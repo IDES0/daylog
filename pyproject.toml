@@ -1,0 +1,52 @@
+[project]
+name = "daylog"
+version = "0.1.0"
+description = "Personal Telegram bot: voice journaling, goal tracking, morning brief."
+requires-python = ">=3.11"
+dependencies = [
+    "python-telegram-bot[job-queue]>=21.0",
+    "faster-whisper>=1.0",
+    "anthropic>=0.40",
+    "ruamel.yaml>=0.18",
+    "feedparser>=6.0",
+    "httpx>=0.27",
+    "python-dotenv>=1.0",
+]
+
+[dependency-groups]
+dev = [
+    "ruff>=0.6",
+    "mypy>=1.11",
+    "pytest>=8.0",
+    "pytest-asyncio>=0.24",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/daylog"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]
+
+[tool.mypy]
+# Matches the interpreter mypy actually runs under (3.13); the project's
+# minimum supported version is 3.11 (see requires-python above). numpy's
+# bundled stubs use syntax that needs python_version >= 3.12 to parse.
+python_version = "3.13"
+strict = true
+files = ["src", "tests"]
+
+[[tool.mypy.overrides]]
+module = ["faster_whisper.*", "feedparser.*", "ruamel.*"]
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
