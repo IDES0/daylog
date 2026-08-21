@@ -16,7 +16,7 @@ from typing import Any
 from zoneinfo import ZoneInfo
 
 from dotenv import load_dotenv
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Message, Update
+from telegram import BotCommand, InlineKeyboardButton, InlineKeyboardMarkup, Message, Update
 from telegram.ext import (
     Application,
     ApplicationBuilder,
@@ -107,6 +107,53 @@ def _itinerary_commit_message(applied: list[itinerary.AppliedChange]) -> str:
 
 def _itinerary_reply_note(applied: list[itinerary.AppliedChange]) -> str:
     return "\n".join(a.summary for a in applied)
+
+
+def _format_goal_line(g: Any) -> str:
+    bits = []
+    if g.get("metric"):
+        bits.append(f"{g.get('progress', 0):g} {g['metric']}")
+    if g.get("type") == "hard" and g.get("deadline"):
+        bits.append(f"deadline {g['deadline']}")
+    elif g.get("target_window"):
+        window = g["target_window"]
+        if window and window[-1]:
+            bits.append(f"target {window[-1]}")
+
+    status = g.get("status", "active")
+    status_tag = f" [{status}]" if status != "active" else ""
+    line = f"- {g.get('title', g['id'])} ({g.get('type', 'soft')}){status_tag}"
+    return f"{line}: {', '.join(bits)}" if bits else line
+
+
+def _format_itinerary_line(e: Any) -> str:
+    status = e.get("status", "candidate")
+    line = f"- {e.get('place', e['id'])} [{status}] ({e.get('type', 'soft')})"
+    entry_date = itinerary.current_date(e)
+    if entry_date:
+        label = "deadline" if e.get("type") == "hard" else "target"
+        line += f": {label} {entry_date}"
+    return line
+
+
+def _format_status(goals_data: Any, itinerary_data: Any) -> str:
+    goal_lines = [_format_goal_line(g) for g in goals_data if g.get("status") != "dropped"]
+    itin_lines = [_format_itinerary_line(e) for e in itinerary_data if e.get("status") != "dropped"]
+    return (
+        "Goals:\n"
+        + ("\n".join(goal_lines) if goal_lines else "(none)")
+        + "\n\nItinerary:\n"
+        + ("\n".join(itin_lines) if itin_lines else "(none)")
+    )
+
+
+async def status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not _is_authorized(update):
+        return
+    message = update.message
+    assert message is not None
+    vault = _vault()
+    await message.reply_text(_format_status(vault.read_goals(), vault.read_itinerary()))
 
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -386,10 +433,22 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     await _log_entry(text, message, context)
 
 
+async def _post_init(application: Application) -> None:  # type: ignore[type-arg]
+    # Registers Telegram's native "/" command menu, so the available
+    # commands are tappable instead of something to remember/type exactly.
+    await application.bot.set_my_commands(
+        [
+            BotCommand("start", "How to use daylog"),
+            BotCommand("status", "Show current goals and itinerary"),
+        ]
+    )
+
+
 def build_application() -> Application:  # type: ignore[type-arg]
     token = os.environ["TELEGRAM_BOT_TOKEN"]
-    application = ApplicationBuilder().token(token).build()
+    application = ApplicationBuilder().token(token).post_init(_post_init).build()
     application.add_handler(CommandHandler("start", start))
+    application.add_handler(CommandHandler("status", status))
     application.add_handler(MessageHandler(filters.VOICE, handle_voice))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
     application.add_handler(CallbackQueryHandler(handle_goal_slip_callback, pattern=r"^goalslip:"))

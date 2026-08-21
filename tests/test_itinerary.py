@@ -40,6 +40,13 @@ def test_current_date_falls_back_to_window_end() -> None:
     assert current_date(soft) == "2026-10-01"
 
 
+def test_current_date_none_for_open_ended_window() -> None:
+    # [start, null] means "still here, no end date set" — a real None slot,
+    # not a missing window. Must not render as the string "None".
+    open_ended = {"target_window": ["2026-08-01", None]}
+    assert current_date(open_ended) is None
+
+
 def test_current_date_none_when_unset() -> None:
     assert current_date({}) is None
 

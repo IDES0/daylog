@@ -60,11 +60,16 @@ def _unique_id(itinerary: list[Any], place: str) -> str:
 
 
 def current_date(entry: Any) -> str | None:
-    """The entry's current target date, whichever field holds it (deadline or target_window)."""
+    """The entry's current target date, whichever field holds it (deadline or target_window).
+
+    An open-ended window (e.g. [start, null] — "still here, no end date
+    yet") has a real end slot that's None, not a missing one — return None
+    rather than the literal string "None".
+    """
     if "deadline" in entry:
         return str(entry["deadline"])
     window = entry.get("target_window")
-    if window:
+    if window and window[-1] is not None:
         return str(window[-1])
     return None
 
