@@ -29,13 +29,27 @@ git config --global user.name "${GIT_AUTHOR_NAME:-daylog-bot}"
 git config --global user.email "${GIT_AUTHOR_EMAIL:-daylog-bot@users.noreply.github.com}"
 git config --global --add safe.directory "$VAULT_PATH"
 
-if [ ! -d "$VAULT_PATH/.git" ]; then
-    echo "Cloning $VAULT_REPO_URL into $VAULT_PATH"
-    rm -rf "$VAULT_PATH"
-    git clone "$VAULT_REPO_URL" "$VAULT_PATH"
-else
+# A missing .git dir isn't the only broken state worth checking for: two
+# container instances briefly overlapping on the same volume (e.g. during a
+# redeploy) can leave the repo with a detached HEAD or stale ref locks.
+# Treat anything that isn't "on a real branch with a resolvable HEAD" as
+# broken and re-clone rather than trying to repair it in place.
+vault_is_healthy() {
+    git -C "$VAULT_PATH" rev-parse --verify -q HEAD >/dev/null 2>&1 \
+        && git -C "$VAULT_PATH" symbolic-ref -q HEAD >/dev/null 2>&1
+}
+
+if [ -d "$VAULT_PATH/.git" ] && vault_is_healthy; then
     echo "Vault already present at $VAULT_PATH — flushing any commits stranded by a previous restart"
     git -C "$VAULT_PATH" push || echo "push failed, will retry on next journal write"
+else
+    if [ -d "$VAULT_PATH" ]; then
+        echo "Vault at $VAULT_PATH is missing or in a broken git state — re-cloning fresh"
+    else
+        echo "Cloning $VAULT_REPO_URL into $VAULT_PATH"
+    fi
+    rm -rf "$VAULT_PATH"
+    git clone "$VAULT_REPO_URL" "$VAULT_PATH"
 fi
 
 exec uv run python -m daylog.bot
