@@ -140,6 +140,26 @@ class Vault:
         self._push()
         return self.itinerary_path
 
+    @property
+    def places_path(self) -> Path:
+        return self.path / "places.yaml"
+
+    def read_places(self) -> Any:
+        """Load places.yaml — hand-curated destination knowledge, read-only for now."""
+        if not self.places_path.exists():
+            return []
+        return _yaml().load(self.places_path.read_text(encoding="utf-8"))
+
+    @property
+    def location_path(self) -> Path:
+        return self.path / "location.yaml"
+
+    def read_location(self) -> Any:
+        """Load location.yaml — retrospective record of where the user was, read-only."""
+        if not self.location_path.exists():
+            return []
+        return _yaml().load(self.location_path.read_text(encoding="utf-8"))
+
     # -- journal -----------------------------------------------------------
 
     def write_journal_entry(

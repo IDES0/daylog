@@ -11,12 +11,13 @@ import os
 import tempfile
 import uuid
 from datetime import datetime
+from datetime import time as dt_time
 from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo
 
 from dotenv import load_dotenv
-from telegram import BotCommand, InlineKeyboardButton, InlineKeyboardMarkup, Message, Update
+from telegram import Bot, BotCommand, InlineKeyboardButton, InlineKeyboardMarkup, Message, Update
 from telegram.ext import (
     Application,
     ApplicationBuilder,
@@ -27,8 +28,9 @@ from telegram.ext import (
     filters,
 )
 
-from daylog import extract, goals, itinerary, transcribe
+from daylog import brief, extract, goals, itinerary, transcribe
 from daylog.dateparse import parse_date_phrase
+from daylog.sources import marine
 from daylog.vault import Vault, VaultError
 
 logger = logging.getLogger(__name__)
@@ -154,6 +156,53 @@ async def status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     assert message is not None
     vault = _vault()
     await message.reply_text(_format_status(vault.read_goals(), vault.read_itinerary()))
+
+
+def _brief_hour() -> int:
+    return int(os.environ.get("BRIEF_HOUR", "7"))
+
+
+async def _send_brief(bot: Bot, chat_id: int) -> None:
+    await bot.send_message(chat_id=chat_id, text="Building your brief...")
+    try:
+        vault = _vault()
+        today = datetime.now(_tz()).date()
+        location_data = vault.read_location()
+
+        current = brief.current_location(location_data)
+        marine_forecast = None
+        if current and current.get("lat") is not None and current.get("lon") is not None:
+            marine_forecast = marine.fetch_forecast(current["lat"], current["lon"], str(_tz()))
+
+        text = brief.generate_brief(
+            today=today,
+            goals_data=vault.read_goals(),
+            itinerary_data=vault.read_itinerary(),
+            places_data=vault.read_places(),
+            location_data=location_data,
+            recent_journal=brief.recent_journal_summaries(vault, today),
+            marine_forecast=marine_forecast,
+        )
+    except Exception:
+        logger.exception("failed to generate brief")
+        await bot.send_message(
+            chat_id=chat_id, text="Something went wrong building your brief — check bot logs."
+        )
+        return
+
+    await bot.send_message(chat_id=chat_id, text=text)
+
+
+async def brief_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not _is_authorized(update):
+        return
+    message = update.message
+    assert message is not None
+    await _send_brief(context.bot, message.chat_id)
+
+
+async def send_scheduled_brief(context: ContextTypes.DEFAULT_TYPE) -> None:
+    await _send_brief(context.bot, _allowed_user_id())
 
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -440,6 +489,7 @@ async def _post_init(application: Application) -> None:  # type: ignore[type-arg
         [
             BotCommand("start", "How to use daylog"),
             BotCommand("status", "Show current goals and itinerary"),
+            BotCommand("brief", "Get a daily brief now"),
         ]
     )
 
@@ -449,10 +499,16 @@ def build_application() -> Application:  # type: ignore[type-arg]
     application = ApplicationBuilder().token(token).post_init(_post_init).build()
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("status", status))
+    application.add_handler(CommandHandler("brief", brief_command))
     application.add_handler(MessageHandler(filters.VOICE, handle_voice))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
     application.add_handler(CallbackQueryHandler(handle_goal_slip_callback, pattern=r"^goalslip:"))
     application.add_handler(CallbackQueryHandler(handle_itinerary_callback, pattern=r"^itin:"))
+
+    assert application.job_queue is not None
+    application.job_queue.run_daily(
+        send_scheduled_brief, time=dt_time(hour=_brief_hour(), tzinfo=_tz())
+    )
     return application
 
 
