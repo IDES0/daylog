@@ -21,9 +21,20 @@ else
     echo "WARNING: VAULT_DEPLOY_KEY is not set — git push to the vault will fail." >&2
 fi
 
+# Railway (like many PaaS platforms) blocks outbound traffic on port 22.
+# GitHub's SSH service is also reachable over port 443 via ssh.github.com,
+# specifically for cases like this — route github.com through it instead.
+cat >~/.ssh/config <<'EOF'
+Host github.com
+    HostName ssh.github.com
+    Port 443
+    User git
+EOF
+chmod 600 ~/.ssh/config
+
 # Personal single-repo deploy key over SSH; skipping host-key verification
 # is the standard tradeoff here rather than fighting known_hosts formatting.
-export GIT_SSH_COMMAND="ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -i ~/.ssh/id_ed25519"
+export GIT_SSH_COMMAND="ssh -F ~/.ssh/config -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -i ~/.ssh/id_ed25519"
 
 git config --global user.name "${GIT_AUTHOR_NAME:-daylog-bot}"
 git config --global user.email "${GIT_AUTHOR_EMAIL:-daylog-bot@users.noreply.github.com}"
