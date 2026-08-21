@@ -21,4 +21,9 @@ anthropic SDK, ruamel.yaml, feedparser, httpx. Git via subprocess.
 - Tests use a temp git repo fixture, never the real vault
 
 ## Current phase
-Phase 1 only. Do not start Phase 2.
+Phase 1 (capture loop) is built and deployed. Goal tracking (goals.yaml
+read/write, slip tracking, hard-deadline confirmation) was added on
+2026-08-21 as a deliberate, informed exception to the "use Phase 1 for 10
+days first" gate below — not a redefinition of it. The gate still applies
+to everything else in Phase 2 (morning brief, feeds, marine/weather) and to
+Phase 3: don't start those without the same explicit conversation.

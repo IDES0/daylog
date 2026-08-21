@@ -176,3 +176,144 @@ def test_second_entry_same_day_uses_append_commit_message(vault: Vault) -> None:
         check=True,
     )
     assert log.stdout.strip() == "journal: 2026-08-21 (+entry)"
+
+
+GOALS_YAML = """\
+# Hand-edit freely. Bot appends progress / slip_history; never silently moves hard deadlines.
+
+- id: jobs
+  title: Job applications
+  type: hard
+  # deadline: YYYY-MM-DD
+  metric: applications_sent
+  progress: 0
+  status: active
+
+- id: surf
+  title: Get cracked at surfing
+  type: soft
+  status: active
+  slip_history: []
+  notes: qualitative — hours in water, comfort in bigger/crowded waves
+"""
+
+
+def test_read_goals_missing_file_returns_empty_list(vault: Vault) -> None:
+    assert vault.read_goals() == []
+
+
+def test_read_goals_parses_existing_file(vault: Vault) -> None:
+    vault.goals_path.write_text(GOALS_YAML, encoding="utf-8")
+
+    goals = vault.read_goals()
+
+    assert len(goals) == 2
+    assert goals[0]["id"] == "jobs"
+    assert goals[0]["progress"] == 0
+    assert goals[1]["id"] == "surf"
+
+
+def test_write_goals_preserves_comments_and_applies_edit(vault: Vault) -> None:
+    vault.goals_path.write_text(GOALS_YAML, encoding="utf-8")
+
+    goals = vault.read_goals()
+    goals[0]["progress"] = 3  # mutate the live ruamel structure in place
+
+    vault.write_goals(goals, "goals: +3 jobs")
+
+    text = vault.goals_path.read_text(encoding="utf-8")
+    assert "# Hand-edit freely." in text
+    assert "# deadline: YYYY-MM-DD" in text
+    assert "progress: 3" in text
+    # comments anchored to a field must stay attached to that field, not
+    # float somewhere else in the file after a round-trip
+    assert text.index("# deadline: YYYY-MM-DD") < text.index("metric: applications_sent")
+
+
+def test_write_goals_commits(vault: Vault) -> None:
+    vault.goals_path.write_text(GOALS_YAML, encoding="utf-8")
+    goals = vault.read_goals()
+
+    vault.write_goals(goals, "goals: +3 jobs")
+
+    log = subprocess.run(
+        ["git", "log", "-1", "--pretty=%s"],
+        cwd=vault.path,
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    assert log.stdout.strip() == "goals: +3 jobs"
+
+
+ITINERARY_YAML = """\
+# Hand-edit freely. Bot appends entries / slip_history; never silently moves hard dates.
+
+- id: canggu-bali-id
+  place: Canggu, Bali, ID
+  type: soft
+  status: current
+  target_window: [2026-08-01, null]
+
+- id: indonesia-visa-exit
+  place: Indonesia (exit)
+  type: hard
+  # deadline: YYYY-MM-DD
+  status: active
+"""
+
+
+def test_read_itinerary_missing_file_returns_empty_list(vault: Vault) -> None:
+    assert vault.read_itinerary() == []
+
+
+def test_read_itinerary_parses_existing_file(vault: Vault) -> None:
+    vault.itinerary_path.write_text(ITINERARY_YAML, encoding="utf-8")
+
+    itinerary = vault.read_itinerary()
+
+    assert len(itinerary) == 2
+    assert itinerary[0]["id"] == "canggu-bali-id"
+    assert itinerary[1]["id"] == "indonesia-visa-exit"
+
+
+def test_write_itinerary_preserves_comments_and_applies_edit(vault: Vault) -> None:
+    vault.itinerary_path.write_text(ITINERARY_YAML, encoding="utf-8")
+
+    itinerary = vault.read_itinerary()
+    # A real `date` object, not a string — matches how goals.py/itinerary.py
+    # write dates (see their _write_slip/_write_date), so this dumps
+    # unquoted like a hand-typed date rather than `deadline: '2026-10-15'`.
+    itinerary[1]["deadline"] = date(2026, 10, 15)
+
+    vault.write_itinerary(itinerary, "itinerary: Indonesia (exit)")
+
+    text = vault.itinerary_path.read_text(encoding="utf-8")
+    assert "# Hand-edit freely." in text
+    assert "# deadline: YYYY-MM-DD" in text
+    assert "deadline: 2026-10-15" in text  # unquoted
+    # `deadline` didn't exist as a real key before, only as a comment, so
+    # ruamel appends the new key after the existing ones rather than
+    # relocating the (unrelated, position-anchored) comment next to it —
+    # the comment stays exactly where it was, between type and status.
+    assert (
+        text.index("type: hard")
+        < text.index("# deadline: YYYY-MM-DD")
+        < text.index("status: active")
+    )
+
+
+def test_write_itinerary_commits(vault: Vault) -> None:
+    vault.itinerary_path.write_text(ITINERARY_YAML, encoding="utf-8")
+    itinerary = vault.read_itinerary()
+
+    vault.write_itinerary(itinerary, "itinerary: Indonesia (exit)")
+
+    log = subprocess.run(
+        ["git", "log", "-1", "--pretty=%s"],
+        cwd=vault.path,
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    assert log.stdout.strip() == "itinerary: Indonesia (exit)"

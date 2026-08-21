@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from datetime import date
 from pathlib import Path
 from typing import Any
 
@@ -44,11 +45,80 @@ RECORD_JOURNAL_ENTRY_TOOL: ToolParam = {
                 "items": {
                     "type": "object",
                     "properties": {
-                        "goal_id": {"type": "string"},
+                        "goal_id": {
+                            "type": "string",
+                            "description": "Must be one of the ids in the provided goal list.",
+                        },
                         "delta": {"type": "number"},
                         "detail": {"type": "string"},
                     },
-                    "required": ["delta"],
+                    "required": ["goal_id", "delta"],
+                },
+            },
+            "goal_slips": {
+                "type": "array",
+                "description": (
+                    "Only when the user explicitly asks to move a goal's deadline or "
+                    "target window — not implied by missing a session."
+                ),
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "goal_id": {
+                            "type": "string",
+                            "description": "Must be one of the ids in the provided goal list.",
+                        },
+                        "new_date": {
+                            "type": "string",
+                            "description": "ISO date (YYYY-MM-DD) the user wants to move to.",
+                        },
+                        "reason": {"type": "string"},
+                    },
+                    "required": ["goal_id", "new_date"],
+                },
+            },
+            "itinerary_changes": {
+                "type": "array",
+                "description": (
+                    "Only when the user talks about travel plans — a new place "
+                    "they're considering, committing to, dropping, or a date "
+                    "(visa expiry, firm commitment) being set or moved."
+                ),
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "id": {
+                            "type": "string",
+                            "description": (
+                                "Existing itinerary id being updated. Omit entirely "
+                                "when this is a new place, not one already listed."
+                            ),
+                        },
+                        "place": {
+                            "type": "string",
+                            "description": "Required when id is omitted (a new place).",
+                        },
+                        "type": {
+                            "type": "string",
+                            "enum": ["hard", "soft"],
+                            "description": (
+                                "Only for a new entry. 'hard' is a firm date that "
+                                "can't move quietly — a visa expiry, a booked flight. "
+                                "'soft' is a rough plan or candidate destination."
+                            ),
+                        },
+                        "status": {
+                            "type": "string",
+                            "enum": ["candidate", "planned", "current", "done", "dropped"],
+                        },
+                        "new_date": {
+                            "type": "string",
+                            "description": "ISO date (YYYY-MM-DD) being set or moved to.",
+                        },
+                        "reason": {"type": "string"},
+                        "notes": {"type": "string"},
+                    },
+                    "required": [],
                 },
             },
             "skipped": {
@@ -75,8 +145,44 @@ class ExtractError(RuntimeError):
     pass
 
 
-def extract(transcript: str, *, client: anthropic.Anthropic | None = None) -> dict[str, Any]:
+def _format_goals(goals: list[dict[str, Any]]) -> str:
+    if not goals:
+        return "(no active goals)"
+    lines = []
+    for goal in goals:
+        metric = f", metric: {goal['metric']}" if goal.get("metric") else ""
+        lines.append(f'- id: {goal["id"]}, title: "{goal["title"]}", type: {goal["type"]}{metric}')
+    return "\n".join(lines)
+
+
+def _format_itinerary(itinerary: list[dict[str, Any]]) -> str:
+    if not itinerary:
+        return "(no itinerary entries yet)"
+    lines = []
+    for entry in itinerary:
+        date_field = f", date: {entry['date']}" if entry.get("date") else ""
+        lines.append(
+            f'- id: {entry["id"]}, place: "{entry["place"]}", type: {entry["type"]}, '
+            f"status: {entry.get('status', 'candidate')}{date_field}"
+        )
+    return "\n".join(lines)
+
+
+def extract(
+    transcript: str,
+    goals: list[dict[str, Any]],
+    itinerary: list[dict[str, Any]],
+    today: date,
+    *,
+    client: anthropic.Anthropic | None = None,
+) -> dict[str, Any]:
     """Extract structured journal facts from a raw transcript.
+
+    `goals` is the current active goal list (id/title/type/metric) so the
+    model can resolve mentions to a real goal_id instead of inventing one.
+    `itinerary` is the current travel plan (id/place/type/status/date) for
+    the same reason, used to resolve itinerary_changes. `today` grounds
+    relative date phrases ("push it a month") in goal_slips/itinerary dates.
 
     Returns a dict matching the journal frontmatter schema, plus a
     `summary` key the caller should pull out before writing to the vault.
@@ -85,7 +191,13 @@ def extract(transcript: str, *, client: anthropic.Anthropic | None = None) -> di
     system_prompt = PROMPT_PATH.read_text(encoding="utf-8")
 
     tool_choice: ToolChoiceToolParam = {"type": "tool", "name": "record_journal_entry"}
-    messages: list[MessageParam] = [{"role": "user", "content": transcript}]
+    user_content = (
+        f"Today's date: {today.isoformat()}\n\n"
+        f"Current goals:\n{_format_goals(goals)}\n\n"
+        f"Current itinerary:\n{_format_itinerary(itinerary)}\n\n"
+        f"Transcript:\n{transcript}"
+    )
+    messages: list[MessageParam] = [{"role": "user", "content": user_content}]
 
     response = client.messages.create(
         model=MODEL,

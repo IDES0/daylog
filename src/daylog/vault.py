@@ -91,6 +91,55 @@ class Vault:
     def journal_path(self, entry_date: date) -> Path:
         return self.path / "journal" / f"{entry_date.isoformat()}.md"
 
+    @property
+    def goals_path(self) -> Path:
+        return self.path / "goals.yaml"
+
+    # -- goals -----------------------------------------------------------
+
+    def read_goals(self) -> Any:
+        """Load goals.yaml via ruamel's round-trip loader.
+
+        Returns the live ruamel structure (a CommentedSeq of CommentedMaps),
+        not a plain dict/list — mutate it in place and pass the same object
+        to write_goals. Rebuilding a plain structure and dumping that would
+        silently drop the user's hand-written comments (goals.yaml is
+        explicitly hand-edited — see its own header comment).
+        """
+        if not self.goals_path.exists():
+            return []
+        return _yaml().load(self.goals_path.read_text(encoding="utf-8"))
+
+    def write_goals(self, goals: Any, commit_message: str) -> Path:
+        buf = io.StringIO()
+        _yaml().dump(goals, buf)
+        self.goals_path.write_text(buf.getvalue(), encoding="utf-8")
+
+        self._commit(self.goals_path, commit_message)
+        self._push()
+        return self.goals_path
+
+    @property
+    def itinerary_path(self) -> Path:
+        return self.path / "itinerary.yaml"
+
+    # -- itinerary -----------------------------------------------------------
+
+    def read_itinerary(self) -> Any:
+        """Load itinerary.yaml via ruamel's round-trip loader — see read_goals."""
+        if not self.itinerary_path.exists():
+            return []
+        return _yaml().load(self.itinerary_path.read_text(encoding="utf-8"))
+
+    def write_itinerary(self, itinerary: Any, commit_message: str) -> Path:
+        buf = io.StringIO()
+        _yaml().dump(itinerary, buf)
+        self.itinerary_path.write_text(buf.getvalue(), encoding="utf-8")
+
+        self._commit(self.itinerary_path, commit_message)
+        self._push()
+        return self.itinerary_path
+
     # -- journal -----------------------------------------------------------
 
     def write_journal_entry(
