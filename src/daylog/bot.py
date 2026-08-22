@@ -10,6 +10,7 @@ import logging
 import os
 import tempfile
 import uuid
+from collections.abc import Callable
 from datetime import datetime
 from datetime import time as dt_time
 from pathlib import Path
@@ -30,7 +31,7 @@ from telegram.ext import (
 
 from daylog import brief, extract, goals, itinerary, transcribe
 from daylog.dateparse import parse_date_phrase
-from daylog.sources import marine
+from daylog.sources import marine, wind
 from daylog.vault import Vault, VaultError
 
 logger = logging.getLogger(__name__)
@@ -181,32 +182,61 @@ def _matching_place(places_data: Any, location_name: str) -> Any | None:
     return None
 
 
+def _relevant_spots(current: dict[str, Any] | None, places_data: Any) -> list[dict[str, Any]]:
+    """Current location plus any curated surf_spots/wind_spots for the matching place.
+
+    Comparing multiple nearby spots (not just where the user happens to be
+    standing) is the point — swell or wind can be building somewhere better
+    a short trip away.
+    """
+    if not current or current.get("lat") is None or current.get("lon") is None:
+        return []
+
+    spots = [
+        {
+            "name": current.get("place", "current location"),
+            "lat": current["lat"],
+            "lon": current["lon"],
+        }
+    ]
+    place = _matching_place(places_data, str(current.get("place", "")))
+    for key in ("surf_spots", "wind_spots"):
+        for spot in (place or {}).get(key, []):
+            if spot.get("lat") is not None and spot.get("lon") is not None:
+                spots.append(
+                    {
+                        "name": spot.get("name", "nearby spot"),
+                        "lat": spot["lat"],
+                        "lon": spot["lon"],
+                    }
+                )
+    return spots
+
+
+def _fetch_conditions(
+    current: dict[str, Any] | None,
+    places_data: Any,
+    tz: ZoneInfo,
+    fetch_fn: Callable[[float, float, str], str | None],
+) -> str | None:
+    blocks = []
+    for spot in _relevant_spots(current, places_data):
+        forecast = fetch_fn(spot["lat"], spot["lon"], str(tz))
+        if forecast:
+            blocks.append(f"{spot['name']}:\n{forecast}")
+    return "\n\n".join(blocks) if blocks else None
+
+
 def _fetch_marine_forecast(
     current: dict[str, Any] | None, places_data: Any, tz: ZoneInfo
 ) -> str | None:
-    """Swell forecast for the current spot, plus any curated nearby surf_spots.
+    return _fetch_conditions(current, places_data, tz, marine.fetch_forecast)
 
-    Comparing multiple nearby breaks (not just where the user happens to be
-    standing) is the point — swell can be building somewhere better a short
-    trip away.
-    """
-    if not current or current.get("lat") is None or current.get("lon") is None:
-        return None
 
-    blocks = []
-    here = marine.fetch_forecast(current["lat"], current["lon"], str(tz))
-    if here:
-        blocks.append(f"{current.get('place', 'current location')}:\n{here}")
-
-    place = _matching_place(places_data, str(current.get("place", "")))
-    for spot in (place or {}).get("surf_spots", []):
-        if spot.get("lat") is None or spot.get("lon") is None:
-            continue
-        forecast = marine.fetch_forecast(spot["lat"], spot["lon"], str(tz))
-        if forecast:
-            blocks.append(f"{spot.get('name', 'nearby spot')}:\n{forecast}")
-
-    return "\n\n".join(blocks) if blocks else None
+def _fetch_wind_forecast(
+    current: dict[str, Any] | None, places_data: Any, tz: ZoneInfo
+) -> str | None:
+    return _fetch_conditions(current, places_data, tz, wind.fetch_forecast)
 
 
 async def _send_brief(bot: Bot, chat_id: int) -> None:
@@ -219,6 +249,7 @@ async def _send_brief(bot: Bot, chat_id: int) -> None:
 
         current = brief.current_location(location_data)
         marine_forecast = _fetch_marine_forecast(current, places_data, _tz())
+        wind_forecast = _fetch_wind_forecast(current, places_data, _tz())
 
         text = brief.generate_brief(
             today=today,
@@ -229,6 +260,7 @@ async def _send_brief(bot: Bot, chat_id: int) -> None:
             profile_data=vault.read_profile(),
             recent_journal=brief.recent_journal_summaries(vault, today),
             marine_forecast=marine_forecast,
+            wind_forecast=wind_forecast,
         )
     except Exception:
         logger.exception("failed to generate brief")

@@ -148,10 +148,24 @@ def _format_surf_spots(surf_spots: Any) -> str:
         break_type = s.get("break_type", "?")
         swell = s.get("ideal_swell_direction")
         swell_bit = f", ideal swell {swell}" if swell else ""
+        wind_dir = s.get("ideal_wind_direction")
+        wind_bit = f", ideal wind {wind_dir}" if wind_dir else ""
         level = s.get("level")
         level_bit = f", {level}" if level else ""
         notes = f" — {s['notes']}" if s.get("notes") else ""
-        lines.append(f"    - {s.get('name', '?')} ({break_type}{swell_bit}{level_bit}){notes}")
+        lines.append(
+            f"    - {s.get('name', '?')} ({break_type}{swell_bit}{wind_bit}{level_bit}){notes}"
+        )
+    return "\n".join(lines)
+
+
+def _format_wind_spots(wind_spots: Any) -> str:
+    lines = []
+    for s in wind_spots:
+        wind_dir = s.get("ideal_wind_direction")
+        wind_bit = f", ideal wind {wind_dir}" if wind_dir else ""
+        notes = f" — {s['notes']}" if s.get("notes") else ""
+        lines.append(f"    - {s.get('name', '?')} (wind spot{wind_bit}){notes}")
     return "\n".join(lines)
 
 
@@ -168,6 +182,8 @@ def _format_places(places_data: Any) -> str:
             lines.append(_format_checklist(p["checklist"]))
         if p.get("surf_spots"):
             lines.append(_format_surf_spots(p["surf_spots"]))
+        if p.get("wind_spots"):
+            lines.append(_format_wind_spots(p["wind_spots"]))
     return "\n".join(lines)
 
 
@@ -188,6 +204,7 @@ def generate_brief(
     profile_data: Any = None,
     recent_journal: str,
     marine_forecast: str | None,
+    wind_forecast: str | None = None,
     client: anthropic.Anthropic | None = None,
 ) -> str:
     client = client or anthropic.Anthropic()
@@ -209,13 +226,15 @@ def generate_brief(
         f"Curated places knowledge:\n{_format_places(places_data)}\n\n"
         f"Marine/swell forecast (current location and any nearby curated surf spots):\n"
         f"{marine_forecast or '(not coastal, or unavailable)'}\n\n"
+        f"Wind forecast (current location and any nearby curated surf/wind spots):\n"
+        f"{wind_forecast or '(unavailable)'}\n\n"
         f"Recent journal entries:\n{recent_journal}"
     )
     messages: list[MessageParam] = [{"role": "user", "content": user_content}]
 
     response = client.messages.create(
         model=MODEL,
-        max_tokens=4096,
+        max_tokens=8192,
         system=system_prompt,
         tools=[WEB_SEARCH_TOOL],
         messages=messages,
@@ -226,6 +245,8 @@ def generate_brief(
         response.usage.input_tokens,
         response.usage.output_tokens,
     )
+    if response.stop_reason == "max_tokens":
+        logger.warning("brief response was truncated by max_tokens")
 
     # Citations split a response into multiple text blocks at the citation
     # boundary, mid-sentence — the blocks are contiguous, not separate
