@@ -43,6 +43,21 @@ def current_location(location_data: Any) -> Any | None:
     return location_data[-1] if location_data else None
 
 
+def _date_reference_table(today: date, days: int = 7) -> str:
+    """Explicit ISO date -> weekday-name pairs for today and the next `days` days.
+
+    Handed to the model instead of a bare ISO date so it never has to compute
+    a weekday itself — a plain `today.isoformat()` led it to miscompute the
+    day of week for dates later in the brief (e.g. calling the 25th a
+    Friday when it wasn't).
+    """
+    lines = [f"{today.isoformat()} ({today.strftime('%A')}) — today"]
+    for offset in range(1, days + 1):
+        day = today + timedelta(days=offset)
+        lines.append(f"{day.isoformat()} ({day.strftime('%A')})")
+    return "\n".join(lines)
+
+
 _HEADING_RE = re.compile(r"^### \d{2}:\d{2}$")
 
 
@@ -112,6 +127,34 @@ def _format_itinerary(itinerary_data: Any) -> str:
     return "\n".join(lines) if lines else "(none)"
 
 
+def _format_checklist(checklist: Any) -> str:
+    lines = []
+    for item in checklist:
+        status = item.get("status", "todo")
+        dates = ""
+        item_dates = item.get("dates")
+        if item_dates and len(item_dates) > 1:
+            dates = f" ({item_dates[0]}–{item_dates[-1]})"
+        elif item_dates:
+            dates = f" ({item_dates[0]})"
+        notes = f" — {item['notes']}" if item.get("notes") else ""
+        lines.append(f"    - [{status}] {item.get('item', '?')}{dates}{notes}")
+    return "\n".join(lines)
+
+
+def _format_surf_spots(surf_spots: Any) -> str:
+    lines = []
+    for s in surf_spots:
+        break_type = s.get("break_type", "?")
+        swell = s.get("ideal_swell_direction")
+        swell_bit = f", ideal swell {swell}" if swell else ""
+        level = s.get("level")
+        level_bit = f", {level}" if level else ""
+        notes = f" — {s['notes']}" if s.get("notes") else ""
+        lines.append(f"    - {s.get('name', '?')} ({break_type}{swell_bit}{level_bit}){notes}")
+    return "\n".join(lines)
+
+
 def _format_places(places_data: Any) -> str:
     if not places_data:
         return "(none curated yet)"
@@ -119,7 +162,19 @@ def _format_places(places_data: Any) -> str:
     for p in places_data:
         activities = ", ".join(p.get("activities", [])) or "unspecified"
         notes = f" — {p['notes']}" if p.get("notes") else ""
-        lines.append(f"- {p.get('name', '?')}: {activities}{notes}")
+        tag = " [current]" if p.get("current") else ""
+        lines.append(f"- {p.get('name', '?')}{tag}: {activities}{notes}")
+        if p.get("checklist"):
+            lines.append(_format_checklist(p["checklist"]))
+        if p.get("surf_spots"):
+            lines.append(_format_surf_spots(p["surf_spots"]))
+    return "\n".join(lines)
+
+
+def _format_profile(profile_data: Any) -> str:
+    if not profile_data:
+        return "(no profile set)"
+    lines = [f"- {k}: {v}" for k, v in profile_data.items()]
     return "\n".join(lines)
 
 
@@ -130,6 +185,7 @@ def generate_brief(
     itinerary_data: Any,
     places_data: Any,
     location_data: Any,
+    profile_data: Any = None,
     recent_journal: str,
     marine_forecast: str | None,
     client: anthropic.Anthropic | None = None,
@@ -140,13 +196,18 @@ def generate_brief(
     current = current_location(location_data)
     location_line = current.get("place", "unknown") if current else "unknown"
 
+    # marine_forecast may cover more than one spot (current location plus any
+    # curated surf_spots nearby) — each spot's block is already labeled by
+    # the caller, this just passes the combined text through.
     user_content = (
-        f"Today's date: {today.isoformat()}\n\n"
+        f"Date reference (use these, don't compute weekdays yourself):\n"
+        f"{_date_reference_table(today)}\n\n"
         f"Current location: {location_line}\n\n"
+        f"Surfer profile:\n{_format_profile(profile_data)}\n\n"
         f"Goals:\n{_format_goals(goals_data)}\n\n"
         f"Itinerary:\n{_format_itinerary(itinerary_data)}\n\n"
         f"Curated places knowledge:\n{_format_places(places_data)}\n\n"
-        f"Marine/swell forecast for current location:\n"
+        f"Marine/swell forecast (current location and any nearby curated surf spots):\n"
         f"{marine_forecast or '(not coastal, or unavailable)'}\n\n"
         f"Recent journal entries:\n{recent_journal}"
     )

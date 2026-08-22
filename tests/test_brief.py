@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import date, datetime
 
-from daylog.brief import current_location, recent_journal_summaries
+from daylog.brief import _date_reference_table, current_location, recent_journal_summaries
 from daylog.vault import Vault
 
 LOCATION_HISTORY = [
@@ -53,3 +53,11 @@ def test_recent_journal_summaries_reads_last_n_days(vault: Vault) -> None:
 def test_recent_journal_summaries_no_entries_returns_placeholder(vault: Vault) -> None:
     text = recent_journal_summaries(vault, today=datetime(2026, 8, 21).date(), days=5)
     assert text == "(no recent journal entries)"
+
+
+def test_date_reference_table_labels_each_day_with_correct_weekday() -> None:
+    # 2026-08-22 is a Saturday; 2026-08-25 is a Tuesday.
+    table = _date_reference_table(date(2026, 8, 22), days=7)
+    assert "2026-08-22 (Saturday) — today" in table
+    assert "2026-08-25 (Tuesday)" in table
+    assert "2026-08-29 (Saturday)" in table

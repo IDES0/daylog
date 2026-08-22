@@ -160,6 +160,16 @@ class Vault:
             return []
         return _yaml().load(self.location_path.read_text(encoding="utf-8"))
 
+    @property
+    def profile_path(self) -> Path:
+        return self.path / "profile.yaml"
+
+    def read_profile(self) -> Any:
+        """Load profile.yaml — hand-curated durable preferences, read-only for now."""
+        if not self.profile_path.exists():
+            return {}
+        return _yaml().load(self.profile_path.read_text(encoding="utf-8"))
+
     # -- journal -----------------------------------------------------------
 
     def write_journal_entry(

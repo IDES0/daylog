@@ -162,24 +162,71 @@ def _brief_hour() -> int:
     return int(os.environ.get("BRIEF_HOUR", "7"))
 
 
+def _matching_place(places_data: Any, location_name: str) -> Any | None:
+    """The places.yaml entry whose name matches the current location, if any.
+
+    places.yaml entries are curated by name (e.g. "Lombok, Indonesia") while
+    location.yaml records specific spots (e.g. "Kuta, Lombok, ID") — match on
+    substring overlap in either direction rather than requiring exact equality.
+    """
+    name = location_name.lower()
+    for place in places_data or []:
+        place_name = str(place.get("name", "")).lower()
+        if not place_name:
+            continue
+        if place_name in name or name in place_name:
+            return place
+        if any(part.strip() in place_name for part in name.split(",")):
+            return place
+    return None
+
+
+def _fetch_marine_forecast(
+    current: dict[str, Any] | None, places_data: Any, tz: ZoneInfo
+) -> str | None:
+    """Swell forecast for the current spot, plus any curated nearby surf_spots.
+
+    Comparing multiple nearby breaks (not just where the user happens to be
+    standing) is the point — swell can be building somewhere better a short
+    trip away.
+    """
+    if not current or current.get("lat") is None or current.get("lon") is None:
+        return None
+
+    blocks = []
+    here = marine.fetch_forecast(current["lat"], current["lon"], str(tz))
+    if here:
+        blocks.append(f"{current.get('place', 'current location')}:\n{here}")
+
+    place = _matching_place(places_data, str(current.get("place", "")))
+    for spot in (place or {}).get("surf_spots", []):
+        if spot.get("lat") is None or spot.get("lon") is None:
+            continue
+        forecast = marine.fetch_forecast(spot["lat"], spot["lon"], str(tz))
+        if forecast:
+            blocks.append(f"{spot.get('name', 'nearby spot')}:\n{forecast}")
+
+    return "\n\n".join(blocks) if blocks else None
+
+
 async def _send_brief(bot: Bot, chat_id: int) -> None:
     await bot.send_message(chat_id=chat_id, text="Building your brief...")
     try:
         vault = _vault()
         today = datetime.now(_tz()).date()
         location_data = vault.read_location()
+        places_data = vault.read_places()
 
         current = brief.current_location(location_data)
-        marine_forecast = None
-        if current and current.get("lat") is not None and current.get("lon") is not None:
-            marine_forecast = marine.fetch_forecast(current["lat"], current["lon"], str(_tz()))
+        marine_forecast = _fetch_marine_forecast(current, places_data, _tz())
 
         text = brief.generate_brief(
             today=today,
             goals_data=vault.read_goals(),
             itinerary_data=vault.read_itinerary(),
-            places_data=vault.read_places(),
+            places_data=places_data,
             location_data=location_data,
+            profile_data=vault.read_profile(),
             recent_journal=brief.recent_journal_summaries(vault, today),
             marine_forecast=marine_forecast,
         )
