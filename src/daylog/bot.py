@@ -435,7 +435,7 @@ async def _log_entry(transcript: str, message: Message, context: ContextTypes.DE
             transcript,
             _active_goals_summary(goals_data),
             _active_itinerary_summary(itinerary_data),
-            now.date(),
+            entry_time.date(),
         )
         summary = facts.pop("summary", "")
 
