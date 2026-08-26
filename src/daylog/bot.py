@@ -11,7 +11,8 @@ import os
 import tempfile
 import uuid
 from collections.abc import Callable
-from datetime import datetime
+from dataclasses import dataclass
+from datetime import date, datetime
 from datetime import time as dt_time
 from pathlib import Path
 from typing import Any
@@ -32,13 +33,14 @@ from telegram.ext import (
 from daylog import brief, extract, goals, itinerary, transcribe
 from daylog.dateparse import parse_date_phrase
 from daylog.sources import marine, wind
-from daylog.vault import Vault, VaultError
+from daylog.vault import CorrectionConflictError, Vault, VaultError
 
 logger = logging.getLogger(__name__)
 
 _PENDING_DATE_KEY = "pending_entry_date"
 _PENDING_SLIP_KEY = "pending_goal_slips"
 _PENDING_ITIN_KEY = "pending_itinerary_changes"
+_PENDING_CORRECTION_KEY = "pending_corrections"
 
 
 def _allowed_user_id() -> int:
@@ -137,6 +139,56 @@ def _format_itinerary_line(e: Any) -> str:
         label = "deadline" if e.get("type") == "hard" else "target"
         line += f": {label} {entry_date}"
     return line
+
+
+@dataclass
+class PendingCorrection:
+    entry_date: date
+    field: str
+    index: int
+    item: Any
+    description: str
+    reason: str | None
+
+
+def _describe_correction_item(field: str, item: Any) -> str:
+    if field == "activities":
+        hours = f", {item['hours']:g}h" if item.get("hours") is not None else ""
+        detail = f" — {item['detail']}" if item.get("detail") else ""
+        return f"{item.get('type', '?')}{hours}{detail}"
+    return str(item)
+
+
+def _resolve_corrections(
+    existing_frontmatter: dict[str, Any] | None,
+    corrections: list[dict[str, Any]],
+    entry_date: date,
+) -> list[PendingCorrection]:
+    """Validate extracted correction references against what's actually on
+    the entry, dropping anything stale or out of range rather than trusting
+    the model's index blindly.
+    """
+    resolved = []
+    for c in corrections:
+        field = c.get("field")
+        index = c.get("index")
+        if field not in ("activities", "skipped", "open_questions") or index is None:
+            continue
+        items = (existing_frontmatter or {}).get(field) or []
+        if not (0 <= index < len(items)):
+            continue
+        item = items[index]
+        resolved.append(
+            PendingCorrection(
+                entry_date=entry_date,
+                field=field,
+                index=index,
+                item=item,
+                description=_describe_correction_item(field, item),
+                reason=c.get("reason"),
+            )
+        )
+    return resolved
 
 
 def _format_status(goals_data: Any, itinerary_data: Any) -> str:
@@ -292,7 +344,10 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     await message.reply_text(
         "daylog is listening. Send a voice note or text to log your day.\n\n"
         'To log for a different day, send the date first (e.g. "yesterday", '
-        '"2 days ago", "2026-08-20") — it applies to your next message only.'
+        '"2 days ago", "2026-08-20") — it applies to your next message only.\n\n'
+        'Made a mistake earlier today? Just say the correction (e.g. "actually '
+        "I only surfed 1 hour, not 2\") — I'll ask you to confirm before "
+        "removing anything."
     )
 
 
@@ -414,6 +469,77 @@ async def handle_itinerary_callback(update: Update, context: ContextTypes.DEFAUL
     await query.edit_message_text(f"Confirmed — '{change.place}' set to {change.new_date}.")
 
 
+async def _ask_correction_confirmation(
+    message: Message, context: ContextTypes.DEFAULT_TYPE, correction: PendingCorrection
+) -> None:
+    assert context.user_data is not None
+    confirm_id = uuid.uuid4().hex
+    context.user_data.setdefault(_PENDING_CORRECTION_KEY, {})[confirm_id] = correction
+
+    reason = f" ({correction.reason})" if correction.reason else ""
+    keyboard = InlineKeyboardMarkup(
+        [
+            [
+                InlineKeyboardButton("Confirm", callback_data=f"correction:confirm:{confirm_id}"),
+                InlineKeyboardButton("Cancel", callback_data=f"correction:cancel:{confirm_id}"),
+            ]
+        ]
+    )
+    await message.reply_text(
+        f"Remove from {correction.entry_date.isoformat()}'s {correction.field}: "
+        f"'{correction.description}'?{reason}",
+        reply_markup=keyboard,
+    )
+
+
+async def handle_correction_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not _is_authorized(update):
+        return
+    query = update.callback_query
+    assert query is not None and query.data is not None
+    await query.answer()
+
+    _, action, confirm_id = query.data.split(":", 2)
+
+    assert context.user_data is not None
+    pending: dict[str, PendingCorrection] = context.user_data.get(_PENDING_CORRECTION_KEY, {})
+    correction = pending.pop(confirm_id, None)
+    if correction is None:
+        await query.edit_message_text("This confirmation has expired or was already handled.")
+        return
+
+    if action == "cancel":
+        await query.edit_message_text(f"Cancelled — '{correction.description}' left unchanged.")
+        return
+
+    vault = _vault()
+    try:
+        vault.remove_journal_item(
+            correction.entry_date,
+            correction.field,
+            correction.index,
+            correction.item,
+            f"journal: {correction.entry_date.isoformat()} (correction)",
+        )
+    except CorrectionConflictError:
+        await query.edit_message_text(
+            f"'{correction.description}' no longer matches today's entry — it may have "
+            "already changed. Nothing was removed; say the correction again if it's still needed."
+        )
+        return
+    except VaultError:
+        logger.exception("correction commit failed for %s", correction.entry_date)
+        await query.edit_message_text(
+            f"Confirmed, but the git commit failed removing '{correction.description}' — "
+            "check bot logs."
+        )
+        return
+
+    await query.edit_message_text(
+        f"Removed '{correction.description}' from {correction.entry_date.isoformat()}."
+    )
+
+
 async def _log_entry(transcript: str, message: Message, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Shared pipeline: transcript text -> extract -> apply goals -> vault write -> reply.
 
@@ -431,21 +557,28 @@ async def _log_entry(transcript: str, message: Message, context: ContextTypes.DE
         vault = _vault()
         goals_data = vault.read_goals()
         itinerary_data = vault.read_itinerary()
+        existing_entry = vault.read_journal_entry(entry_time.date())
         facts = extract.extract(
             transcript,
             _active_goals_summary(goals_data),
             _active_itinerary_summary(itinerary_data),
             entry_time.date(),
+            existing_frontmatter=existing_entry.frontmatter if existing_entry else None,
         )
         summary = facts.pop("summary", "")
 
         # goal_progress stays in facts — it's part of the journal frontmatter
-        # schema too (SPEC §5.1) — but goal_slips and itinerary_changes are
-        # goals.yaml/itinerary.yaml bookkeeping, not facts about the day, so
-        # neither belongs in the journal file.
+        # schema too (SPEC §5.1) — but goal_slips, itinerary_changes, and
+        # corrections are bookkeeping for other files/edits, not facts about
+        # the day, so none of them belong in the journal file.
         goal_progress = facts.get("goal_progress", [])
         goal_slips = facts.pop("goal_slips", [])
         itinerary_changes = facts.pop("itinerary_changes", [])
+        corrections = _resolve_corrections(
+            existing_entry.frontmatter if existing_entry else None,
+            facts.pop("corrections", []),
+            entry_time.date(),
+        )
 
         goals_note = ""
         if goal_progress or goal_slips:
@@ -485,6 +618,9 @@ async def _log_entry(transcript: str, message: Message, context: ContextTypes.DE
 
             for change in pending_changes:
                 await _ask_hard_itinerary_confirmation(message, context, change)
+
+        for correction in corrections:
+            await _ask_correction_confirmation(message, context, correction)
 
         try:
             vault.write_journal_entry(entry_time, facts, transcript, summary)
@@ -583,6 +719,9 @@ def build_application() -> Application:  # type: ignore[type-arg]
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
     application.add_handler(CallbackQueryHandler(handle_goal_slip_callback, pattern=r"^goalslip:"))
     application.add_handler(CallbackQueryHandler(handle_itinerary_callback, pattern=r"^itin:"))
+    application.add_handler(
+        CallbackQueryHandler(handle_correction_callback, pattern=r"^correction:")
+    )
 
     assert application.job_queue is not None
     application.job_queue.run_daily(

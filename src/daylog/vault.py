@@ -45,6 +45,12 @@ class VaultError(RuntimeError):
     """
 
 
+class CorrectionConflictError(VaultError):
+    """A correction's target no longer matches what was captured when it was
+    proposed — e.g. a later message changed the same list before the user
+    confirmed. Refuse rather than risk removing the wrong item."""
+
+
 @dataclass
 class JournalEntry:
     date: date
@@ -219,6 +225,41 @@ class Vault:
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text(body, encoding="utf-8")
 
+        self._commit(target, commit_message)
+        self._push()
+        return target
+
+    def remove_journal_item(
+        self,
+        entry_date: date,
+        field: str,
+        index: int,
+        expected_item: Any,
+        commit_message: str,
+    ) -> Path:
+        """Remove one item from a journal frontmatter list, preserving everything else.
+
+        `expected_item` must equal what's currently at `index` — if the
+        entry changed since the correction was proposed (e.g. a later
+        message extended the same list), this raises CorrectionConflictError
+        rather than risk deleting the wrong thing.
+        """
+        entry = self.read_journal_entry(entry_date)
+        if entry is None:
+            raise VaultError(f"no journal entry for {entry_date.isoformat()} to correct")
+
+        items = entry.frontmatter.get(field)
+        if not items or not (0 <= index < len(items)) or items[index] != expected_item:
+            raise CorrectionConflictError(
+                f"correction target no longer matches: {field}[{index}] on {entry_date.isoformat()}"
+            )
+
+        del items[index]
+        target = self.journal_path(entry_date)
+        target.write_text(
+            self._render_journal(entry.frontmatter, entry.transcript, entry.summary),
+            encoding="utf-8",
+        )
         self._commit(target, commit_message)
         self._push()
         return target

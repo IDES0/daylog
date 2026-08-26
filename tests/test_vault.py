@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from daylog.vault import Vault, VaultError
+from daylog.vault import CorrectionConflictError, Vault, VaultError
 
 FRONTMATTER = {
     "location": "Canggu, Bali",
@@ -223,6 +223,85 @@ def test_second_entry_same_day_uses_append_commit_message(vault: Vault) -> None:
         check=True,
     )
     assert log.stdout.strip() == "journal: 2026-08-21 (+entry)"
+
+
+def test_remove_journal_item_removes_and_commits(vault: Vault) -> None:
+    vault.write_journal_entry(ENTRY_TIME, FRONTMATTER, "t", "s")
+
+    vault.remove_journal_item(
+        ENTRY_TIME.date(), "skipped", 0, "gym", "journal: 2026-08-21 (correction)"
+    )
+
+    entry = vault.read_journal_entry(ENTRY_TIME.date())
+    assert entry is not None
+    assert entry.frontmatter.get("skipped") == []
+    # everything else on the entry survives untouched
+    assert entry.frontmatter["location"] == "Canggu, Bali"
+    assert "### 09:14" in entry.transcript
+    assert entry.transcript.endswith("t")
+
+    log = subprocess.run(
+        ["git", "log", "-1", "--pretty=%s"],
+        cwd=vault.path,
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    assert log.stdout.strip() == "journal: 2026-08-21 (correction)"
+
+
+def test_remove_journal_item_removes_activity_by_index(vault: Vault) -> None:
+    two_activities = {
+        **FRONTMATTER,
+        "activities": [
+            {"type": "surf", "hours": 2.0, "detail": "Echo Beach"},
+            {"type": "deep_work", "hours": 3.0, "detail": "study"},
+        ],
+    }
+    vault.write_journal_entry(ENTRY_TIME, two_activities, "t", "s")
+
+    vault.remove_journal_item(
+        ENTRY_TIME.date(),
+        "activities",
+        0,
+        {"type": "surf", "hours": 2.0, "detail": "Echo Beach"},
+        "journal: 2026-08-21 (correction)",
+    )
+
+    entry = vault.read_journal_entry(ENTRY_TIME.date())
+    assert entry is not None
+    assert [a["type"] for a in entry.frontmatter["activities"]] == ["deep_work"]
+
+
+def test_remove_journal_item_missing_entry_raises(vault: Vault) -> None:
+    with pytest.raises(VaultError):
+        vault.remove_journal_item(date(2099, 1, 1), "skipped", 0, "gym", "msg")
+
+
+def test_remove_journal_item_index_out_of_range_raises_conflict(vault: Vault) -> None:
+    vault.write_journal_entry(ENTRY_TIME, FRONTMATTER, "t", "s")
+
+    with pytest.raises(CorrectionConflictError):
+        vault.remove_journal_item(ENTRY_TIME.date(), "skipped", 5, "gym", "msg")
+
+    # the failed correction must not have touched the entry
+    entry = vault.read_journal_entry(ENTRY_TIME.date())
+    assert entry is not None
+    assert entry.frontmatter["skipped"] == ["gym"]
+
+
+def test_remove_journal_item_stale_reference_raises_conflict(vault: Vault) -> None:
+    # The item at index 0 changed since the correction was proposed (e.g. a
+    # second message rewrote today's skipped list) — the stale reference
+    # must be refused, not blindly applied to whatever is there now.
+    vault.write_journal_entry(ENTRY_TIME, FRONTMATTER, "t", "s")
+
+    with pytest.raises(CorrectionConflictError):
+        vault.remove_journal_item(ENTRY_TIME.date(), "skipped", 0, "yoga", "msg")
+
+    entry = vault.read_journal_entry(ENTRY_TIME.date())
+    assert entry is not None
+    assert entry.frontmatter["skipped"] == ["gym"]
 
 
 GOALS_YAML = """\

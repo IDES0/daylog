@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import date
 from zoneinfo import ZoneInfo
 
 import pytest
@@ -72,3 +73,53 @@ def test_fetch_wind_forecast_combines_current_and_curated_wind_spots(
 
 def test_fetch_wind_forecast_none_without_coordinates() -> None:
     assert bot._fetch_wind_forecast(None, _PLACES, ZoneInfo("UTC")) is None
+
+
+_TODAY = date(2026, 8, 21)
+_EXISTING_FRONTMATTER = {
+    "activities": [{"type": "surf", "hours": 2.0, "detail": "Echo Beach"}],
+    "skipped": ["gym"],
+}
+
+
+def test_resolve_corrections_valid_reference() -> None:
+    resolved = bot._resolve_corrections(
+        _EXISTING_FRONTMATTER,
+        [{"field": "skipped", "index": 0, "reason": "went after all"}],
+        _TODAY,
+    )
+
+    assert len(resolved) == 1
+    assert resolved[0].field == "skipped"
+    assert resolved[0].item == "gym"
+    assert resolved[0].description == "gym"
+    assert resolved[0].reason == "went after all"
+    assert resolved[0].entry_date == _TODAY
+
+
+def test_resolve_corrections_describes_activity() -> None:
+    resolved = bot._resolve_corrections(
+        _EXISTING_FRONTMATTER, [{"field": "activities", "index": 0}], _TODAY
+    )
+
+    assert len(resolved) == 1
+    assert resolved[0].description == "surf, 2h — Echo Beach"
+
+
+def test_resolve_corrections_out_of_range_dropped() -> None:
+    resolved = bot._resolve_corrections(
+        _EXISTING_FRONTMATTER, [{"field": "skipped", "index": 5}], _TODAY
+    )
+    assert resolved == []
+
+
+def test_resolve_corrections_unsupported_field_dropped() -> None:
+    resolved = bot._resolve_corrections(
+        _EXISTING_FRONTMATTER, [{"field": "goal_progress", "index": 0}], _TODAY
+    )
+    assert resolved == []
+
+
+def test_resolve_corrections_no_existing_entry_dropped() -> None:
+    resolved = bot._resolve_corrections(None, [{"field": "skipped", "index": 0}], _TODAY)
+    assert resolved == []

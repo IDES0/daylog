@@ -121,6 +121,40 @@ RECORD_JOURNAL_ENTRY_TOOL: ToolParam = {
                     "required": [],
                 },
             },
+            "corrections": {
+                "type": "array",
+                "description": (
+                    "Only when the transcript explicitly corrects or retracts something "
+                    "in 'Already logged today' below — e.g. 'actually I only surfed 1 "
+                    "hour, not 2' or 'scratch that, I didn't skip the gym after all.' "
+                    "Never infer a correction just because today's real activities "
+                    "differ from something said earlier describing a different thing — "
+                    "only an explicit correction/retraction counts. Only activities, "
+                    "skipped, and open_questions can be corrected this way; goal and "
+                    "itinerary corrections go through goal_slips/itinerary_changes."
+                ),
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "field": {
+                            "type": "string",
+                            "enum": ["activities", "skipped", "open_questions"],
+                        },
+                        "index": {
+                            "type": "integer",
+                            "description": (
+                                "0-based index into that field's numbered list in "
+                                "'Already logged today' below."
+                            ),
+                        },
+                        "reason": {
+                            "type": "string",
+                            "description": "Why, in the user's own words, if stated.",
+                        },
+                    },
+                    "required": ["field", "index"],
+                },
+            },
             "skipped": {
                 "type": "array",
                 "items": {"type": "string"},
@@ -168,12 +202,43 @@ def _format_itinerary(itinerary: list[dict[str, Any]]) -> str:
     return "\n".join(lines)
 
 
+def _describe_activity(item: dict[str, Any]) -> str:
+    hours = f", {item['hours']:g}h" if item.get("hours") is not None else ""
+    detail = f" — {item['detail']}" if item.get("detail") else ""
+    return f"{item.get('type', '?')}{hours}{detail}"
+
+
+def _format_existing_entry(frontmatter: dict[str, Any] | None) -> str:
+    """Numbered listing of today's activities/skipped/open_questions, for corrections.
+
+    Only these three fields are listed — they're the only ones `corrections`
+    can target (see the tool schema). Indices must match what's actually in
+    the entry, so the model can reference "index 1" and mean the same item
+    the caller will later remove.
+    """
+    if not frontmatter:
+        return "(nothing logged yet today)"
+
+    blocks = []
+    activities = frontmatter.get("activities")
+    if activities:
+        numbered = "\n".join(f"  {i}: {_describe_activity(a)}" for i, a in enumerate(activities))
+        blocks.append(f"activities:\n{numbered}")
+    for field in ("skipped", "open_questions"):
+        items = frontmatter.get(field)
+        if items:
+            numbered = "\n".join(f"  {i}: {item}" for i, item in enumerate(items))
+            blocks.append(f"{field}:\n{numbered}")
+    return "\n".join(blocks) if blocks else "(nothing logged yet today)"
+
+
 def extract(
     transcript: str,
     goals: list[dict[str, Any]],
     itinerary: list[dict[str, Any]],
     today: date,
     *,
+    existing_frontmatter: dict[str, Any] | None = None,
     client: anthropic.Anthropic | None = None,
 ) -> dict[str, Any]:
     """Extract structured journal facts from a raw transcript.
@@ -183,6 +248,9 @@ def extract(
     `itinerary` is the current travel plan (id/place/type/status/date) for
     the same reason, used to resolve itinerary_changes. `today` grounds
     relative date phrases ("push it a month") in goal_slips/itinerary dates.
+    `existing_frontmatter` is the day's journal entry so far (if any,
+    keyed by entry date, not necessarily today when backdating), so the
+    model can resolve `corrections` against it by index.
 
     Returns a dict matching the journal frontmatter schema, plus a
     `summary` key the caller should pull out before writing to the vault.
@@ -193,6 +261,8 @@ def extract(
     tool_choice: ToolChoiceToolParam = {"type": "tool", "name": "record_journal_entry"}
     user_content = (
         f"Today's date: {today.isoformat()}\n\n"
+        f"Already logged today (for corrections only):\n"
+        f"{_format_existing_entry(existing_frontmatter)}\n\n"
         f"Current goals:\n{_format_goals(goals)}\n\n"
         f"Current itinerary:\n{_format_itinerary(itinerary)}\n\n"
         f"Transcript:\n{transcript}"

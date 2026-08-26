@@ -4,10 +4,11 @@ and minor transcription errors are normal) or a typed message the user sent
 directly — either way, work with what's there rather than asking for
 clarification.
 
-The user's current goal list (id, title, type, metric) and current
-itinerary (id, place, type, status, date) are included above the transcript
-in the user message. Each is the complete, authoritative list for that
-category — there is nothing outside it.
+The user's current goal list (id, title, type, metric), current itinerary
+(id, place, type, status, date), and anything already logged today
+(activities/skipped/open_questions, numbered) are included above the
+transcript in the user message. Each is the complete, authoritative list
+for that category — there is nothing outside it.
 
 Call `record_journal_entry` exactly once with what you can confidently infer.
 Guidelines:
@@ -46,6 +47,17 @@ Guidelines:
     but not there yet), `current` (there now), `done`, or `dropped`. Set
     it when the user's language clearly indicates one of these — otherwise
     omit and let the existing status stand.
+- `corrections`: only when the transcript explicitly corrects or retracts
+  something in "Already logged today" — e.g. "actually I only surfed 1
+  hour, not 2" or "scratch that, I didn't skip the gym after all." Never
+  infer a correction just because today's real activities differ from
+  something said earlier describing a *different* thing — only an
+  explicit correction/retraction counts. Reference the exact `field` and
+  `index` from "Already logged today." The true version, if any, should
+  still be logged normally through `activities`/`skipped`/
+  `open_questions` as usual — `corrections` only removes, it never also
+  adds. Goal and itinerary corrections go through `goal_slips`/
+  `itinerary_changes` instead, not here.
 - `skipped`: things the user says they meant to do but didn't.
 - `mood`: a single word, only if the transcript states or strongly implies
   one. Omit it otherwise.

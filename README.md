@@ -26,6 +26,17 @@ committed.
   a voice note, and that note logs under that date instead of today. A
   message that merely mentions a date in passing is treated as journal
   content, not a date override.
+- **Corrections**: say a correction out loud ("actually I only surfed 1
+  hour, not 2") and extraction is given the day's entry so far to resolve
+  it against, by index. Only `activities`/`skipped`/`open_questions` can be
+  corrected this way — the raw transcript is never edited or removed, only
+  the structured facts, and only after an inline Confirm/Cancel (a bad
+  overwrite is worse than a harmless duplicate). If the entry changed
+  between the correction being proposed and confirmed, the removal is
+  refused rather than risk deleting the wrong thing. Corrections to a goal
+  or itinerary date go through the existing slip/confirmation flow instead
+  — see Goal tracking / Itinerary below. Location and mood already
+  self-correct: a restated value simply overwrites the old one.
 
 ### Goal tracking
 `goals.yaml` holds hard-deadline and soft-target goals. Voice mentions of
@@ -81,7 +92,7 @@ src/daylog/
   transcribe.py    Voice (OGG) -> text via faster-whisper, lazy-loaded.
   extract.py       Transcript -> structured facts via one forced
                    tool-use Claude call (goal_progress, goal_slips,
-                   itinerary_changes).
+                   itinerary_changes, corrections).
   dateparse.py     Deterministic (non-LLM) parsing for the small date-
                    override vocabulary — a control-flow signal, not
                    fact extraction, so it's exact rather than inferred.
@@ -172,7 +183,7 @@ daylog-vault/
 | `/status` | Plain read of current goals + itinerary — no LLM |
 | `/brief` | Generate and send the morning brief on demand |
 | `/start` | Registers the chat, confirms the bot is alive |
-| Confirm/Cancel buttons | Appear when extraction detects a hard-deadline move; nothing hard ever moves without this |
+| Confirm/Cancel buttons | Appear when extraction detects a hard-deadline move or a correction; nothing hard ever moves, and nothing already-logged is removed, without this |
 
 All commands also appear in Telegram's native `/` command menu.
 
