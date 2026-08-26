@@ -61,6 +61,15 @@ def _yaml() -> YAML:
     return yaml
 
 
+def _describe(result: subprocess.CompletedProcess[str]) -> str:
+    """Git's failure reason isn't always on stderr — e.g. a no-op `git commit`
+    ("nothing to commit, working tree clean") prints to stdout and leaves
+    stderr empty, which previously made the resulting VaultError message
+    empty and undiagnosable from logs. Report whichever stream has content."""
+    reason = result.stderr.strip() or result.stdout.strip()
+    return reason or f"exit code {result.returncode}, no output"
+
+
 def _merge_frontmatter(
     existing: dict[str, Any], new: dict[str, Any], entry_date: date
 ) -> dict[str, Any]:
@@ -284,11 +293,11 @@ class Vault:
     def _commit(self, changed_path: Path, message: str) -> None:
         add = self._run_git("add", str(changed_path))
         if add.returncode != 0:
-            raise VaultError(f"git add failed: {add.stderr.strip()}")
+            raise VaultError(f"git add failed: {_describe(add)}")
 
         commit = self._run_git("commit", "-m", message)
         if commit.returncode != 0:
-            raise VaultError(f"git commit failed: {commit.stderr.strip()}")
+            raise VaultError(f"git commit failed: {_describe(commit)}")
 
     def _push(self) -> bool:
         push = self._run_git("push")

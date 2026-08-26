@@ -129,6 +129,19 @@ def test_commit_failure_raises(vault: Vault, monkeypatch: pytest.MonkeyPatch) ->
         broken.write_journal_entry(ENTRY_TIME, FRONTMATTER, "t", "s")
 
 
+def test_commit_failure_message_includes_stdout_reason(vault: Vault) -> None:
+    # `git commit` with nothing staged prints its reason ("nothing to
+    # commit, working tree clean") to stdout, not stderr — the error
+    # message must still surface it, or a real failure like this is
+    # undiagnosable from logs.
+    target = vault.path / "unchanged.txt"
+    target.write_text("x", encoding="utf-8")
+    vault._commit(target, "seed")  # first commit succeeds, nothing left to stage next time
+
+    with pytest.raises(VaultError, match="nothing to commit"):
+        vault._commit(target, "no-op")
+
+
 def test_second_entry_same_day_appends_not_overwrites(vault: Vault) -> None:
     vault.write_journal_entry(ENTRY_TIME, FRONTMATTER, "morning transcript", "Morning summary.")
 
