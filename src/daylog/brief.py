@@ -240,13 +240,31 @@ def generate_brief(
         messages=messages,
     )
 
+    search_requests = (
+        response.usage.server_tool_use.web_search_requests if response.usage.server_tool_use else 0
+    )
     logger.info(
-        "brief usage: input=%d output=%d",
+        "brief usage: input=%d output=%d web_searches=%d/%d",
         response.usage.input_tokens,
         response.usage.output_tokens,
+        search_requests,
+        WEB_SEARCH_TOOL["max_uses"],
     )
     if response.stop_reason == "max_tokens":
         logger.warning("brief response was truncated by max_tokens")
+
+    # The client never sees search result page content (it's opaque
+    # `encrypted_content`, for the model's own use) — title/url/error_code
+    # is the only visibility we get into whether search actually found
+    # anything specific, so log it every time rather than only on failure.
+    for block in response.content:
+        if block.type != "web_search_tool_result":
+            continue
+        if isinstance(block.content, list):
+            found = "; ".join(f"{r.title} ({r.url})" for r in block.content) or "(no results)"
+            logger.info("web_search result: %s", found)
+        else:
+            logger.warning("web_search error: %s", block.content.error_code)
 
     # Citations split a response into multiple text blocks at the citation
     # boundary, mid-sentence — the blocks are contiguous, not separate
