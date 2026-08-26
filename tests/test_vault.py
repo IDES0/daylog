@@ -100,6 +100,40 @@ def test_write_journal_entry_pushes_to_remote(
     assert log.stdout.strip() == "journal: 2026-08-21"
 
 
+def test_write_journal_entry_reconciles_after_remote_diverges(
+    vault_with_remote: tuple[Vault, Path], tmp_path: Path
+) -> None:
+    # Simulate a second clone of the same repo (e.g. a direct edit pushed
+    # from outside the bot) landing on the remote first — this is exactly
+    # the "! [rejected] ... (fetch first)" failure mode, not network
+    # flakiness, so a bare retry must not be the only thing that's tried.
+    vault, remote = vault_with_remote
+
+    other = tmp_path / "other-clone"
+    subprocess.run(["git", "clone", str(remote), str(other)], check=True, capture_output=True)
+    subprocess.run(["git", "config", "user.email", "test@example.com"], cwd=other, check=True)
+    subprocess.run(["git", "config", "user.name", "Test"], cwd=other, check=True)
+    (other / "external.txt").write_text("x", encoding="utf-8")
+    subprocess.run(["git", "add", "external.txt"], cwd=other, check=True)
+    subprocess.run(["git", "commit", "-m", "external edit"], cwd=other, check=True)
+    subprocess.run(["git", "push"], cwd=other, check=True, capture_output=True)
+
+    # vault's local branch is now behind origin/main — its own commit can't
+    # fast-forward push without reconciling first.
+    path = vault.write_journal_entry(ENTRY_TIME, FRONTMATTER, "t", "s")
+    assert path.exists()
+
+    log = subprocess.run(
+        ["git", "log", "--oneline", "main"],
+        cwd=remote,
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    assert "external edit" in log.stdout
+    assert "journal: 2026-08-21" in log.stdout
+
+
 def test_read_journal_entry_roundtrip(vault: Vault) -> None:
     vault.write_journal_entry(ENTRY_TIME, FRONTMATTER, "raw transcript text", "Surfed and worked.")
 

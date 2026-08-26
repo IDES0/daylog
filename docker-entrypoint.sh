@@ -52,7 +52,19 @@ vault_is_healthy() {
 
 if [ -d "$VAULT_PATH/.git" ] && vault_is_healthy; then
     echo "Vault already present at $VAULT_PATH — flushing any commits stranded by a previous restart"
-    git -C "$VAULT_PATH" push || echo "push failed, will retry on next journal write"
+    if ! git -C "$VAULT_PATH" push; then
+        # A rejected push here usually isn't network flakiness — it means the
+        # remote moved ahead of what this clone last knew (e.g. a commit
+        # pushed from a different clone of the same repo), so a bare retry
+        # would fail identically forever. Reconcile once via rebase.
+        echo "push rejected — fetching and rebasing onto the remote before retrying"
+        if git -C "$VAULT_PATH" fetch origin && git -C "$VAULT_PATH" rebase origin/main; then
+            git -C "$VAULT_PATH" push || echo "push still failed after reconciling, will retry on next journal write"
+        else
+            echo "reconciliation failed — aborting rebase, commits stay local, will retry on next journal write"
+            git -C "$VAULT_PATH" rebase --abort 2>/dev/null || true
+        fi
+    fi
 else
     if [ -d "$VAULT_PATH" ]; then
         echo "Vault at $VAULT_PATH is missing or in a broken git state — re-cloning fresh"

@@ -301,10 +301,49 @@ class Vault:
 
     def _push(self) -> bool:
         push = self._run_git("push")
-        if push.returncode != 0:
+        if push.returncode == 0:
+            return True
+
+        logger.warning(
+            "git push failed, attempting to reconcile with the remote: %s", _describe(push)
+        )
+
+        # A rejected push isn't always transient network flakiness — the
+        # remote can have moved ahead of what this clone last knew about
+        # (e.g. a commit landing from a different clone of the same repo),
+        # in which case a bare retry would fail identically forever. Rebase
+        # local commits on top of the remote and retry once.
+        if not self._reconcile_with_remote():
+            logger.warning("reconciliation failed, commit kept locally and will retry next write")
+            return False
+
+        retry = self._run_git("push")
+        if retry.returncode != 0:
             logger.warning(
-                "git push failed, commit kept locally and will retry next write: %s",
-                push.stderr.strip(),
+                "git push still failed after reconciling, commit kept locally "
+                "and will retry next write: %s",
+                _describe(retry),
             )
             return False
         return True
+
+    def _reconcile_with_remote(self) -> bool:
+        """Fetch and rebase local commits onto the remote's current state.
+
+        If the rebase doesn't apply cleanly (a real conflict, not just a
+        clean fast-forward-able divergence), abort it so the working tree
+        is left exactly as it was rather than mid-conflict — the commit
+        stays local and safe, just not pushed yet.
+        """
+        fetch = self._run_git("fetch", "origin")
+        if fetch.returncode != 0:
+            logger.warning("git fetch failed during reconciliation: %s", _describe(fetch))
+            return False
+
+        rebase = self._run_git("rebase", "origin/main")
+        if rebase.returncode == 0:
+            return True
+
+        logger.warning("git rebase failed during reconciliation, aborting: %s", _describe(rebase))
+        self._run_git("rebase", "--abort")
+        return False
