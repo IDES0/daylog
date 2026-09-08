@@ -69,6 +69,16 @@ Guidelines:
   `open_questions` as usual — `corrections` only removes, it never also
   adds. Goal and itinerary corrections go through `goal_slips`/
   `itinerary_changes` instead, not here.
+- `other_day_notes`: only for an explicit aside about a specific *other*
+  day, dropped in while the transcript is mainly about today — e.g. "oh
+  yeah, yesterday I also went surfing, forgot to mention it." This is for
+  a genuinely forgotten fact about a different day. It is NOT for the day
+  this whole message is about — if the entire transcript is one
+  continuous account of a single day, everything belongs in the top-level
+  fields (`activities`, `goal_progress`, etc.), never here, even if that
+  day happens to be yesterday. Resolve relative phrases ("yesterday",
+  "Monday") into a real ISO `date` using today's actual date; `summary`
+  should describe only that aside, not the whole message.
 - `skipped`: things the user says they meant to do but didn't.
 - `mood`: a single word, only if the transcript states or strongly implies
   one. Omit it otherwise.

@@ -123,3 +123,107 @@ def test_resolve_corrections_unsupported_field_dropped() -> None:
 def test_resolve_corrections_no_existing_entry_dropped() -> None:
     resolved = bot._resolve_corrections(None, [{"field": "skipped", "index": 0}], _TODAY)
     assert resolved == []
+
+
+def test_upcoming_items_sorted_earliest_first() -> None:
+    goals_data = [
+        {"id": "jobs", "title": "Jobs", "type": "hard", "deadline": date(2026, 10, 31)},
+        {
+            "id": "surf",
+            "title": "Surf",
+            "type": "soft",
+            "target_window": [date(2026, 9, 1), date(2026, 9, 15)],
+        },
+    ]
+    itinerary_data = [
+        {"id": "visa", "place": "Indonesia exit", "type": "hard", "deadline": date(2026, 9, 20)},
+    ]
+
+    lines = bot._upcoming_items(goals_data, itinerary_data, today=date(2026, 9, 1))
+
+    assert lines == [
+        "2026-09-15: Surf — target",
+        "2026-09-20: Indonesia exit — deadline",
+        "2026-10-31: Jobs — deadline",
+    ]
+
+
+def test_upcoming_items_flags_overdue() -> None:
+    goals_data = [{"id": "jobs", "title": "Jobs", "type": "hard", "deadline": date(2026, 8, 1)}]
+
+    lines = bot._upcoming_items(goals_data, [], today=date(2026, 9, 1))
+
+    assert lines == ["2026-08-01: Jobs — deadline (overdue)"]
+
+
+def test_upcoming_items_skips_done_and_dropped() -> None:
+    goals_data = [
+        {"id": "a", "title": "A", "type": "hard", "deadline": date(2026, 9, 1), "status": "done"},
+        {
+            "id": "b",
+            "title": "B",
+            "type": "hard",
+            "deadline": date(2026, 9, 2),
+            "status": "dropped",
+        },
+    ]
+
+    assert bot._upcoming_items(goals_data, [], today=date(2026, 9, 1)) == []
+
+
+def test_upcoming_items_skips_undated_entries() -> None:
+    goals_data = [{"id": "a", "title": "A", "type": "soft", "status": "active"}]
+    assert bot._upcoming_items(goals_data, [], today=date(2026, 9, 1)) == []
+
+
+def test_format_short_date() -> None:
+    assert bot._format_short_date(date(2026, 9, 8)) == "Sep 8"
+
+
+def test_backdate_options_labels_today_and_yesterday_by_name() -> None:
+    options = bot._backdate_options(date(2026, 9, 9), days=3)
+
+    assert options[0] == (date(2026, 9, 9), "Today (Sep 9)")
+    assert options[1] == (date(2026, 9, 8), "Yesterday (Sep 8)")
+    assert options[2] == (date(2026, 9, 7), "Monday (Sep 7)")
+
+
+def test_backdate_options_length_matches_days() -> None:
+    assert len(bot._backdate_options(date(2026, 9, 9), days=7)) == 7
+
+
+def test_resolve_other_day_notes_valid() -> None:
+    resolved = bot._resolve_other_day_notes(
+        [
+            {
+                "date": "2026-09-08",
+                "summary": "Also surfed yesterday.",
+                "activities": [{"type": "surf", "hours": 1.0}],
+            }
+        ]
+    )
+
+    assert len(resolved) == 1
+    assert resolved[0].date == date(2026, 9, 8)
+    assert resolved[0].summary == "Also surfed yesterday."
+    assert resolved[0].facts == {"activities": [{"type": "surf", "hours": 1.0}]}
+
+
+def test_resolve_other_day_notes_drops_missing_summary() -> None:
+    assert bot._resolve_other_day_notes([{"date": "2026-09-08"}]) == []
+
+
+def test_resolve_other_day_notes_drops_missing_date() -> None:
+    assert bot._resolve_other_day_notes([{"summary": "x"}]) == []
+
+
+def test_resolve_other_day_notes_drops_invalid_date() -> None:
+    assert bot._resolve_other_day_notes([{"date": "not-a-date", "summary": "x"}]) == []
+
+
+def test_resolve_other_day_notes_only_keeps_known_fact_fields() -> None:
+    resolved = bot._resolve_other_day_notes(
+        [{"date": "2026-09-08", "summary": "x", "goal_progress": [{"goal_id": "g", "delta": 1}]}]
+    )
+
+    assert resolved[0].facts == {}

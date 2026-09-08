@@ -25,7 +25,21 @@ committed.
   ("yesterday", "3 days ago", "August 20", an ISO date) immediately before
   a voice note, and that note logs under that date instead of today. A
   message that merely mentions a date in passing is treated as journal
-  content, not a date override.
+  content, not a date override. `/backdate` offers the same thing as an
+  inline button list (today, yesterday, then the last several days by
+  weekday name) instead of typing the phrase.
+- **A mid-message aside about a different day** ("...oh yeah, yesterday I
+  also went surfing, forgot to mention it") — `other_day_notes` in
+  extraction resolves the relative date and logs just that fact under the
+  *other* day, while everything else in the message still logs under
+  today as normal. This is for a forgotten fact dropped into an otherwise
+  today-focused message, not for backdating the whole message (that's
+  still the job of a date sent first, or `/backdate`, above) — extraction
+  is told explicitly not to use this for a message that's entirely about
+  one other day. The other day's entry gets a labeled pointer back to
+  today's entry rather than a second copy of the full transcript, which
+  stays complete and verbatim under today's date, where the recording
+  actually belongs.
 - **Corrections**: say a correction out loud ("actually I only surfed 1
   hour, not 2") and extraction is given the day's entry so far to resolve
   it against, by index. Only `activities`/`skipped`/`open_questions` can be
@@ -62,11 +76,18 @@ progress or slipped dates are extracted automatically:
 ### Itinerary / "flexible calendar"
 `itinerary.yaml` mirrors the same hard/soft/slip pattern for travel:
 candidate destinations, soft target windows, and hard dates/deadlines
-(e.g. a visa expiry) that also require confirmation before moving.
+(e.g. a visa expiry) that also require confirmation before moving. A
+`candidate` entry is a loose, undecided plan — it shows up on the
+calendar feed marked `TENTATIVE` rather than looking identical to a
+firm, `CONFIRMED` one.
 
-### `/status`
-On-demand plain-text read of current goals and itinerary state — doesn't
-touch the LLM, doesn't get misfiled as a journal entry.
+### `/status` and `/upcoming`
+`/status` is an on-demand plain-text read of current goals and itinerary
+state — doesn't touch the LLM, doesn't get misfiled as a journal entry.
+`/upcoming` is the same underlying data reshaped as a timeline: every
+active goal/itinerary item that has a resolvable date, soonest first,
+with anything past its date and still active marked `(overdue)` instead
+of hidden.
 
 ### Morning brief (`/brief`, and scheduled daily)
 One Claude call with the `web_search` tool (for anything time-sensitive —
@@ -126,7 +147,8 @@ src/daylog/
   transcribe.py    Voice (OGG) -> text via faster-whisper, lazy-loaded.
   extract.py       Transcript -> structured facts via one forced
                    tool-use Claude call (goal_progress, goal_slips,
-                   itinerary_changes, corrections).
+                   itinerary_changes, corrections, location_change,
+                   other_day_notes).
   dateparse.py     Deterministic (non-LLM) parsing for the small date-
                    override vocabulary — a control-flow signal, not
                    fact extraction, so it's exact rather than inferred.
@@ -217,7 +239,9 @@ daylog-vault/
 | Voice note | Transcribed, extracted, appended to today's journal entry |
 | Text message | Same pipeline as voice, text in instead of transcribed audio |
 | Text that's *only* a date phrase, then a voice note | The voice note logs under that date instead of today |
+| `/backdate` | Same as above, via an inline button list instead of typing the phrase |
 | `/status` | Plain read of current goals + itinerary — no LLM |
+| `/upcoming` | Dated goals/itinerary items, soonest first, overdue ones flagged — no LLM |
 | `/brief` | Generate and send the morning brief on demand |
 | `/start` | Registers the chat, confirms the bot is alive |
 | Confirm/Cancel buttons | Appear when extraction detects a hard-deadline move or a correction; nothing hard ever moves, and nothing already-logged is removed, without this |

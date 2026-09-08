@@ -187,6 +187,48 @@ RECORD_JOURNAL_ENTRY_TOOL: ToolParam = {
                     "required": ["field", "index"],
                 },
             },
+            "other_day_notes": {
+                "type": "array",
+                "description": (
+                    "Only for an explicit aside about a specific OTHER day, mentioned in "
+                    "passing while the transcript is mainly about today — e.g. 'oh yeah, "
+                    "yesterday I also went surfing, forgot to mention it.' This is for a "
+                    "genuinely forgotten fact about a different day; it is NOT for the day "
+                    "this whole message is about (a message that's entirely about a past "
+                    "day is backdated before it's sent, not marked here) — if the whole "
+                    "transcript is one continuous account of a single day, everything "
+                    "belongs in the top-level fields, not here. Resolve relative phrases "
+                    "('yesterday', 'Monday') into a real ISO date using today's actual date."
+                ),
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "date": {
+                            "type": "string",
+                            "description": "ISO date (YYYY-MM-DD) the aside is actually about.",
+                        },
+                        "activities": {
+                            "type": "array",
+                            "items": {
+                                "type": "object",
+                                "properties": {
+                                    "type": {"type": "string"},
+                                    "hours": {"type": "number"},
+                                    "detail": {"type": "string"},
+                                },
+                                "required": ["type"],
+                            },
+                        },
+                        "skipped": {"type": "array", "items": {"type": "string"}},
+                        "mood": {"type": "string"},
+                        "summary": {
+                            "type": "string",
+                            "description": "One short sentence describing just this aside.",
+                        },
+                    },
+                    "required": ["date", "summary"],
+                },
+            },
             "skipped": {
                 "type": "array",
                 "items": {"type": "string"},

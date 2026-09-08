@@ -12,7 +12,7 @@ import tempfile
 import uuid
 from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from datetime import time as dt_time
 from pathlib import Path
 from typing import Any
@@ -191,6 +191,32 @@ def _resolve_corrections(
     return resolved
 
 
+@dataclass
+class ResolvedOtherDayNote:
+    date: date
+    facts: dict[str, Any]
+    summary: str
+
+
+def _resolve_other_day_notes(notes: list[dict[str, Any]]) -> list[ResolvedOtherDayNote]:
+    """Validate/parse raw other_day_notes extraction output, dropping anything malformed
+    (missing date/summary, or a date string that isn't real) rather than trusting it blindly.
+    """
+    resolved = []
+    for note in notes:
+        date_str = note.get("date")
+        summary = note.get("summary")
+        if not date_str or not summary:
+            continue
+        try:
+            note_date = date.fromisoformat(date_str)
+        except ValueError:
+            continue
+        facts = {key: note[key] for key in ("activities", "skipped", "mood") if note.get(key)}
+        resolved.append(ResolvedOtherDayNote(date=note_date, facts=facts, summary=summary))
+    return resolved
+
+
 def _format_status(goals_data: Any, itinerary_data: Any) -> str:
     goal_lines = [_format_goal_line(g) for g in goals_data if g.get("status") != "dropped"]
     itin_lines = [_format_itinerary_line(e) for e in itinerary_data if e.get("status") != "dropped"]
@@ -209,6 +235,49 @@ async def status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     assert message is not None
     vault = _vault()
     await message.reply_text(_format_status(vault.read_goals(), vault.read_itinerary()))
+
+
+def _upcoming_items(goals_data: Any, itinerary_data: Any, today: date) -> list[str]:
+    """One line per active goal/itinerary item with a resolvable date, earliest first.
+
+    Deliberately doesn't hide past-due dates — an active item whose date
+    has already passed is exactly the "you forgot about this" signal worth
+    surfacing at the top, not filtering out.
+    """
+    dated: list[tuple[date, str]] = []
+    for g in goals_data:
+        if g.get("status") in ("done", "dropped"):
+            continue
+        d_str = goals.current_target_date(g)
+        if not d_str:
+            continue
+        d = date.fromisoformat(d_str)
+        kind = "deadline" if g.get("type") == "hard" else "target"
+        overdue = " (overdue)" if d < today else ""
+        dated.append((d, f"{d.isoformat()}: {g.get('title', g['id'])} — {kind}{overdue}"))
+    for e in itinerary_data:
+        if e.get("status") in ("done", "dropped"):
+            continue
+        d_str = itinerary.current_date(e)
+        if not d_str:
+            continue
+        d = date.fromisoformat(d_str)
+        kind = "deadline" if e.get("type") == "hard" else e.get("status", "candidate")
+        overdue = " (overdue)" if d < today else ""
+        dated.append((d, f"{d.isoformat()}: {e.get('place', e['id'])} — {kind}{overdue}"))
+    dated.sort(key=lambda item: item[0])
+    return [label for _, label in dated]
+
+
+async def upcoming(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not _is_authorized(update):
+        return
+    message = update.message
+    assert message is not None
+    vault = _vault()
+    today = datetime.now(_tz()).date()
+    lines = _upcoming_items(vault.read_goals(), vault.read_itinerary(), today)
+    await message.reply_text("\n".join(lines) if lines else "Nothing dated yet.")
 
 
 def _brief_hour() -> int:
@@ -344,10 +413,63 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     await message.reply_text(
         "daylog is listening. Send a voice note or text to log your day.\n\n"
         'To log for a different day, send the date first (e.g. "yesterday", '
-        '"2 days ago", "2026-08-20") — it applies to your next message only.\n\n'
+        '"2 days ago", "2026-08-20") — it applies to your next message only. '
+        "Or use /backdate to pick from a short list instead of typing it.\n\n"
         'Made a mistake earlier today? Just say the correction (e.g. "actually '
         "I only surfed 1 hour, not 2\") — I'll ask you to confirm before "
         "removing anything."
+    )
+
+
+def _format_short_date(d: date) -> str:
+    return f"{d.strftime('%b')} {d.day}"
+
+
+def _backdate_options(today: date, days: int = 7) -> list[tuple[date, str]]:
+    """(date, label) pairs for the /backdate picker, today first then going back."""
+    options = []
+    for offset in range(days):
+        d = today - timedelta(days=offset)
+        if offset == 0:
+            name = "Today"
+        elif offset == 1:
+            name = "Yesterday"
+        else:
+            name = d.strftime("%A")
+        options.append((d, f"{name} ({_format_short_date(d)})"))
+    return options
+
+
+async def backdate_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not _is_authorized(update):
+        return
+    message = update.message
+    assert message is not None
+    today = datetime.now(_tz()).date()
+    keyboard = InlineKeyboardMarkup(
+        [
+            [InlineKeyboardButton(label, callback_data=f"backdate:{d.isoformat()}")]
+            for d, label in _backdate_options(today)
+        ]
+    )
+    await message.reply_text("Log your next message under which day?", reply_markup=keyboard)
+
+
+async def handle_backdate_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not _is_authorized(update):
+        return
+    query = update.callback_query
+    assert query is not None and query.data is not None
+    await query.answer()
+
+    _, iso_date = query.data.split(":", 1)
+    picked = date.fromisoformat(iso_date)
+
+    assert context.user_data is not None
+    context.user_data[_PENDING_DATE_KEY] = picked
+
+    await query.edit_message_text(
+        f"Got it — your next message will be logged as {picked.isoformat()}."
     )
 
 
@@ -584,6 +706,7 @@ async def _log_entry(transcript: str, message: Message, context: ContextTypes.DE
             facts.pop("corrections", []),
             entry_time.date(),
         )
+        other_day_notes = facts.pop("other_day_notes", [])
 
         location_note = ""
         if location_change and location_change.get("place"):
@@ -599,6 +722,31 @@ async def _log_entry(transcript: str, message: Message, context: ContextTypes.DE
             except VaultError:
                 logger.exception("location commit failed")
                 location_note = "\n\n(location update didn't save — check bot logs)"
+
+        other_day_note = ""
+        resolved_notes = _resolve_other_day_notes(other_day_notes)
+        if resolved_notes:
+            applied_other_days = []
+            for resolved in resolved_notes:
+                other_time = datetime.combine(resolved.date, entry_time.time())
+                # Not the raw transcript — the whole recording is mainly
+                # about entry_time.date(), and lives there in full. This
+                # is a clearly-labeled pointer, not a second verbatim copy.
+                stub = (
+                    f"(Mentioned in the {entry_time.date().isoformat()} entry) {resolved.summary}"
+                )
+                try:
+                    vault.write_journal_entry(other_time, resolved.facts, stub, resolved.summary)
+                    applied_other_days.append(
+                        f"Also logged under {resolved.date.isoformat()}: {resolved.summary}"
+                    )
+                except VaultError:
+                    logger.exception("other-day note commit failed for %s", resolved.date)
+                    applied_other_days.append(
+                        f"(couldn't save the {resolved.date.isoformat()} note — check bot logs)"
+                    )
+            if applied_other_days:
+                other_day_note = "\n\n" + "\n".join(applied_other_days)
 
         goals_note = ""
         if goal_progress or goal_slips:
@@ -661,7 +809,7 @@ async def _log_entry(transcript: str, message: Message, context: ContextTypes.DE
 
         await message.reply_text(
             f"Logged {entry_time.date().isoformat()}:\n\n{summary}"
-            f"{goals_note}{itinerary_note}{location_note}"
+            f"{goals_note}{itinerary_note}{location_note}{other_day_note}"
         )
     except Exception:
         logger.exception("failed to process entry")
@@ -725,7 +873,9 @@ async def _post_init(application: Application) -> None:  # type: ignore[type-arg
         [
             BotCommand("start", "How to use daylog"),
             BotCommand("status", "Show current goals and itinerary"),
+            BotCommand("upcoming", "Show dated goals/itinerary, earliest first"),
             BotCommand("brief", "Get a daily brief now"),
+            BotCommand("backdate", "Log your next message under a recent past date"),
         ]
     )
 
@@ -735,7 +885,9 @@ def build_application() -> Application:  # type: ignore[type-arg]
     application = ApplicationBuilder().token(token).post_init(_post_init).build()
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("status", status))
+    application.add_handler(CommandHandler("upcoming", upcoming))
     application.add_handler(CommandHandler("brief", brief_command))
+    application.add_handler(CommandHandler("backdate", backdate_command))
     application.add_handler(MessageHandler(filters.VOICE, handle_voice))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
     application.add_handler(CallbackQueryHandler(handle_goal_slip_callback, pattern=r"^goalslip:"))
@@ -743,6 +895,7 @@ def build_application() -> Application:  # type: ignore[type-arg]
     application.add_handler(
         CallbackQueryHandler(handle_correction_callback, pattern=r"^correction:")
     )
+    application.add_handler(CallbackQueryHandler(handle_backdate_callback, pattern=r"^backdate:"))
 
     assert application.job_queue is not None
     application.job_queue.run_daily(

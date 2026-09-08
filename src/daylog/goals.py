@@ -83,7 +83,7 @@ def apply_slips(
         if goal is None or not new_date:
             continue
         reason = item.get("reason")
-        old_date = _current_target_date(goal)
+        old_date = current_target_date(goal)
 
         if goal.get("type") == "hard":
             pending.append(
@@ -117,7 +117,9 @@ def apply_confirmed_slip(goals: list[Any], slip: PendingSlip, on: date) -> None:
     _write_slip(goal, slip.old_date, slip.new_date, slip.reason, on)
 
 
-def _current_target_date(goal: Any) -> str | None:
+def current_target_date(goal: Any) -> str | None:
+    """The goal's current target date, whichever field holds it — mirrors
+    itinerary.py's current_date, used e.g. to sort goals chronologically."""
     if "deadline" in goal:
         return str(goal["deadline"])
     window = goal.get("target_window")
