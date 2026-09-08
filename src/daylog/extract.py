@@ -25,6 +25,38 @@ RECORD_JOURNAL_ENTRY_TOOL: ToolParam = {
                 "type": "string",
                 "description": "Where the user was, e.g. 'Canggu, Bali'.",
             },
+            "location_change": {
+                "type": "object",
+                "description": (
+                    "Only when the transcript explicitly states the user has moved to "
+                    "or arrived at a new base — not just mentioning a place in "
+                    "passing, describing where today's activity happened, or a "
+                    "place they're merely considering (that goes through "
+                    "itinerary_changes instead). This updates where the bot thinks "
+                    "the user currently is, for the morning brief's forecasts and "
+                    "place matching — separate from `location` above, which is only "
+                    "descriptive text for today's entry. Omit if the current "
+                    "location given below is already correct."
+                ),
+                "properties": {
+                    "place": {
+                        "type": "string",
+                        "description": "Short current place name, e.g. 'Ubud, Bali, ID'.",
+                    },
+                    "lat": {
+                        "type": "number",
+                        "description": (
+                            "Approximate latitude — only if it's a real, "
+                            "identifiable place you're confident about."
+                        ),
+                    },
+                    "lon": {
+                        "type": "number",
+                        "description": "Approximate longitude, only if confident.",
+                    },
+                },
+                "required": ["place"],
+            },
             "activities": {
                 "type": "array",
                 "items": {
@@ -239,6 +271,7 @@ def extract(
     today: date,
     *,
     existing_frontmatter: dict[str, Any] | None = None,
+    current_location: str | None = None,
     client: anthropic.Anthropic | None = None,
 ) -> dict[str, Any]:
     """Extract structured journal facts from a raw transcript.
@@ -250,7 +283,9 @@ def extract(
     relative date phrases ("push it a month") in goal_slips/itinerary dates.
     `existing_frontmatter` is the day's journal entry so far (if any,
     keyed by entry date, not necessarily today when backdating), so the
-    model can resolve `corrections` against it by index.
+    model can resolve `corrections` against it by index. `current_location`
+    is what location.yaml says the user's base is right now, so the model
+    can tell an actual move apart from a place already correctly recorded.
 
     Returns a dict matching the journal frontmatter schema, plus a
     `summary` key the caller should pull out before writing to the vault.
@@ -261,6 +296,7 @@ def extract(
     tool_choice: ToolChoiceToolParam = {"type": "tool", "name": "record_journal_entry"}
     user_content = (
         f"Today's date: {today.isoformat()}\n\n"
+        f"Current location (per location.yaml): {current_location or '(not set)'}\n\n"
         f"Already logged today (for corrections only):\n"
         f"{_format_existing_entry(existing_frontmatter)}\n\n"
         f"Current goals:\n{_format_goals(goals)}\n\n"

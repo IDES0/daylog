@@ -163,17 +163,42 @@ def test_commit_failure_raises(vault: Vault, monkeypatch: pytest.MonkeyPatch) ->
         broken.write_journal_entry(ENTRY_TIME, FRONTMATTER, "t", "s")
 
 
-def test_commit_failure_message_includes_stdout_reason(vault: Vault) -> None:
-    # `git commit` with nothing staged prints its reason ("nothing to
-    # commit, working tree clean") to stdout, not stderr — the error
-    # message must still surface it, or a real failure like this is
-    # undiagnosable from logs.
+def test_commit_noop_does_not_raise(vault: Vault) -> None:
+    # `git commit` with nothing staged prints "nothing to commit, working
+    # tree clean" and exits non-zero — but in normal operation every write
+    # changes the file first, so reaching this means the desired content is
+    # already committed (most commonly a duplicate write, e.g. Telegram
+    # redelivering an update after a restart re-applies an already-saved
+    # change). That's an already-achieved no-op, not a failure.
     target = vault.path / "unchanged.txt"
     target.write_text("x", encoding="utf-8")
     vault._commit(target, "seed")  # first commit succeeds, nothing left to stage next time
 
-    with pytest.raises(VaultError, match="nothing to commit"):
-        vault._commit(target, "no-op")
+    vault._commit(target, "no-op")  # must not raise
+
+    log = subprocess.run(
+        ["git", "log", "-1", "--pretty=%s"],
+        cwd=vault.path,
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    assert log.stdout.strip() == "seed"  # no spurious empty commit was created
+
+
+def test_write_goals_duplicate_call_does_not_raise(vault: Vault) -> None:
+    # Reproduces the reported crash: the same goal_progress update applied
+    # twice (e.g. a redelivered Telegram update) produces byte-identical
+    # goals.yaml content the second time, which must not raise.
+    vault.goals_path.write_text(GOALS_YAML, encoding="utf-8")
+
+    goals = vault.read_goals()
+    goals[0]["progress"] = 3
+    vault.write_goals(goals, "goals: +3 jobs")
+
+    goals_again = vault.read_goals()
+    goals_again[0]["progress"] = 3
+    vault.write_goals(goals_again, "goals: +3 jobs")  # must not raise
 
 
 def test_second_entry_same_day_appends_not_overwrites(vault: Vault) -> None:
@@ -443,3 +468,53 @@ def test_write_itinerary_commits(vault: Vault) -> None:
         check=True,
     )
     assert log.stdout.strip() == "itinerary: Indonesia (exit)"
+
+
+def test_write_location_creates_first_entry(vault: Vault) -> None:
+    vault.write_location(
+        "Kuta, Lombok, ID", -8.8948, 116.2832, date(2026, 8, 18), "location: Kuta, Lombok, ID"
+    )
+
+    locations = vault.read_location()
+    assert len(locations) == 1
+    assert locations[0]["place"] == "Kuta, Lombok, ID"
+    assert locations[0]["lat"] == -8.8948
+    assert locations[0]["from"] == date(2026, 8, 18)
+    assert locations[0]["to"] is None
+
+
+def test_write_location_closes_previous_open_entry(vault: Vault) -> None:
+    vault.write_location("Uluwatu, Bali, ID", -8.829, 115.0849, date(2026, 8, 9), "location: A")
+
+    vault.write_location("Kuta, Lombok, ID", -8.8948, 116.2832, date(2026, 8, 18), "location: B")
+
+    locations = vault.read_location()
+    assert len(locations) == 2
+    assert locations[0]["place"] == "Uluwatu, Bali, ID"
+    assert locations[0]["to"] == date(2026, 8, 18)  # closed exactly when the new one opened
+    assert locations[1]["place"] == "Kuta, Lombok, ID"
+    assert locations[1]["to"] is None
+
+
+def test_write_location_without_coordinates(vault: Vault) -> None:
+    # extraction only supplies lat/lon when confident — a bare place name
+    # must still work, just without a marine/wind forecast until it's known.
+    vault.write_location("somewhere remote", None, None, date(2026, 8, 20), "location: somewhere")
+
+    locations = vault.read_location()
+    assert locations[0]["place"] == "somewhere remote"
+    assert "lat" not in locations[0]
+    assert "lon" not in locations[0]
+
+
+def test_write_location_commits(vault: Vault) -> None:
+    vault.write_location("Kuta, Lombok, ID", -8.8948, 116.2832, date(2026, 8, 18), "location: Kuta")
+
+    log = subprocess.run(
+        ["git", "log", "-1", "--pretty=%s"],
+        cwd=vault.path,
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    assert log.stdout.strip() == "location: Kuta"

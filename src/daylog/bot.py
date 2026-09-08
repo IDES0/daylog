@@ -558,27 +558,47 @@ async def _log_entry(transcript: str, message: Message, context: ContextTypes.DE
         goals_data = vault.read_goals()
         itinerary_data = vault.read_itinerary()
         existing_entry = vault.read_journal_entry(entry_time.date())
+        location_data = vault.read_location()
+        current = brief.current_location(location_data)
         facts = extract.extract(
             transcript,
             _active_goals_summary(goals_data),
             _active_itinerary_summary(itinerary_data),
             entry_time.date(),
             existing_frontmatter=existing_entry.frontmatter if existing_entry else None,
+            current_location=current.get("place") if current else None,
         )
         summary = facts.pop("summary", "")
 
         # goal_progress stays in facts — it's part of the journal frontmatter
-        # schema too (SPEC §5.1) — but goal_slips, itinerary_changes, and
-        # corrections are bookkeeping for other files/edits, not facts about
-        # the day, so none of them belong in the journal file.
+        # schema too (SPEC §5.1) — but goal_slips, itinerary_changes,
+        # corrections, and location_change are bookkeeping for other
+        # files/edits, not facts about the day, so none of them belong in
+        # the journal file.
         goal_progress = facts.get("goal_progress", [])
         goal_slips = facts.pop("goal_slips", [])
         itinerary_changes = facts.pop("itinerary_changes", [])
+        location_change = facts.pop("location_change", None)
         corrections = _resolve_corrections(
             existing_entry.frontmatter if existing_entry else None,
             facts.pop("corrections", []),
             entry_time.date(),
         )
+
+        location_note = ""
+        if location_change and location_change.get("place"):
+            try:
+                vault.write_location(
+                    location_change["place"],
+                    location_change.get("lat"),
+                    location_change.get("lon"),
+                    entry_time.date(),
+                    f"location: {location_change['place']}",
+                )
+                location_note = f"\n\n(Updated current location to {location_change['place']})"
+            except VaultError:
+                logger.exception("location commit failed")
+                location_note = "\n\n(location update didn't save — check bot logs)"
 
         goals_note = ""
         if goal_progress or goal_slips:
@@ -640,7 +660,8 @@ async def _log_entry(transcript: str, message: Message, context: ContextTypes.DE
             return
 
         await message.reply_text(
-            f"Logged {entry_time.date().isoformat()}:\n\n{summary}{goals_note}{itinerary_note}"
+            f"Logged {entry_time.date().isoformat()}:\n\n{summary}"
+            f"{goals_note}{itinerary_note}{location_note}"
         )
     except Exception:
         logger.exception("failed to process entry")

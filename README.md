@@ -35,8 +35,20 @@ committed.
   between the correction being proposed and confirmed, the removal is
   refused rather than risk deleting the wrong thing. Corrections to a goal
   or itinerary date go through the existing slip/confirmation flow instead
-  — see Goal tracking / Itinerary below. Location and mood already
-  self-correct: a restated value simply overwrites the old one.
+  — see Goal tracking / Itinerary below. Mood and the per-day `location`
+  field already self-correct: a restated value simply overwrites the old
+  one.
+- **Location tracking**: `location.yaml` (a separate, date-ranged history —
+  see Vault layout below) drives what the morning brief thinks your
+  current base is, and it only ever changes when extraction detects an
+  explicit statement that you've moved ("I'm in Ubud now"), never from a
+  place just mentioned in passing. It's given your current recorded
+  location on every extraction call so it can tell an actual move apart
+  from a place already correctly recorded. This applies immediately, no
+  confirmation — low stakes, and easy to correct by just saying where you
+  actually are. Approximate coordinates are recorded only when the model
+  is confident in them; without them the location still updates, it just
+  won't have a marine/wind forecast until coordinates are known.
 
 ### Goal tracking
 `goals.yaml` holds hard-deadline and soft-target goals. Voice mentions of

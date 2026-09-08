@@ -175,6 +175,43 @@ class Vault:
             return []
         return _yaml().load(self.location_path.read_text(encoding="utf-8"))
 
+    def write_location(
+        self,
+        place: str,
+        lat: float | None,
+        lon: float | None,
+        on: date,
+        commit_message: str,
+    ) -> Path:
+        """Close whichever entry is currently open (`to: null`) as of `on`, and open a new one.
+
+        `lat`/`lon` are optional — extraction only supplies them when
+        confident (see prompts/extract.md); a place with neither still
+        updates *where* the brief thinks the user is, it just won't have a
+        marine/wind forecast until coordinates are known.
+        """
+        locations = self.read_location()
+        for entry in locations:
+            if entry.get("to") is None:
+                entry["to"] = on
+
+        new_entry: dict[str, Any] = {"place": place}
+        if lat is not None:
+            new_entry["lat"] = lat
+        if lon is not None:
+            new_entry["lon"] = lon
+        new_entry["from"] = on
+        new_entry["to"] = None
+        locations.append(new_entry)
+
+        buf = io.StringIO()
+        _yaml().dump(locations, buf)
+        self.location_path.write_text(buf.getvalue(), encoding="utf-8")
+
+        self._commit(self.location_path, commit_message)
+        self._push()
+        return self.location_path
+
     @property
     def profile_path(self) -> Path:
         return self.path / "profile.yaml"
@@ -338,7 +375,17 @@ class Vault:
 
         commit = self._run_git("commit", "-m", message)
         if commit.returncode != 0:
-            raise VaultError(f"git commit failed: {_describe(commit)}")
+            reason = _describe(commit)
+            if "nothing to commit" in reason:
+                # The content we just wrote is byte-identical to what's
+                # already committed. In normal operation every write changes
+                # something first, so this means the desired end state was
+                # already reached — most likely a duplicate write (e.g.
+                # Telegram redelivering an update after a restart re-applies
+                # an already-saved change). That's not a failure to raise.
+                logger.info("nothing to commit for %s — write was a no-op", changed_path)
+                return
+            raise VaultError(f"git commit failed: {reason}")
 
     def _push(self) -> bool:
         push = self._run_git("push")
