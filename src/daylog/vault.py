@@ -106,6 +106,23 @@ class Vault:
     def journal_path(self, entry_date: date) -> Path:
         return self.path / "journal" / f"{entry_date.isoformat()}.md"
 
+    def list_journal_dates(self) -> list[date]:
+        """All dates with a journal entry, oldest first.
+
+        Skips anything whose filename isn't a plain `YYYY-MM-DD.md` (e.g. a
+        stray `.bak` or manually-named test file) rather than raising.
+        """
+        journal_dir = self.path / "journal"
+        if not journal_dir.exists():
+            return []
+        dates = []
+        for entry_path in journal_dir.glob("*.md"):
+            try:
+                dates.append(date.fromisoformat(entry_path.stem))
+            except ValueError:
+                continue
+        return sorted(dates)
+
     @property
     def goals_path(self) -> Path:
         return self.path / "goals.yaml"

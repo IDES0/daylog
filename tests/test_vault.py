@@ -518,3 +518,23 @@ def test_write_location_commits(vault: Vault) -> None:
         check=True,
     )
     assert log.stdout.strip() == "location: Kuta"
+
+
+def test_list_journal_dates_empty_when_no_journal_dir(vault: Vault) -> None:
+    assert vault.list_journal_dates() == []
+
+
+def test_list_journal_dates_sorted_oldest_first(vault: Vault) -> None:
+    vault.write_journal_entry(datetime(2026, 8, 22, 9, 0), {}, "t", "s")
+    vault.write_journal_entry(datetime(2026, 8, 20, 9, 0), {}, "t", "s")
+    vault.write_journal_entry(datetime(2026, 8, 21, 9, 0), {}, "t", "s")
+
+    assert vault.list_journal_dates() == [date(2026, 8, 20), date(2026, 8, 21), date(2026, 8, 22)]
+
+
+def test_list_journal_dates_skips_non_date_filenames(vault: Vault) -> None:
+    vault.write_journal_entry(ENTRY_TIME, FRONTMATTER, "t", "s")
+    (vault.path / "journal" / "2026-08-21.local-test.md.bak").write_text("x", encoding="utf-8")
+    (vault.path / "journal" / "notes.md").write_text("x", encoding="utf-8")
+
+    assert vault.list_journal_dates() == [ENTRY_TIME.date()]

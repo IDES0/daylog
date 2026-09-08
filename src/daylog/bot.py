@@ -30,7 +30,7 @@ from telegram.ext import (
     filters,
 )
 
-from daylog import brief, extract, goals, itinerary, transcribe
+from daylog import brief, calendar_server, extract, goals, itinerary, transcribe
 from daylog.dateparse import parse_date_phrase
 from daylog.sources import marine, wind
 from daylog.vault import CorrectionConflictError, Vault, VaultError
@@ -758,6 +758,7 @@ def main() -> None:
     # which drowns daylog's own logs under the constant getUpdates polling.
     logging.getLogger("httpx").setLevel(logging.WARNING)
     logging.getLogger("httpcore").setLevel(logging.WARNING)
+    calendar_server.start()
     application = build_application()
     application.run_polling()
 

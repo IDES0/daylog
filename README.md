@@ -92,6 +92,28 @@ in the vault:
 Scheduled once daily at `BRIEF_HOUR` (local `TZ`), and available on demand
 via `/brief`.
 
+### Calendar feed (optional, read-only)
+A small HTTP server (`calendar_server.py`) serves an iCalendar (`.ics`)
+feed at `/calendar/<CALENDAR_FEED_SECRET>.ics` — Google Calendar and Apple
+Calendar can both subscribe to it directly by URL, no OAuth or per-provider
+integration needed. It's built fresh from vault data on every request:
+- Goal/itinerary deadlines and target windows, as all-day events.
+- One all-day event per journal day, titled from that day's distinct
+  activity types (plus location, if recorded), with the full daily summary
+  as the event description.
+
+It's **one-way and read-only by construction** — editing or deleting an
+event in Google/Apple Calendar has no effect on the vault; this is a view
+onto daylog's data, not another way to write to it. Refresh timing is
+whatever the calendar app's own subscription-polling interval is (commonly
+several hours), not instant. The endpoint is opt-in: with
+`CALENDAR_FEED_SECRET` unset the server doesn't start at all, and any path
+other than the exact configured secret 404s — this is the only HTTP
+surface the bot has, so the secret is the only thing standing between your
+goals/itinerary/journal history and anyone who finds the URL. Generate a
+real one (e.g. `openssl rand -hex 16`), and treat the full feed URL like a
+password.
+
 ## Architecture
 
 ```
@@ -113,6 +135,9 @@ src/daylog/
   itinerary.py     Same pattern as goals.py, for travel/destinations.
   brief.py         Morning brief: gathers vault context, one Claude call
                    with web_search, returns plain text (not parsed).
+  calendar_feed.py Pure logic: goals/itinerary/journal data -> .ics bytes.
+  calendar_server.py  Minimal stdlib HTTP server exposing calendar_feed.py
+                   at an unguessable path. The bot's only HTTP surface.
   prompts/*.md     All LLM system prompts — never inlined in Python.
   sources/
     marine.py      Swell/wave forecast, Open-Meteo marine API.
@@ -220,6 +245,8 @@ Requires a local clone of the private vault repo at the path set by
 | `VAULT_PATH` | Path to the local clone of `daylog-vault` |
 | `BRIEF_HOUR` | Local hour (0-23) the scheduled brief sends, default `7` |
 | `TZ` | IANA timezone, used for the brief schedule and date resolution |
+| `CALENDAR_FEED_SECRET` | Optional. Enables the calendar feed at `/calendar/<secret>.ics`; unset disables it entirely |
+| `PORT` | Only relevant with `CALENDAR_FEED_SECRET` set. Railway injects this itself; default `8080` for local testing |
 
 ## Testing
 
@@ -244,6 +271,9 @@ Railway, Dockerfile-based build (`railway.json`):
   guards against a corrupted state from an overlapping redeploy.
 - Git push to the vault goes over SSH on port 443 (`ssh.github.com`),
   since Railway blocks outbound port 22.
+- The calendar feed (if `CALENDAR_FEED_SECRET` is set) needs a public
+  domain generated for this service in the Railway dashboard — Railway
+  doesn't expose one by default just because a port is listening.
 
 ## Current phase status
 
