@@ -31,6 +31,7 @@ def _add_all_day_event(
     start: date,
     end: date | None = None,
     description: str | None = None,
+    status: str | None = None,
 ) -> None:
     event = Event()
     event.add("uid", uid)
@@ -41,7 +42,21 @@ def _add_all_day_event(
     event.add("dtend", (end or start) + timedelta(days=1))
     if description:
         event.add("description", description)
+    if status:
+        event.add("status", status)
     cal.add_component(event)
+
+
+# itinerary/goal `status` -> the RFC 5545 VEVENT STATUS calendar apps
+# actually render differently (e.g. Apple Calendar shows TENTATIVE events
+# distinctly) — a loose "maybe sometime in November" candidate plan
+# shouldn't look identical to a firm, decided one.
+_ICS_STATUS = {
+    "candidate": "TENTATIVE",
+    "planned": "CONFIRMED",
+    "current": "CONFIRMED",
+    "done": "CONFIRMED",
+}
 
 
 def _goal_events(cal: Calendar, goals_data: list[dict[str, Any]]) -> None:
@@ -74,12 +89,14 @@ def _itinerary_events(cal: Calendar, itinerary_data: list[dict[str, Any]]) -> No
         elif entry.get("target_window") and entry["target_window"][0]:
             window = entry["target_window"]
             end = window[-1] if len(window) > 1 and window[-1] else None
+            status = entry.get("status", "candidate")
             _add_all_day_event(
                 cal,
                 f"itin-target-{entry['id']}@daylog",
-                f"{place} ({entry.get('status', 'candidate')})",
+                f"{place} ({status})",
                 window[0],
                 end,
+                status=_ICS_STATUS.get(status),
             )
 
 

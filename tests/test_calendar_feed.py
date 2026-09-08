@@ -87,8 +87,22 @@ def test_build_feed_includes_itinerary_soft_window_as_ranged_event() -> None:
     assert len(events) == 1
     assert "Canggu, Bali, ID (current)" in str(events[0]["SUMMARY"])
     assert events[0]["DTSTART"].dt == date(2026, 8, 1)
-    # open-ended window: DTEND falls back to a single-day (exclusive) span
-    assert events[0]["DTEND"].dt == date(2026, 8, 2)
+    assert str(events[0]["STATUS"]) == "CONFIRMED"
+
+
+def test_build_feed_candidate_itinerary_is_tentative() -> None:
+    itinerary = [
+        {
+            "id": "flores",
+            "place": "Flores, Indonesia",
+            "type": "soft",
+            "status": "candidate",
+            "target_window": [date(2026, 11, 1), date(2026, 11, 15)],
+        }
+    ]
+    events = _events(build_feed([], itinerary, []))
+
+    assert str(events[0]["STATUS"]) == "TENTATIVE"
 
 
 def test_build_feed_includes_journal_entry() -> None:
