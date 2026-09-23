@@ -253,6 +253,42 @@ class ExtractError(RuntimeError):
     pass
 
 
+# Fields the schema declares as arrays. Observed failure mode: the model
+# returns a technically-valid tool_use.input whose "activities" value is
+# itself a JSON *string* encoding the entire intended payload (summary,
+# mood, goal_progress and all) rather than following the schema — nothing
+# in the SDK catches this, since `block.input` is already a parsed dict at
+# that point, just one whose value for this key is a string instead of a
+# list. Silently accepting it wrote that string straight into the vault as
+# the literal `activities` frontmatter value, corrupting the entry and
+# permanently losing whatever was buried in it (see journal 2026-09-16).
+# Reject outright instead of guessing how to unpack it — the caller
+# already turns an ExtractError into "try again," which is far better than
+# writing bad data no one notices until something downstream crashes.
+_ARRAY_FIELDS = (
+    "activities",
+    "goal_progress",
+    "goal_slips",
+    "itinerary_changes",
+    "corrections",
+    "other_day_notes",
+    "skipped",
+    "open_questions",
+)
+
+
+def _validate_shape(facts: dict[str, Any]) -> None:
+    for field in _ARRAY_FIELDS:
+        value = facts.get(field)
+        if value is not None and not isinstance(value, list):
+            raise ExtractError(
+                f"malformed tool call: {field!r} was {type(value).__name__}, not a list"
+            )
+    summary = facts.get("summary")
+    if not isinstance(summary, str) or not summary.strip():
+        raise ExtractError("malformed tool call: summary was missing or empty")
+
+
 def _format_goals(goals: list[dict[str, Any]]) -> str:
     if not goals:
         return "(no active goals)"
@@ -274,6 +310,30 @@ def _format_itinerary(itinerary: list[dict[str, Any]]) -> str:
             f"status: {entry.get('status', 'candidate')}{date_field}"
         )
     return "\n".join(lines)
+
+
+def _format_known_spots(places_data: list[dict[str, Any]]) -> str:
+    """Named surf/wind spots across every curated place, for grounding activity mentions.
+
+    Whisper transcribes an unusual local place name poorly often enough
+    that a garbled result (e.g. "Gerupuk" -> "group hook") gives the model
+    nothing to recognize — with no real name to anchor to, it can default
+    to a well-known place from general knowledge instead of the user's own
+    actual, obscure spot. Listing every curated name up front (regardless
+    of current location — a day trip elsewhere is exactly the case a
+    location filter would get wrong) gives it something concrete to match
+    a garbled mention against before falling back to a guess.
+    """
+    lines = []
+    for place in places_data:
+        for key in ("surf_spots", "wind_spots"):
+            for spot in place.get(key, []):
+                name = spot.get("name")
+                if not name:
+                    continue
+                break_type = f", {spot['break_type']}" if spot.get("break_type") else ""
+                lines.append(f"- {name} ({place.get('name', '?')}{break_type})")
+    return "\n".join(lines) if lines else "(none curated yet)"
 
 
 def _describe_activity(item: dict[str, Any]) -> str:
@@ -314,6 +374,7 @@ def extract(
     *,
     existing_frontmatter: dict[str, Any] | None = None,
     current_location: str | None = None,
+    places: list[dict[str, Any]] | None = None,
     client: anthropic.Anthropic | None = None,
 ) -> dict[str, Any]:
     """Extract structured journal facts from a raw transcript.
@@ -328,6 +389,9 @@ def extract(
     model can resolve `corrections` against it by index. `current_location`
     is what location.yaml says the user's base is right now, so the model
     can tell an actual move apart from a place already correctly recorded.
+    `places` is places.yaml's curated surf/wind spot names, so a garbled
+    transcription of an obscure real spot has something concrete to match
+    against instead of defaulting to a famous but wrong one.
 
     Returns a dict matching the journal frontmatter schema, plus a
     `summary` key the caller should pull out before writing to the vault.
@@ -343,6 +407,7 @@ def extract(
         f"{_format_existing_entry(existing_frontmatter)}\n\n"
         f"Current goals:\n{_format_goals(goals)}\n\n"
         f"Current itinerary:\n{_format_itinerary(itinerary)}\n\n"
+        f"Known surf/wind spots (from places.yaml):\n{_format_known_spots(places or [])}\n\n"
         f"Transcript:\n{transcript}"
     )
     messages: list[MessageParam] = [{"role": "user", "content": user_content}]
@@ -364,6 +429,8 @@ def extract(
 
     for block in response.content:
         if block.type == "tool_use":
-            return dict(block.input)
+            facts = dict(block.input)
+            _validate_shape(facts)
+            return facts
 
     raise ExtractError(f"no tool_use block in response (stop_reason={response.stop_reason})")
