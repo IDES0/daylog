@@ -136,3 +136,31 @@ def test_build_feed_journal_entry_without_activities_falls_back() -> None:
     events = _events(build_feed([], [], [entry]))
 
     assert str(events[0]["SUMMARY"]) == "journal entry"
+
+
+def test_build_feed_tolerates_malformed_non_list_activities() -> None:
+    # Reproduces a real production incident: a corrupted entry had
+    # `activities` as a JSON string instead of a list, which used to crash
+    # build_feed outright — taking down the *entire* calendar for every
+    # day, not just the one bad entry. One bad entry must degrade to a
+    # generic title, never crash the whole feed.
+    bad_entry = JournalEntry(
+        date=date(2026, 9, 16),
+        frontmatter={"activities": '{"activities": [{"type": "surf"}]}'},
+        transcript="raw",
+        summary="stuff happened",
+        raw="",
+    )
+    good_entry = JournalEntry(
+        date=date(2026, 9, 17),
+        frontmatter={"activities": [{"type": "surf"}]},
+        transcript="raw",
+        summary="Surfed.",
+        raw="",
+    )
+    events = _events(build_feed([], [], [bad_entry, good_entry]))
+
+    assert len(events) == 2
+    summaries = {str(e["SUMMARY"]) for e in events}
+    assert "journal entry" in summaries
+    assert "surf" in summaries

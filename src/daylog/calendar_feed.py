@@ -11,6 +11,7 @@ on daylog.
 
 from __future__ import annotations
 
+import logging
 import re
 from datetime import date, timedelta
 from typing import Any
@@ -18,6 +19,8 @@ from typing import Any
 from icalendar import Calendar, Event
 
 from daylog.vault import JournalEntry
+
+logger = logging.getLogger(__name__)
 
 PRODID = "-//daylog//daylog//EN"
 
@@ -112,10 +115,21 @@ def _journal_summary_line(entry: JournalEntry) -> str:
 def _journal_title(entry: JournalEntry) -> str:
     activities = entry.frontmatter.get("activities") or []
     types: list[str] = []
-    for activity in activities:
-        activity_type = activity.get("type")
-        if activity_type and activity_type not in types:
-            types.append(activity_type)
+    if isinstance(activities, list):
+        for activity in activities:
+            activity_type = activity.get("type") if isinstance(activity, dict) else None
+            if activity_type and activity_type not in types:
+                types.append(activity_type)
+    else:
+        # Legacy/malformed data (e.g. extraction once wrote a JSON string
+        # here instead of a list — see extract.py's _validate_shape) must
+        # never crash the whole feed over one bad day. Fall back to the
+        # generic title below rather than raise.
+        logger.warning(
+            "journal entry %s has non-list activities (%s) — using generic title",
+            entry.date,
+            type(activities).__name__,
+        )
     base = ", ".join(types) if types else "journal entry"
     location = entry.frontmatter.get("location")
     return f"{base} — {location}" if location else base
