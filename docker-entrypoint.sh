@@ -6,6 +6,15 @@
 # the common case, but a commit that landed locally and then failed to push
 # (see vault.py's offline handling) would be lost on the next restart
 # instead of retried. Mount a volume at VAULT_PATH in Railway to avoid that.
+#
+# On every boot, this also fast-forwards the existing clone onto the
+# remote before doing anything else. The bot itself never does this —
+# vault.py only talks to the remote reactively, fetching/rebasing when its
+# own push gets rejected — so a change made directly on the remote (e.g. a
+# manual data repair pushed from elsewhere) would otherwise sit invisible
+# to a long-running container until it happened to write something that
+# triggered a conflict. A restart is the one point where catching up for
+# free costs nothing.
 set -eu
 
 : "${VAULT_REPO_URL:?VAULT_REPO_URL is required (e.g. git@github.com:you/your-vault.git)}"
@@ -51,7 +60,18 @@ vault_is_healthy() {
 }
 
 if [ -d "$VAULT_PATH/.git" ] && vault_is_healthy; then
-    echo "Vault already present at $VAULT_PATH — flushing any commits stranded by a previous restart"
+    echo "Vault already present at $VAULT_PATH — syncing with the remote"
+    if git -C "$VAULT_PATH" fetch origin; then
+        # A clean fast-forward is a no-op when this clone is already
+        # current (the common case) and correctly does nothing when it has
+        # its own unpushed commits instead — that case is reconciled by the
+        # push/rebase logic below, which already handles it.
+        git -C "$VAULT_PATH" merge --ff-only origin/main 2>/dev/null || true
+    else
+        echo "git fetch failed, continuing with local vault state as-is" >&2
+    fi
+
+    echo "Flushing any commits stranded by a previous restart"
     if ! git -C "$VAULT_PATH" push; then
         # A rejected push here usually isn't network flakiness — it means the
         # remote moved ahead of what this clone last knew (e.g. a commit

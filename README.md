@@ -298,7 +298,12 @@ Railway, Dockerfile-based build (`railway.json`):
 - A persistent volume holds the local vault clone across restarts.
 - `docker-entrypoint.sh` checks the volume's git state is actually healthy
   (not just that `.git` exists) before deciding to reuse vs. re-clone —
-  guards against a corrupted state from an overlapping redeploy.
+  guards against a corrupted state from an overlapping redeploy. On every
+  boot it also fast-forwards onto the remote before anything else — the
+  bot itself only reconciles with the remote reactively (when its own
+  push is rejected), so a fix pushed directly to the vault from elsewhere
+  would otherwise sit invisible until the container happened to write
+  something that conflicted with it.
 - Git push to the vault goes over SSH on port 443 (`ssh.github.com`),
   since Railway blocks outbound port 22.
 - The calendar feed (if `CALENDAR_FEED_SECRET` is set) needs a public
