@@ -689,6 +689,7 @@ async def _log_entry(transcript: str, message: Message, context: ContextTypes.DE
             entry_time.date(),
             existing_frontmatter=existing_entry.frontmatter if existing_entry else None,
             current_location=current.get("place") if current else None,
+            places=vault.read_places(),
         )
         summary = facts.pop("summary", "")
 

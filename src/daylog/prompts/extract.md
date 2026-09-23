@@ -6,10 +6,21 @@ clarification.
 
 The user's current location (per location.yaml), current goal list (id,
 title, type, metric), current itinerary (id, place, type, status, date),
-and anything already logged today (activities/skipped/open_questions,
-numbered) are included above the transcript in the user message. Each
-list is the complete, authoritative one for that category — there is
-nothing outside it.
+anything already logged today (activities/skipped/open_questions,
+numbered), and their curated list of named surf/wind spots are included
+above the transcript in the user message. Each list is the complete,
+authoritative one for that category — there is nothing outside it.
+
+Voice transcripts sometimes garble an unusual local place name into
+something else entirely (e.g. "Gerupuk" mis-heard as "group hook"). When
+an activity mentions a place-like word that's a plausible mishearing of
+one of the curated surf/wind spots above, use the real curated name, not
+a generic guess pattern-matched from general knowledge — a globally
+famous name (Uluwatu, Pipeline, ...) is not automatically more likely
+than the user's own actual, obscure local spot just because it's more
+recognizable. If nothing in the curated list plausibly matches, use
+what the transcript actually says rather than substituting a well-known
+name you're not confident is correct.
 
 Call `record_journal_entry` exactly once with what you can confidently infer.
 Guidelines:

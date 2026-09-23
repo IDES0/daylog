@@ -148,7 +148,13 @@ src/daylog/
   extract.py       Transcript -> structured facts via one forced
                    tool-use Claude call (goal_progress, goal_slips,
                    itinerary_changes, corrections, location_change,
-                   other_day_notes).
+                   other_day_notes). Validates the returned shape before
+                   trusting it (a schema-obeying tool call can still put
+                   the wrong Python type in a field) and is grounded with
+                   places.yaml's curated spot names, so a garbled
+                   transcription of an obscure real place has something
+                   concrete to match against instead of defaulting to a
+                   famous but wrong one.
   dateparse.py     Deterministic (non-LLM) parsing for the small date-
                    override vocabulary — a control-flow signal, not
                    fact extraction, so it's exact rather than inferred.
