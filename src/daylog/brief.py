@@ -17,6 +17,7 @@ from typing import Any
 import anthropic
 from anthropic.types import MessageParam, WebSearchTool20260209Param
 
+from daylog.places import PlaceIndex, describe_for_brief
 from daylog.vault import Vault
 
 logger = logging.getLogger(__name__)
@@ -41,24 +42,6 @@ def current_location(location_data: Any) -> Any | None:
         if entry.get("to") is None:
             return entry
     return location_data[-1] if location_data else None
-
-
-def matching_place(places_data: Any, location_name: str) -> Any | None:
-    """The places.yaml entry for the region containing `location_name`, if any.
-
-    places.yaml entries are curated per region ("Lombok, Indonesia") while
-    location.yaml records specific spots ("Kuta, Lombok, ID"). Match the
-    region — the first component of the place name — against the
-    location's components. Countries are deliberately never compared:
-    "Komodo, Indonesia" must not match whichever Indonesian region happens
-    to come first in the file.
-    """
-    parts = {part.strip().lower() for part in location_name.split(",") if part.strip()}
-    for place in places_data or []:
-        region = str(place.get("name", "")).split(",")[0].strip().lower()
-        if region and region in parts:
-            return place
-    return None
 
 
 def _date_reference_table(today: date, days: int = 7) -> str:
@@ -145,69 +128,6 @@ def _format_itinerary(itinerary_data: Any) -> str:
     return "\n".join(lines) if lines else "(none)"
 
 
-def _format_checklist(checklist: Any) -> str:
-    lines = []
-    for item in checklist:
-        status = item.get("status", "todo")
-        dates = ""
-        item_dates = item.get("dates")
-        if item_dates and len(item_dates) > 1:
-            dates = f" ({item_dates[0]}–{item_dates[-1]})"
-        elif item_dates:
-            dates = f" ({item_dates[0]})"
-        notes = f" — {item['notes']}" if item.get("notes") else ""
-        lines.append(f"    - [{status}] {item.get('item', '?')}{dates}{notes}")
-    return "\n".join(lines)
-
-
-def _format_surf_spots(surf_spots: Any) -> str:
-    lines = []
-    for s in surf_spots:
-        break_type = s.get("break_type", "?")
-        swell = s.get("ideal_swell_direction")
-        swell_bit = f", ideal swell {swell}" if swell else ""
-        wind_dir = s.get("ideal_wind_direction")
-        wind_bit = f", ideal wind {wind_dir}" if wind_dir else ""
-        level = s.get("level")
-        level_bit = f", {level}" if level else ""
-        notes = f" — {s['notes']}" if s.get("notes") else ""
-        lines.append(
-            f"    - {s.get('name', '?')} ({break_type}{swell_bit}{wind_bit}{level_bit}){notes}"
-        )
-    return "\n".join(lines)
-
-
-def _format_wind_spots(wind_spots: Any) -> str:
-    lines = []
-    for s in wind_spots:
-        wind_dir = s.get("ideal_wind_direction")
-        wind_bit = f", ideal wind {wind_dir}" if wind_dir else ""
-        notes = f" — {s['notes']}" if s.get("notes") else ""
-        lines.append(f"    - {s.get('name', '?')} (wind spot{wind_bit}){notes}")
-    return "\n".join(lines)
-
-
-def _format_places(places_data: Any, current_place: Any | None = None) -> str:
-    """`current_place` is derived from location.yaml by the caller — never a
-    hand-set flag in places.yaml, which silently went stale when the user
-    moved on and led the brief to file other regions' spots under it."""
-    if not places_data:
-        return "(none curated yet)"
-    lines = []
-    for p in places_data:
-        activities = ", ".join(p.get("activities", [])) or "unspecified"
-        notes = f" — {p['notes']}" if p.get("notes") else ""
-        tag = " [current]" if current_place is not None and p is current_place else ""
-        lines.append(f"- {p.get('name', '?')}{tag}: {activities}{notes}")
-        if p.get("checklist"):
-            lines.append(_format_checklist(p["checklist"]))
-        if p.get("surf_spots"):
-            lines.append(_format_surf_spots(p["surf_spots"]))
-        if p.get("wind_spots"):
-            lines.append(_format_wind_spots(p["wind_spots"]))
-    return "\n".join(lines)
-
-
 def _format_profile(profile_data: Any) -> str:
     if not profile_data:
         return "(no profile set)"
@@ -233,7 +153,10 @@ def generate_brief(
 
     current = current_location(location_data)
     location_line = current.get("place", "unknown") if current else "unknown"
-    current_place = matching_place(places_data, location_line) if current else None
+    place_index = PlaceIndex(list(places_data or []))
+    current_place = place_index.current_place(current)
+    if current_place is not None:
+        location_line += f" (in the places tree: {place_index.path_name(current_place['id'])})"
 
     # marine_forecast may cover more than one spot (current location plus any
     # curated surf_spots nearby) — each spot's block is already labeled by
@@ -245,7 +168,7 @@ def generate_brief(
         f"Surfer profile:\n{_format_profile(profile_data)}\n\n"
         f"Goals:\n{_format_goals(goals_data)}\n\n"
         f"Itinerary:\n{_format_itinerary(itinerary_data)}\n\n"
-        f"Curated places knowledge:\n{_format_places(places_data, current_place)}\n\n"
+        f"Curated places knowledge:\n{describe_for_brief(place_index, current_place)}\n\n"
         f"Marine/swell forecast (current location and any nearby curated surf spots):\n"
         f"{marine_forecast or '(not coastal, or unavailable)'}\n\n"
         f"Wind forecast (current location and any nearby curated surf/wind spots):\n"

@@ -7,20 +7,24 @@ clarification.
 The user's current location (per location.yaml), current goal list (id,
 title, type, metric), current itinerary (id, place, type, status, date),
 anything already logged today (activities/skipped/open_questions,
-numbered), and their curated list of named surf/wind spots are included
-above the transcript in the user message. Each list is the complete,
-authoritative one for that category — there is nothing outside it.
+numbered), and the known places tree are included above the transcript in
+the user message. Each list is the complete, authoritative one for that
+category — there is nothing outside it.
 
-Voice transcripts sometimes garble an unusual local place name into
-something else entirely (e.g. "Gerupuk" mis-heard as "group hook"). When
-an activity mentions a place-like word that's a plausible mishearing of
-one of the curated surf/wind spots above, use the real curated name, not
-a generic guess pattern-matched from general knowledge — a globally
-famous name (Uluwatu, Pipeline, ...) is not automatically more likely
-than the user's own actual, obscure local spot just because it's more
-recognizable. If nothing in the curated list plausibly matches, use
-what the transcript actually says rather than substituting a well-known
-name you're not confident is correct.
+Linking places. Every activity (and meal) that happened somewhere
+specific gets linked:
+- If it matches a Known places entry, set `place` to that exact id. Match
+  on name or alias, and on meaning — "the peak" said while at Lakey is
+  `lakey-peak`. When a name exists in more than one region (Kuta is on
+  both Bali and Lombok), pick the one inside the region the user is in or
+  just described travelling to, never the more famous one.
+- If nothing in the list fits, leave `place` out and set `place_mention`
+  to the name as the user said it plus `place_kind`. Never invent an id.
+- Voice transcripts garble unusual local names ("Gerupuk" mis-heard as
+  "group hook"). A plausible mishearing of a known place is that place. A
+  globally famous name (Uluwatu, Pipeline, ...) is not more likely than
+  the user's own obscure local spot just because it's more recognizable.
+- A generic place with no name ("a beach", "the cafe") gets neither.
 
 Call `record_journal_entry` exactly once with what you can confidently infer.
 Guidelines:
@@ -41,6 +45,9 @@ Guidelines:
   resolve the region from the route the transcript describes (e.g.
   arriving from the Gili Islands by boat means Lombok) and from
   "Current location", never from which one is more famous.
+  Set `place_id` when the new base is in Known places. Use `mode: trip`
+  for a multi-day moving trip (a liveaboard, a multi-camp trek) and
+  `mode: transit` for a pure travel day; otherwise leave `mode` out.
   Include `lat`/`lon` only for a real, identifiable place you're
   genuinely confident about (approximate is fine, this is for regional
   swell/wind comparison, not navigation) — leave them out rather than

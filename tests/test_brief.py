@@ -63,14 +63,15 @@ def test_date_reference_table_labels_each_day_with_correct_weekday() -> None:
     assert "2026-08-29 (Saturday)" in table
 
 
-def test_format_places_tags_current_from_location_not_flag() -> None:
-    from daylog.brief import _format_places, matching_place
+def test_describe_for_brief_tags_current_region_from_location() -> None:
+    from daylog.places import PlaceIndex, describe_for_brief
 
-    places = [
-        {"name": "Lombok, Indonesia", "current": True},
-        {"name": "Sumbawa, Indonesia"},
-    ]
-    current = matching_place(places, "Lakey, Sumbawa, ID")
-    text = _format_places(places, current)
-    assert "- Sumbawa, Indonesia [current]" in text
-    assert "Lombok, Indonesia [current]" not in text
+    from .place_fixtures import tree
+
+    index = PlaceIndex(tree())
+    current = index.current_place({"place": "Kuta, Lombok, ID"})
+    text = describe_for_brief(index, current)
+    assert "- Lombok, Indonesia [current]" in text
+    assert "- Bali, Indonesia:" in text
+    assert "[todo] Dive the Gilis" in text
+    assert "Airport Rights [surf_spot]" in text

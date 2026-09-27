@@ -10,10 +10,38 @@ from typing import Any
 import anthropic
 from anthropic.types import MessageParam, ToolChoiceToolParam, ToolParam
 
+from daylog.places import KINDS, PlaceIndex, outline
+
 logger = logging.getLogger(__name__)
 
 MODEL = "claude-sonnet-5"
 PROMPT_PATH = Path(__file__).parent / "prompts" / "extract.md"
+
+# Shared by every journal list whose items happen somewhere (activities,
+# meals): a resolved id when the place is already known, the name as said
+# when it isn't — the research step resolves those later, with a confirm.
+_PLACE_LINK_PROPERTIES: dict[str, Any] = {
+    "place": {
+        "type": "string",
+        "description": (
+            "Id from Known places where this happened. Only an id copied from "
+            "that list — never invented."
+        ),
+    },
+    "place_mention": {
+        "type": "string",
+        "description": (
+            "When no Known places id fits: the place's name as the user said it "
+            "(corrected for obvious transcription garbling). Omit if no specific "
+            "place was named."
+        ),
+    },
+    "place_kind": {
+        "type": "string",
+        "enum": list(KINDS),
+        "description": "With place_mention only: what kind of place it seems to be.",
+    },
+}
 
 RECORD_JOURNAL_ENTRY_TOOL: ToolParam = {
     "name": "record_journal_entry",
@@ -43,6 +71,18 @@ RECORD_JOURNAL_ENTRY_TOOL: ToolParam = {
                         "type": "string",
                         "description": "Short current place name, e.g. 'Ubud, Bali, ID'.",
                     },
+                    "place_id": {
+                        "type": "string",
+                        "description": "The Known places id for this base, when one matches.",
+                    },
+                    "mode": {
+                        "type": "string",
+                        "enum": ["stay", "trip", "transit"],
+                        "description": (
+                            "'trip' for a multi-day moving trip (a liveaboard, a trek "
+                            "between camps), 'transit' for a travel day, else 'stay'."
+                        ),
+                    },
                     "lat": {
                         "type": "number",
                         "description": (
@@ -68,6 +108,7 @@ RECORD_JOURNAL_ENTRY_TOOL: ToolParam = {
                         },
                         "hours": {"type": "number", "description": "Approximate hours spent."},
                         "detail": {"type": "string", "description": "One-line specifics."},
+                        **_PLACE_LINK_PROPERTIES,
                     },
                     "required": ["type"],
                 },
@@ -312,30 +353,6 @@ def _format_itinerary(itinerary: list[dict[str, Any]]) -> str:
     return "\n".join(lines)
 
 
-def _format_known_spots(places_data: list[dict[str, Any]]) -> str:
-    """Named surf/wind spots across every curated place, for grounding activity mentions.
-
-    Whisper transcribes an unusual local place name poorly often enough
-    that a garbled result (e.g. "Gerupuk" -> "group hook") gives the model
-    nothing to recognize — with no real name to anchor to, it can default
-    to a well-known place from general knowledge instead of the user's own
-    actual, obscure spot. Listing every curated name up front (regardless
-    of current location — a day trip elsewhere is exactly the case a
-    location filter would get wrong) gives it something concrete to match
-    a garbled mention against before falling back to a guess.
-    """
-    lines = []
-    for place in places_data:
-        for key in ("surf_spots", "wind_spots"):
-            for spot in place.get(key, []):
-                name = spot.get("name")
-                if not name:
-                    continue
-                break_type = f", {spot['break_type']}" if spot.get("break_type") else ""
-                lines.append(f"- {name} ({place.get('name', '?')}{break_type})")
-    return "\n".join(lines) if lines else "(none curated yet)"
-
-
 def _describe_activity(item: dict[str, Any]) -> str:
     hours = f", {item['hours']:g}h" if item.get("hours") is not None else ""
     detail = f" — {item['detail']}" if item.get("detail") else ""
@@ -374,7 +391,8 @@ def extract(
     *,
     existing_frontmatter: dict[str, Any] | None = None,
     current_location: str | None = None,
-    places: list[dict[str, Any]] | None = None,
+    places: list[Any] | None = None,
+    current_location_entry: Any | None = None,
     client: anthropic.Anthropic | None = None,
 ) -> dict[str, Any]:
     """Extract structured journal facts from a raw transcript.
@@ -389,9 +407,11 @@ def extract(
     model can resolve `corrections` against it by index. `current_location`
     is what location.yaml says the user's base is right now, so the model
     can tell an actual move apart from a place already correctly recorded.
-    `places` is places.yaml's curated surf/wind spot names, so a garbled
-    transcription of an obscure real spot has something concrete to match
-    against instead of defaulting to a famous but wrong one.
+    `places` is the place tree's nodes, so every mention can be linked to
+    a real id — and a garbled transcription of an obscure real spot has
+    something concrete to match against instead of defaulting to a famous
+    but wrong one. `current_location_entry` (the open location.yaml entry)
+    focuses that list on the region the user is in.
 
     Returns a dict matching the journal frontmatter schema, plus a
     `summary` key the caller should pull out before writing to the vault.
@@ -400,6 +420,8 @@ def extract(
     system_prompt = PROMPT_PATH.read_text(encoding="utf-8")
 
     tool_choice: ToolChoiceToolParam = {"type": "tool", "name": "record_journal_entry"}
+    place_index = PlaceIndex(list(places or []))
+    focus = place_index.current_place(current_location_entry)
     user_content = (
         f"Today's date: {today.isoformat()}\n\n"
         f"Current location (per location.yaml): {current_location or '(not set)'}\n\n"
@@ -407,7 +429,8 @@ def extract(
         f"{_format_existing_entry(existing_frontmatter)}\n\n"
         f"Current goals:\n{_format_goals(goals)}\n\n"
         f"Current itinerary:\n{_format_itinerary(itinerary)}\n\n"
-        f"Known surf/wind spots (from places.yaml):\n{_format_known_spots(places or [])}\n\n"
+        f"Known places (id: name (kind) aka aliases; indented under their parent):\n"
+        f"{outline(place_index, focus)}\n\n"
         f"Transcript:\n{transcript}"
     )
     messages: list[MessageParam] = [{"role": "user", "content": user_content}]

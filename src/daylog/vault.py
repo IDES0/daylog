@@ -10,6 +10,7 @@ from __future__ import annotations
 import io
 import logging
 import subprocess
+import time
 from dataclasses import dataclass, field
 from datetime import date, datetime
 from pathlib import Path
@@ -23,16 +24,24 @@ _FRONTMATTER_KEY_ORDER = (
     "date",
     "location",
     "activities",
+    "meals",
+    "felt",
     "goal_progress",
     "skipped",
     "mood",
     "open_questions",
+    "reconciled",
 )
+
+# How often `sync()` may actually hit the remote. Every handler calls it,
+# so this bounds git traffic while still picking up a change pushed from
+# elsewhere (the research routine, a manual fix) within a minute.
+_SYNC_INTERVAL_SECONDS = 60
 
 # Frontmatter fields that get extended (list) or overwritten (scalar) when a
 # second entry lands on a day that already has one. Anything not listed here
 # is treated as a scalar (new value wins) when merging.
-_LIST_FIELDS_EXTEND = ("activities", "goal_progress")
+_LIST_FIELDS_EXTEND = ("activities", "meals", "felt", "goal_progress")
 _LIST_FIELDS_DEDUPE = ("skipped", "open_questions")
 
 
@@ -147,7 +156,7 @@ class Vault:
         _yaml().dump(goals, buf)
         self.goals_path.write_text(buf.getvalue(), encoding="utf-8")
 
-        self._commit(self.goals_path, commit_message)
+        self._commit(self.goals_path, message=commit_message)
         self._push()
         return self.goals_path
 
@@ -168,19 +177,90 @@ class Vault:
         _yaml().dump(itinerary, buf)
         self.itinerary_path.write_text(buf.getvalue(), encoding="utf-8")
 
-        self._commit(self.itinerary_path, commit_message)
+        self._commit(self.itinerary_path, message=commit_message)
         self._push()
         return self.itinerary_path
 
-    @property
-    def places_path(self) -> Path:
-        return self.path / "places.yaml"
+    # -- places -----------------------------------------------------------
 
-    def read_places(self) -> Any:
-        """Load places.yaml — hand-curated destination knowledge, read-only for now."""
-        if not self.places_path.exists():
+    @property
+    def places_dir(self) -> Path:
+        return self.path / "places"
+
+    def read_place_files(self) -> dict[str, Any]:
+        """places/<file>.yaml -> its live ruamel list of nodes, keyed by file stem.
+
+        Mutate a node in place and hand the same dict back to
+        `write_place_files` — see read_goals for why the live structure
+        matters (hand-written comments survive).
+        """
+        if not self.places_dir.exists():
+            return {}
+        files: dict[str, Any] = {}
+        for path in sorted(self.places_dir.glob("*.yaml")):
+            files[path.stem] = _yaml().load(path.read_text(encoding="utf-8")) or []
+        return files
+
+    def read_places(self) -> list[Any]:
+        """Every place node across all places/ files, as one flat list."""
+        return [node for nodes in self.read_place_files().values() for node in nodes]
+
+    def write_place_files(
+        self, files: dict[str, Any], changed: set[str], commit_message: str
+    ) -> list[Path]:
+        """Write the named files from `files` (all of them must be keys) and commit once."""
+        self.places_dir.mkdir(parents=True, exist_ok=True)
+        paths = []
+        for stem in sorted(changed):
+            path = self.places_dir / f"{stem}.yaml"
+            self._dump(files[stem], path)
+            paths.append(path)
+        self._commit(*paths, message=commit_message)
+        self._push()
+        return paths
+
+    # -- generic yaml docs (rankings, usage, ...) ----------------------------
+
+    def read_yaml(self, name: str, default: Any) -> Any:
+        path = self.path / name
+        if not path.exists():
+            return default
+        loaded = _yaml().load(path.read_text(encoding="utf-8"))
+        return default if loaded is None else loaded
+
+    def write_yaml(self, name: str, data: Any, commit_message: str) -> Path:
+        path = self.path / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        self._dump(data, path)
+        self._commit(path, message=commit_message)
+        self._push()
+        return path
+
+    # -- markdown docs (research, plans, reviews) ------------------------------
+
+    def read_text(self, name: str) -> str | None:
+        path = self.path / name
+        return path.read_text(encoding="utf-8") if path.exists() else None
+
+    def list_docs(self, folder: str) -> list[str]:
+        """Relative paths of markdown files under `folder`, newest name last."""
+        base = self.path / folder
+        if not base.exists():
             return []
-        return _yaml().load(self.places_path.read_text(encoding="utf-8"))
+        return sorted(str(p.relative_to(self.path)) for p in base.glob("*.md"))
+
+    def write_text(self, name: str, text: str, commit_message: str) -> Path:
+        path = self.path / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text, encoding="utf-8")
+        self._commit(path, message=commit_message)
+        self._push()
+        return path
+
+    def _dump(self, data: Any, path: Path) -> None:
+        buf = io.StringIO()
+        _yaml().dump(data, buf)
+        path.write_text(buf.getvalue(), encoding="utf-8")
 
     @property
     def location_path(self) -> Path:
@@ -199,6 +279,8 @@ class Vault:
         lon: float | None,
         on: date,
         commit_message: str,
+        place_id: str | None = None,
+        mode: str | None = None,
     ) -> Path:
         """Close whichever entry is currently open (`to: null`) as of `on`, and open a new one.
 
@@ -213,6 +295,10 @@ class Vault:
                 entry["to"] = on
 
         new_entry: dict[str, Any] = {"place": place}
+        if place_id:
+            new_entry["place_id"] = place_id
+        if mode and mode != "stay":
+            new_entry["mode"] = mode
         if lat is not None:
             new_entry["lat"] = lat
         if lon is not None:
@@ -225,7 +311,7 @@ class Vault:
         _yaml().dump(locations, buf)
         self.location_path.write_text(buf.getvalue(), encoding="utf-8")
 
-        self._commit(self.location_path, commit_message)
+        self._commit(self.location_path, message=commit_message)
         self._push()
         return self.location_path
 
@@ -279,7 +365,7 @@ class Vault:
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text(body, encoding="utf-8")
 
-        self._commit(target, commit_message)
+        self._commit(target, message=commit_message)
         self._push()
         return target
 
@@ -314,7 +400,7 @@ class Vault:
             self._render_journal(entry.frontmatter, entry.transcript, entry.summary),
             encoding="utf-8",
         )
-        self._commit(target, commit_message)
+        self._commit(target, message=commit_message)
         self._push()
         return target
 
@@ -331,6 +417,51 @@ class Vault:
             summary=summary,
             raw=raw,
         )
+
+    def read_journal_range(self, start: date, end: date) -> dict[date, JournalEntry]:
+        """Every entry dated start..end inclusive. A file that fails to parse is
+        skipped and logged, never fatal — one bad day must not hide the rest."""
+        out: dict[date, JournalEntry] = {}
+        for entry_date in self.list_journal_dates():
+            if not (start <= entry_date <= end):
+                continue
+            try:
+                entry = self.read_journal_entry(entry_date)
+            except Exception:
+                logger.exception("skipping unparseable journal entry %s", entry_date)
+                continue
+            if entry is not None:
+                out[entry_date] = entry
+        return out
+
+    def rewrite_journal_entry(
+        self,
+        entry_date: date,
+        frontmatter: dict[str, Any],
+        commit_message: str,
+        summary: str | None = None,
+    ) -> Path:
+        """Replace an existing entry's frontmatter (and optionally its summary).
+
+        The transcript is never touched — it's the user's own words and the
+        source everything else is re-derivable from. Used by place linking
+        and the end-of-day reconcile, which rebuild the derived parts.
+        """
+        entry = self.read_journal_entry(entry_date)
+        if entry is None:
+            raise VaultError(f"no journal entry for {entry_date.isoformat()} to rewrite")
+        target = self.journal_path(entry_date)
+        target.write_text(
+            self._render_journal(
+                {**frontmatter, "date": entry_date},
+                entry.transcript,
+                entry.summary if summary is None else summary,
+            ),
+            encoding="utf-8",
+        )
+        self._commit(target, message=commit_message)
+        self._push()
+        return target
 
     def _render_journal(self, frontmatter: dict[str, Any], transcript: str, summary: str) -> str:
         ordered = {
@@ -377,6 +508,31 @@ class Vault:
 
     # -- git -----------------------------------------------------------
 
+    _last_sync: float = 0.0
+
+    def sync(self, force: bool = False) -> None:
+        """Catch up with the remote, at most once a minute unless `force`.
+
+        Other writers push to the vault too (the scheduled research routine,
+        a manual fix). Before this, the bot only saw their changes after a
+        restart. Fast-forward when possible; with local unpushed commits,
+        rebase them on top. A failure is logged and ignored — stale data
+        for a minute is better than a failed handler.
+        """
+        now = time.monotonic()
+        if not force and now - Vault._last_sync < _SYNC_INTERVAL_SECONDS:
+            return
+        Vault._last_sync = now
+        fetch = self._run_git("fetch", "origin")
+        if fetch.returncode != 0:
+            logger.warning("vault sync: fetch failed: %s", _describe(fetch))
+            return
+        merge = self._run_git("merge", "--ff-only", "origin/main")
+        if merge.returncode == 0:
+            return
+        if self._reconcile_with_remote():
+            self._push()
+
     def _run_git(self, *args: str) -> subprocess.CompletedProcess[str]:
         return subprocess.run(
             ["git", "-C", str(self.path), *args],
@@ -385,8 +541,12 @@ class Vault:
             check=False,
         )
 
-    def _commit(self, changed_path: Path, message: str) -> None:
-        add = self._run_git("add", str(changed_path))
+    def _commit(self, *changed_paths: Path, message: str) -> None:
+        # git -C resolves pathspecs against the vault dir, so a relative
+        # VAULT_PATH ("../daylog-vault") would otherwise be applied twice.
+        root = self.path.resolve()
+        relative = [str(p.resolve().relative_to(root)) for p in changed_paths]
+        add = self._run_git("add", "--", *relative)
         if add.returncode != 0:
             raise VaultError(f"git add failed: {_describe(add)}")
 
@@ -400,7 +560,7 @@ class Vault:
                 # already reached — most likely a duplicate write (e.g.
                 # Telegram redelivering an update after a restart re-applies
                 # an already-saved change). That's not a failure to raise.
-                logger.info("nothing to commit for %s — write was a no-op", changed_path)
+                logger.info("nothing to commit for %s — write was a no-op", changed_paths)
                 return
             raise VaultError(f"git commit failed: {reason}")
 

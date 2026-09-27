@@ -172,9 +172,9 @@ def test_commit_noop_does_not_raise(vault: Vault) -> None:
     # change). That's an already-achieved no-op, not a failure.
     target = vault.path / "unchanged.txt"
     target.write_text("x", encoding="utf-8")
-    vault._commit(target, "seed")  # first commit succeeds, nothing left to stage next time
+    vault._commit(target, message="seed")  # first commit succeeds, nothing left to stage next time
 
-    vault._commit(target, "no-op")  # must not raise
+    vault._commit(target, message="no-op")  # must not raise
 
     log = subprocess.run(
         ["git", "log", "-1", "--pretty=%s"],
@@ -538,3 +538,71 @@ def test_list_journal_dates_skips_non_date_filenames(vault: Vault) -> None:
     (vault.path / "journal" / "notes.md").write_text("x", encoding="utf-8")
 
     assert vault.list_journal_dates() == [ENTRY_TIME.date()]
+
+
+def test_place_files_round_trip_and_commit_together(vault: Vault) -> None:
+    files = {
+        "lombok": [{"id": "lombok", "name": "Lombok", "kind": "region"}],
+        "_world": [{"id": "indonesia", "name": "Indonesia", "kind": "country"}],
+    }
+    vault.write_place_files(files, {"lombok", "_world"}, "places: seed")
+
+    assert {n["id"] for n in vault.read_places()} == {"lombok", "indonesia"}
+    loaded = vault.read_place_files()
+    loaded["lombok"].append({"id": "kuta", "name": "Kuta", "kind": "town", "parent": "lombok"})
+    vault.write_place_files(loaded, {"lombok"}, "places: add kuta")
+    assert "kuta" in {n["id"] for n in vault.read_places()}
+    log = subprocess.run(
+        ["git", "-C", str(vault.path), "log", "--oneline"], capture_output=True, text=True
+    ).stdout
+    assert "places: add kuta" in log and "places: seed" in log
+
+
+def test_rewrite_journal_entry_keeps_transcript(vault: Vault) -> None:
+    when = datetime(2026, 9, 16, 21, 0)
+    vault.write_journal_entry(when, {"activities": [{"type": "surf"}]}, "raw words", "Surfed.")
+    vault.rewrite_journal_entry(
+        when.date(),
+        {"activities": [{"type": "surf", "place": "gerupuk"}]},
+        "journal: link places",
+        summary="Surfed Gerupuk.",
+    )
+    entry = vault.read_journal_entry(when.date())
+    assert entry is not None
+    assert entry.transcript == "### 21:00\n\nraw words"
+    assert entry.summary == "Surfed Gerupuk."
+    assert entry.frontmatter["activities"][0]["place"] == "gerupuk"
+
+
+def test_read_journal_range_is_inclusive(vault: Vault) -> None:
+    for day in (14, 15, 16):
+        vault.write_journal_entry(datetime(2026, 9, day, 9, 0), {}, "t", f"day {day}")
+    entries = vault.read_journal_range(date(2026, 9, 15), date(2026, 9, 16))
+    assert sorted(entries) == [date(2026, 9, 15), date(2026, 9, 16)]
+
+
+def test_sync_fast_forwards_onto_remote_changes(
+    vault_with_remote: tuple[Vault, Path], tmp_path: Path
+) -> None:
+    vault, remote = vault_with_remote
+    other = tmp_path / "other"
+    subprocess.run(["git", "clone", str(remote), str(other)], check=True, capture_output=True)
+    subprocess.run(["git", "-C", str(other), "config", "user.email", "o@x"], check=True)
+    subprocess.run(["git", "-C", str(other), "config", "user.name", "O"], check=True)
+    (other / "research").mkdir()
+    (other / "research" / "lakey.md").write_text("# Lakey\n")
+    subprocess.run(["git", "-C", str(other), "add", "."], check=True)
+    subprocess.run(["git", "-C", str(other), "commit", "-qm", "research"], check=True)
+    subprocess.run(["git", "-C", str(other), "push", "-q"], check=True, capture_output=True)
+
+    vault.sync(force=True)
+    assert vault.read_text("research/lakey.md") == "# Lakey\n"
+
+
+def test_commit_works_with_a_relative_vault_path(
+    vault_repo: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.chdir(vault_repo.parent)
+    relative = Vault(Path(vault_repo.name))
+    relative.write_yaml("rankings.yaml", {"food": []}, "rankings: seed")
+    assert relative.read_yaml("rankings.yaml", None) == {"food": []}

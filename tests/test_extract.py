@@ -2,19 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from daylog.extract import ExtractError, _format_known_spots, _validate_shape
-
-_PLACES = [
-    {
-        "name": "Lombok, Indonesia",
-        "surf_spots": [
-            {"name": "Gerupuk (Inside Right)", "break_type": "right"},
-            {"name": "Ekas Bay (Inside)", "break_type": "right/left peak"},
-        ],
-        "wind_spots": [{"name": "Kuta (wind foiling)"}],
-    },
-    {"name": "Siargao, Philippines", "surf_spots": [{"name": "Cloud 9", "break_type": "right"}]},
-]
+from daylog.extract import ExtractError, _validate_shape
 
 
 def test_validate_shape_accepts_well_formed_facts() -> None:
@@ -44,13 +32,3 @@ def test_validate_shape_allows_absent_optional_array_fields() -> None:
     # goal_progress, corrections, etc. are legitimately omitted most of the
     # time — only a present-but-wrong-typed value should raise.
     _validate_shape({"activities": [], "summary": "x"})  # must not raise
-
-
-def test_format_known_spots_lists_name_and_break_type() -> None:
-    text = _format_known_spots(_PLACES)
-    assert "Gerupuk (Inside Right) (Lombok, Indonesia, right)" in text
-    assert "Cloud 9 (Siargao, Philippines, right)" in text
-
-
-def test_format_known_spots_empty_list() -> None:
-    assert _format_known_spots([]) == "(none curated yet)"

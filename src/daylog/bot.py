@@ -30,8 +30,9 @@ from telegram.ext import (
     filters,
 )
 
-from daylog import brief, calendar_server, extract, goals, itinerary, transcribe
+from daylog import brief, calendar_server, extract, goals, itinerary, trail, transcribe
 from daylog.dateparse import parse_date_phrase
+from daylog.places import PlaceIndex
 from daylog.sources import marine, wind
 from daylog.vault import CorrectionConflictError, Vault, VaultError
 
@@ -48,7 +49,10 @@ def _allowed_user_id() -> int:
 
 
 def _vault() -> Vault:
-    return Vault(Path(os.environ.get("VAULT_PATH", "../daylog-vault")))
+    """The vault, caught up with the remote (throttled — see Vault.sync)."""
+    vault = Vault(Path(os.environ.get("VAULT_PATH", "../daylog-vault")))
+    vault.sync()
+    return vault
 
 
 def _tz() -> ZoneInfo:
@@ -280,12 +284,110 @@ async def upcoming(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     await message.reply_text("\n".join(lines) if lines else "Nothing dated yet.")
 
 
+def _trail_range(args: list[str], today: date, location_data: Any) -> tuple[date, date]:
+    """/trail -> last 30 days; /trail 60 -> last 60; /trail all -> since the first stay."""
+    if args and args[0].lower() == "all":
+        starts = [s.start for s in trail.stays(location_data)]
+        return (min(starts) if starts else today - timedelta(days=30)), today
+    days = int(args[0]) if args and args[0].isdigit() else 30
+    return today - timedelta(days=days - 1), today
+
+
+async def trail_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not _is_authorized(update):
+        return
+    message = update.message
+    assert message is not None
+    vault = _vault()
+    today = datetime.now(_tz()).date()
+    location_data = vault.read_location()
+    start, end = _trail_range(list(context.args or []), today, location_data)
+    entries = vault.read_journal_range(start, end)
+    days = trail.build(
+        location_data,
+        {d: e.frontmatter for d, e in entries.items()},
+        {d: e.summary for d, e in entries.items()},
+        start,
+        end,
+    )
+    text = trail.format_trail(days, PlaceIndex(vault.read_places()))
+    for chunk in _chunks(text):
+        await message.reply_text(chunk)
+
+
+def _format_place_card(
+    index: PlaceIndex, node: Any, visited: list[date], rank_line: str | None
+) -> str:
+    lines = [f"{node.get('name')} — {node.get('kind')}", index.path_name(node["id"])]
+    if node.get("description"):
+        lines += ["", str(node["description"]).strip()]
+    facts = node.get("facts") or {}
+    if facts:
+        lines += [""] + [f"{k}: {v}" for k, v in facts.items() if v]
+    if node.get("notes"):
+        lines += ["", str(node["notes"]).strip()]
+    if rank_line:
+        lines += ["", rank_line]
+    if visited:
+        lines += ["", "Visited: " + ", ".join(d.isoformat() for d in visited)]
+    for note in node.get("my_notes") or []:
+        lines.append(f"- {note.get('date')}: {note.get('text')}")
+    children = index.descendants(node["id"])
+    if children:
+        lines += ["", "Inside: " + ", ".join(str(c.get("name")) for c in children[:30])]
+    return "\n".join(lines)
+
+
+async def place_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not _is_authorized(update):
+        return
+    message = update.message
+    assert message is not None
+    query = " ".join(context.args or []).strip()
+    if not query:
+        await message.reply_text("Usage: /place <name>, e.g. /place Lakey Peak")
+        return
+    vault = _vault()
+    index = PlaceIndex(vault.read_places())
+    matches = index.resolve(query)
+    if not matches:
+        needle = query.lower()
+        matches = [i for i, n in index.by_id.items() if needle in str(n.get("name", "")).lower()]
+    if not matches:
+        await message.reply_text(f"No place matching '{query}' yet.")
+        return
+    today = datetime.now(_tz()).date()
+    entries = vault.read_journal_range(date(2000, 1, 1), today)
+    visited = trail.visits({d: e.frontmatter for d, e in entries.items()}, index)
+    node = index.by_id[matches[0]]
+    card = _format_place_card(index, node, visited.get(node["id"], []), None)
+    if len(matches) > 1:
+        others = ", ".join(index.path_name(m) for m in matches[1:5])
+        card += f"\n\nAlso matching: {others}"
+    for chunk in _chunks(card):
+        await message.reply_text(chunk)
+
+
+def _chunks(text: str, limit: int = 4000) -> list[str]:
+    """Split on line boundaries under Telegram's 4096-char message limit."""
+    chunks: list[str] = []
+    current = ""
+    for line in text.splitlines(keepends=True):
+        if len(current) + len(line) > limit and current:
+            chunks.append(current)
+            current = ""
+        current += line
+    if current:
+        chunks.append(current)
+    return chunks or [""]
+
+
 def _brief_hour() -> int:
     return int(os.environ.get("BRIEF_HOUR", "7"))
 
 
 def _relevant_spots(current: dict[str, Any] | None, places_data: Any) -> list[dict[str, Any]]:
-    """Current location plus any curated surf_spots/wind_spots for the matching place.
+    """Current location plus every surf/wind spot with coordinates in its region.
 
     Comparing multiple nearby spots (not just where the user happens to be
     standing) is the point — swell or wind can be building somewhere better
@@ -301,17 +403,11 @@ def _relevant_spots(current: dict[str, Any] | None, places_data: Any) -> list[di
             "lon": current["lon"],
         }
     ]
-    place = brief.matching_place(places_data, str(current.get("place", "")))
-    for key in ("surf_spots", "wind_spots"):
-        for spot in (place or {}).get(key, []):
-            if spot.get("lat") is not None and spot.get("lon") is not None:
-                spots.append(
-                    {
-                        "name": spot.get("name", "nearby spot"),
-                        "lat": spot["lat"],
-                        "lon": spot["lon"],
-                    }
-                )
+    index = PlaceIndex(list(places_data or []))
+    for spot in index.forecast_spots(index.current_place(current)):
+        spots.append(
+            {"name": spot.get("name", "nearby spot"), "lat": spot["lat"], "lon": spot["lon"]}
+        )
     return spots
 
 
@@ -671,6 +767,7 @@ async def _log_entry(transcript: str, message: Message, context: ContextTypes.DE
             existing_frontmatter=existing_entry.frontmatter if existing_entry else None,
             current_location=current.get("place") if current else None,
             places=vault.read_places(),
+            current_location_entry=current,
         )
         summary = facts.pop("summary", "")
 
@@ -699,6 +796,8 @@ async def _log_entry(transcript: str, message: Message, context: ContextTypes.DE
                     location_change.get("lon"),
                     entry_time.date(),
                     f"location: {location_change['place']}",
+                    place_id=location_change.get("place_id"),
+                    mode=location_change.get("mode"),
                 )
                 location_note = f"\n\n(Updated current location to {location_change['place']})"
             except VaultError:
@@ -858,6 +957,8 @@ async def _post_init(application: Application) -> None:  # type: ignore[type-arg
             BotCommand("upcoming", "Show dated goals/itinerary, earliest first"),
             BotCommand("brief", "Get a daily brief now"),
             BotCommand("backdate", "Log your next message under a recent past date"),
+            BotCommand("trail", "Where you've been (/trail, /trail 60, /trail all)"),
+            BotCommand("place", "What's known about a place (/place Lakey Peak)"),
         ]
     )
 
@@ -870,6 +971,8 @@ def build_application() -> Application:  # type: ignore[type-arg]
     application.add_handler(CommandHandler("upcoming", upcoming))
     application.add_handler(CommandHandler("brief", brief_command))
     application.add_handler(CommandHandler("backdate", backdate_command))
+    application.add_handler(CommandHandler("trail", trail_command))
+    application.add_handler(CommandHandler("place", place_command))
     application.add_handler(MessageHandler(filters.VOICE, handle_voice))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
     application.add_handler(CallbackQueryHandler(handle_goal_slip_callback, pattern=r"^goalslip:"))
