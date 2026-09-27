@@ -33,9 +33,10 @@ _PLACE_LINK_PROPERTIES: dict[str, Any] = {
     "place_mention": {
         "type": "string",
         "description": (
-            "When no Known places id fits: the place's name as the user said it "
-            "(corrected for obvious transcription garbling). Omit if no specific "
-            "place was named."
+            "When no Known places id fits: the place's proper name as the user "
+            "said it (corrected for obvious transcription garbling). Only a real "
+            "name — never a description like 'near Lakey' or 'a cafe'. Omit if "
+            "no specific place was named."
         ),
     },
     "place_kind": {
