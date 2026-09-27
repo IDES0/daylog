@@ -24,7 +24,7 @@ from typing import Any
 import anthropic
 from anthropic.types import MessageParam, ToolParam
 
-from daylog import brief, goals, llm, rankings, trail
+from daylog import brief, edits, goals, llm, rankings, trail
 from daylog.places import PlaceIndex
 from daylog.vault import Vault
 
@@ -109,6 +109,105 @@ TOOLS: list[ToolParam] = [
             "summary": {"type": "string", "description": "One line shown on the confirm card."},
         },
         ["summary"],
+    ),
+    _tool(
+        "propose_place_edit",
+        "Rename a place (old name is kept as an alias), add/remove aliases, change its "
+        "kind or parent (which region/town it's in), set coordinates or description. "
+        "The user confirms with a button.",
+        {
+            "place_id": {"type": "string"},
+            "name": {"type": "string", "description": "New name."},
+            "add_aliases": {"type": "array", "items": {"type": "string"}},
+            "remove_aliases": {"type": "array", "items": {"type": "string"}},
+            "kind": {"type": "string"},
+            "parent_id": {"type": "string"},
+            "lat": {"type": "number"},
+            "lon": {"type": "number"},
+            "description": {"type": "string"},
+            "summary": {"type": "string", "description": "One line for the confirm card."},
+        },
+        ["place_id", "summary"],
+    ),
+    _tool(
+        "propose_merge_places",
+        "Two ids are the same real place: fold source into target (names become aliases, "
+        "journal links and rankings move to target, source is removed).",
+        {
+            "source_id": {"type": "string"},
+            "target_id": {"type": "string"},
+            "summary": {"type": "string"},
+        },
+        ["source_id", "target_id", "summary"],
+    ),
+    _tool(
+        "propose_delete_place",
+        "Delete a place that isn't real. Refused if journal days link to it (merge instead).",
+        {"place_id": {"type": "string"}, "summary": {"type": "string"}},
+        ["place_id", "summary"],
+    ),
+    _tool(
+        "propose_journal_edit",
+        "Change a past day's record: update, remove or add one item in activities, meals, "
+        "felt, skipped or open_questions. Read the day with get_journal first to get the "
+        '0-based index. `values` holds the fields to set (e.g. {"hours": 2} or '
+        '{"place": "compass-warung"}); null removes a field. For skipped/'
+        'open_questions use {"text": ...}. Goal totals are not touched — use '
+        "propose_goal_edit for those.",
+        {
+            "date": {"type": "string"},
+            "field": {
+                "type": "string",
+                "enum": ["activities", "meals", "felt", "skipped", "open_questions"],
+            },
+            "action": {"type": "string", "enum": ["update", "remove", "add"]},
+            "index": {"type": "integer"},
+            "values": {"type": "object"},
+            "summary": {"type": "string"},
+        },
+        ["date", "field", "action", "summary"],
+    ),
+    _tool(
+        "propose_location_edit",
+        "Fix where the user was based: add a stay, or update/remove one by its 0-based "
+        "index in the trail (get_trail). Dates are ISO; `to` empty means still there.",
+        {
+            "action": {"type": "string", "enum": ["add", "update", "remove"]},
+            "index": {"type": "integer"},
+            "place": {"type": "string"},
+            "place_id": {"type": "string"},
+            "from": {"type": "string"},
+            "to": {"type": "string"},
+            "mode": {"type": "string", "enum": ["stay", "trip", "transit"]},
+            "summary": {"type": "string"},
+        },
+        ["action", "summary"],
+    ),
+    _tool(
+        "propose_goal_edit",
+        "Create a goal (omit goal_id, give title) or change one: title, metric, target, "
+        "progress_delta (e.g. +10 applications not logged), date (deadline or target), "
+        "status (active/done/dropped).",
+        {
+            "goal_id": {"type": "string"},
+            "title": {"type": "string"},
+            "type": {"type": "string", "enum": ["hard", "soft"]},
+            "metric": {"type": "string"},
+            "target": {"type": "number"},
+            "progress_delta": {"type": "number"},
+            "date": {"type": "string"},
+            "status": {"type": "string", "enum": ["active", "done", "dropped"]},
+            "notes": {"type": "string"},
+            "summary": {"type": "string"},
+        },
+        ["summary"],
+    ),
+    _tool(
+        "start_ranking",
+        "Send the user the rank-it buttons (tier, then head-to-heads) for a place, to "
+        "rank or re-rank it.",
+        {"place_id": {"type": "string"}},
+        ["place_id"],
     ),
     _tool(
         "start_research",
@@ -255,12 +354,85 @@ class Tools:
         return f"No place with id {place_id}."
 
     def t_propose_itinerary_change(self, **change: Any) -> str:
-        self.proposals.append(change)
+        self.proposals.append({"edit": "itinerary", **change})
         return "Proposed — the user will see a confirm button after your reply."
+
+    def _propose(self, kind: str, change: dict[str, Any]) -> str:
+        """Dry-run the edit on copies so a bad proposal fails now, with a reason
+        the model can act on, instead of on the user's tap."""
+        try:
+            edits_preview(self.v, kind, change, self.today)
+        except edits.EditError as exc:
+            return f"Can't propose that: {exc}"
+        self.proposals.append({"edit": kind, **change})
+        return "Proposed — the user will see a confirm button after your reply."
+
+    def t_propose_place_edit(self, **change: Any) -> str:
+        return self._propose("place", change)
+
+    def t_propose_merge_places(self, **change: Any) -> str:
+        return self._propose("merge", change)
+
+    def t_propose_delete_place(self, **change: Any) -> str:
+        return self._propose("delete_place", change)
+
+    def t_propose_journal_edit(self, **change: Any) -> str:
+        return self._propose("journal", change)
+
+    def t_propose_location_edit(self, **change: Any) -> str:
+        return self._propose("location", change)
+
+    def t_propose_goal_edit(self, **change: Any) -> str:
+        return self._propose("goal", change)
+
+    def t_start_ranking(self, place_id: str) -> str:
+        if place_id not in self.index.by_id:
+            return f"No place with id {place_id}."
+        self.research_jobs.append({"job": "rank", "place": place_id})
+        return "Ranking buttons will be sent after your reply."
 
     def t_start_research(self, job: str, place_or_name: str = "") -> str:
         self.research_jobs.append({"job": job, "place": place_or_name})
         return "Started — results arrive as separate messages."
+
+
+def edits_preview(v: Vault, kind: str, change: dict[str, Any], today: date) -> str:
+    """Apply an edit to deep copies of the vault data; raises EditError if it can't apply."""
+    import copy
+
+    if kind == "place":
+        return edits.edit_place(copy.deepcopy(v.read_place_files()), change)[1]
+    if kind == "merge":
+        return edits.merge_places(
+            copy.deepcopy(v.read_place_files()),
+            str(change.get("source_id")),
+            str(change.get("target_id")),
+        )[1]
+    if kind == "delete_place":
+        linked = linked_days(v, str(change.get("place_id")), today)
+        return edits.delete_place(
+            copy.deepcopy(v.read_place_files()), str(change.get("place_id")), linked
+        )[1]
+    if kind == "journal":
+        try:
+            day = date.fromisoformat(str(change.get("date")))
+        except ValueError as exc:
+            raise edits.EditError(f"bad date {change.get('date')!r}") from exc
+        entry = v.read_journal_entry(day)
+        if entry is None:
+            raise edits.EditError(f"no journal entry for {day}")
+        known = {n["id"] for n in v.read_places()}
+        return edits.edit_journal(copy.deepcopy(entry.frontmatter), change, known)
+    if kind == "location":
+        return edits.edit_location(copy.deepcopy(list(v.read_location())), change)
+    if kind == "goal":
+        return edits.edit_goal(copy.deepcopy(list(v.read_goals())), change, today)
+    raise edits.EditError(f"unknown edit kind {kind!r}")
+
+
+def linked_days(v: Vault, place_id: str, today: date) -> list[date]:
+    journal = v.read_journal_range(date(2000, 1, 1), today)
+    return trail.visits({d: e.frontmatter for d, e in journal.items()}).get(place_id, [])
 
 
 def context_block(v: Vault, today: date, now: datetime) -> str:

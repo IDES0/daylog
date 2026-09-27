@@ -48,16 +48,24 @@ def rank_candidates(facts: dict[str, Any], index: PlaceIndex) -> list[tuple[str,
     return out
 
 
+def _pending(context: ContextTypes.DEFAULT_TYPE) -> dict[str, dict[str, Any]]:
+    # bot_data, not user_data: prompts can come from background jobs with no
+    # user context, and this is a single-user bot anyway.
+    store: dict[str, dict[str, Any]] = context.bot_data.setdefault(_PENDING_KEY, {})
+    return store
+
+
 async def ask_to_rank(
     message: Message, context: ContextTypes.DEFAULT_TYPE, place_id: str, category: str, name: str
 ) -> None:
-    assert context.user_data is not None
+    await ask_to_rank_chat(context, message.chat_id, place_id, category, name)
+
+
+async def ask_to_rank_chat(
+    context: ContextTypes.DEFAULT_TYPE, chat_id: int, place_id: str, category: str, name: str
+) -> None:
     token = uuid.uuid4().hex[:12]
-    context.user_data.setdefault(_PENDING_KEY, {})[token] = {
-        "place_id": place_id,
-        "category": category,
-        "ins": None,
-    }
+    _pending(context)[token] = {"place_id": place_id, "category": category, "ins": None}
     keyboard = InlineKeyboardMarkup(
         [
             [
@@ -68,7 +76,9 @@ async def ask_to_rank(
             [InlineKeyboardButton("Skip", callback_data=f"rank:tier:{token}:skip")],
         ]
     )
-    await message.reply_text(f"How was {name}? ({category})", reply_markup=keyboard)
+    await context.bot.send_message(
+        chat_id=chat_id, text=f"How was {name}? ({category})", reply_markup=keyboard
+    )
 
 
 async def prompt_after_entry(
@@ -101,8 +111,7 @@ async def handle_rank_callback(update: Update, context: ContextTypes.DEFAULT_TYP
     await query.answer()
     _, step, token, choice = query.data.split(":", 3)
 
-    assert context.user_data is not None
-    pending: dict[str, dict[str, Any]] = context.user_data.get(_PENDING_KEY, {})
+    pending = _pending(context)
     state = pending.get(token)
     if state is None:
         await query.edit_message_text("This ranking has expired or was already handled.")

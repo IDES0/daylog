@@ -509,6 +509,31 @@ class Vault:
 
         return dict(frontmatter), transcript.strip(), summary.strip()
 
+    # -- history / undo ----------------------------------------------------
+
+    def recent_changes(self, limit: int = 8) -> list[tuple[str, str]]:
+        """(sha, subject) of recent commits worth undoing — newest first, skipping
+        cost bookkeeping and merges."""
+        log = self._run_git("log", "--no-merges", "-n", str(limit * 4), "--format=%h%x09%s")
+        out: list[tuple[str, str]] = []
+        for line in log.stdout.splitlines():
+            sha, _, subject = line.partition("\t")
+            if subject.startswith("usage:"):
+                continue
+            out.append((sha, subject))
+            if len(out) >= limit:
+                break
+        return out
+
+    def revert(self, sha: str) -> None:
+        """Undo one commit with a new commit. A conflict (a later change touched the
+        same lines) aborts cleanly and raises — nothing half-reverted is left."""
+        result = self._run_git("revert", "--no-edit", sha)
+        if result.returncode != 0:
+            self._run_git("revert", "--abort")
+            raise VaultError(f"can't undo {sha} cleanly: {_describe(result)}")
+        self._push()
+
     # -- git -----------------------------------------------------------
 
     _last_sync: float = 0.0

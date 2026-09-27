@@ -992,6 +992,7 @@ async def _post_init(application: Application) -> None:  # type: ignore[type-arg
             BotCommand("wishlist", "Destinations you want to go, with research status"),
             BotCommand("plan", "Plan the next few weeks (2-3 options to pick from)"),
             BotCommand("review", "This week's review now"),
+            BotCommand("undo", "Revert one of the bot's recent changes"),
             BotCommand("rankings", "Your rankings (/rankings food)"),
         ]
     )
@@ -1024,6 +1025,8 @@ def build_application() -> Application:  # type: ignore[type-arg]
     )
     application.add_handler(CommandHandler("plan", plan_flow.plan_command))
     application.add_handler(CommandHandler("review", daily.review_command))
+    application.add_handler(CommandHandler("undo", chat_flow.undo_command))
+    application.add_handler(CallbackQueryHandler(chat_flow.handle_undo_callback, pattern=r"^undo:"))
     application.add_handler(CallbackQueryHandler(plan_flow.handle_plan_callback, pattern=r"^plan:"))
     application.add_handler(
         CallbackQueryHandler(research_flow.handle_place_callback, pattern=r"^place:")

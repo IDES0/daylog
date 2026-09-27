@@ -118,7 +118,7 @@ def test_respond_runs_tools_and_keeps_only_words_in_history(vault: Vault) -> Non
     result = chat.respond(vault, [], "best wave?", NOW, allow_web=False, client=_client(fake))
     assert result.text == "Ekas is your top wave. Proposed Mentawai."
     assert result.proposals == [
-        {"place": "Mentawai", "status": "candidate", "summary": "Add Mentawai"}
+        {"edit": "itinerary", "place": "Mentawai", "status": "candidate", "summary": "Add Mentawai"}
     ]
     second_call = fake.calls[1]["messages"]
     tool_results = second_call[-1]["content"]
