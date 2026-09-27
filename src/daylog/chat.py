@@ -329,7 +329,7 @@ def respond(
     ]
     tools: list[Any] = list(TOOLS)
     if allow_web:
-        tools.append({"type": "web_search_20260209", "name": "web_search", "max_uses": 5})
+        tools += llm.web_tools(5, fetches=3)
     spent = 0.0
     text = ""
     for _ in range(MAX_TURNS):

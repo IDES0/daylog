@@ -106,8 +106,10 @@ the user adds them from Telegram.
 
 ## Rules
 
-- Search the web for anything current. Read pages the way a person would;
-  don't crawl sites or bulk-extract data, and skip paywalled pages.
+- Research properly: search, then open and read the actual pages — forecast
+  sites, tide tables, event listings, operator schedules, guides — and
+  cross-check facts across sources. Prefer primary sources (the operator,
+  the event organiser, the forecast itself) over aggregator summaries.
 - Never modify `journal/`, `goals.yaml`, `location.yaml`, `rankings.yaml`,
   `usage.yaml` or `plans/`.
 - Everything you write is dated and sourced. No marketing tone, no filler.

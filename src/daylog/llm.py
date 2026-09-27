@@ -60,6 +60,27 @@ def create(client: Any, **kwargs: Any) -> Any:
     return messages.create(**kwargs)
 
 
+def web_tools(searches: int, fetches: int | None = None) -> list[dict[str, Any]]:
+    """Server-side web search plus web fetch (reads whole pages, not just
+    result snippets). Fetch has no per-call fee, only the tokens of what it
+    reads, so pages are capped at `max_content_tokens`."""
+    tools: list[dict[str, Any]] = [
+        {"type": "web_search_20260209", "name": "web_search", "max_uses": searches}
+    ]
+    if fetches is None:
+        fetches = searches
+    if fetches > 0:
+        tools.append(
+            {
+                "type": "web_fetch_20260209",
+                "name": "web_fetch",
+                "max_uses": fetches,
+                "max_content_tokens": 12000,
+            }
+        )
+    return tools
+
+
 def monthly_budget() -> float:
     return float(os.environ.get("MONTHLY_BUDGET_USD", "40"))
 

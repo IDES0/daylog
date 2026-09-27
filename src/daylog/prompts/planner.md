@@ -5,7 +5,7 @@ hard deadlines (visa, flights, commitments), their wishlist of
 destinations with research files (seasons, events, how to get there),
 where they've been recently, and their last several journal days.
 
-Use `web_search` for what the research files don't cover or that might
+Use `web_search` (and `web_fetch` to read a page in full) for what the research files don't cover or that might
 have changed: events in the next weeks, ferry/flight schedules and
 prices from where they are, current season conditions. Then call
 `record_plan` once.

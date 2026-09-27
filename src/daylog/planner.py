@@ -104,7 +104,7 @@ def run(context: str, *, max_searches: int = 8, client: anthropic.Anthropic | No
     system = PROMPT_PATH.read_text(encoding="utf-8")
     messages: list[Any] = [{"role": "user", "content": context}]
     tools: list[Any] = [
-        {"type": "web_search_20260209", "name": "web_search", "max_uses": max_searches},
+        *llm.web_tools(max_searches),
         RECORD_PLAN_TOOL,
     ]
     spent = 0.0

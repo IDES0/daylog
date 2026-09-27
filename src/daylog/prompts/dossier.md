@@ -3,7 +3,7 @@ and when to go. They surf (intermediate, working on rights), dive
 (Advanced Open Water + Nitrox), hike, and travel on a budget; the user
 message may add their goals, where they are now, and their dates.
 
-Use `web_search` for anything time-sensitive or specific: seasons,
+Use `web_search` (and `web_fetch` to read a page in full) for anything time-sensitive or specific: seasons,
 events, prices, routes, current conditions. Don't rely on memory for
 those. Then write the file as markdown, in this order, skipping any
 section there's nothing real to say in:

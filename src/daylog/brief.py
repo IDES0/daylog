@@ -15,7 +15,7 @@ from pathlib import Path
 from typing import Any
 
 import anthropic
-from anthropic.types import MessageParam, WebSearchTool20260209Param
+from anthropic.types import MessageParam
 
 from daylog import llm
 from daylog.places import PlaceIndex, describe_for_brief
@@ -26,11 +26,7 @@ logger = logging.getLogger(__name__)
 MODEL = llm.MAIN_MODEL
 PROMPT_PATH = Path(__file__).parent / "prompts" / "brief.md"
 
-WEB_SEARCH_TOOL: WebSearchTool20260209Param = {
-    "type": "web_search_20260209",
-    "name": "web_search",
-    "max_uses": 5,
-}
+MAX_SEARCHES = 5
 
 
 class BriefError(RuntimeError):
@@ -200,7 +196,7 @@ def generate_brief(
         model=MODEL,
         max_tokens=8192,
         system=system_prompt,
-        tools=[WEB_SEARCH_TOOL],
+        tools=llm.web_tools(MAX_SEARCHES, fetches=3),
         messages=messages,
     )
 
@@ -212,7 +208,7 @@ def generate_brief(
         response.usage.input_tokens,
         response.usage.output_tokens,
         search_requests,
-        WEB_SEARCH_TOOL["max_uses"],
+        MAX_SEARCHES,
     )
     llm.record("brief", MODEL, response.usage)
     if response.stop_reason == "max_tokens":

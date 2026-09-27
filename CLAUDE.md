@@ -6,7 +6,8 @@ Full spec in docs/SPEC.md — read it before implementing anything.
 ## Non-negotiables
 - No database. Vault is plain markdown + YAML files.
 - No web frontend. Telegram is the interface.
-- No scraping. RSS and public APIs only.
+- Research reads the web properly: search, fetch and read full pages
+  (the Stage 1 "RSS and public APIs only" rule was lifted 2026-09-27).
 - The bot never messages third parties. It drafts; the user sends.
 - vault.py is the ONLY module that touches the filesystem or git.
 - Every Telegram handler checks user id against TELEGRAM_ALLOWED_USER_ID first.

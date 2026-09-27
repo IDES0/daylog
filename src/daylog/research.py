@@ -24,7 +24,7 @@ from pathlib import Path
 from typing import Any
 
 import anthropic
-from anthropic.types import MessageParam, ToolParam, WebSearchTool20260209Param
+from anthropic.types import MessageParam, ToolParam
 
 from daylog import llm
 from daylog.places import KINDS, PlaceIndex, file_for, new_node_id, outline
@@ -137,10 +137,6 @@ class Findings:
     cost: float = 0.0
 
 
-def _web_search(max_uses: int) -> WebSearchTool20260209Param:
-    return {"type": "web_search_20260209", "name": "web_search", "max_uses": max_uses}
-
-
 def _parse(raw: dict[str, Any], index: PlaceIndex) -> Findings:
     """Keep only well-formed proposals: known kinds, real parents, no invented ids."""
     findings = Findings(summary=str(raw.get("summary", "")))
@@ -186,7 +182,7 @@ def run(
             ),
         }
     ]
-    tools: list[Any] = [_web_search(max_searches), RECORD_PLACES_TOOL]
+    tools: list[Any] = [*llm.web_tools(max_searches), RECORD_PLACES_TOOL]
     spent = 0.0
     force = False
     for _turn in range(MAX_TURNS):
@@ -242,7 +238,7 @@ def dossier(
             model=llm.MAIN_MODEL,
             max_tokens=16000,
             system=system,
-            tools=[_web_search(max_searches)],
+            tools=llm.web_tools(max_searches),
             messages=messages,
         )
         spent += llm.record("dossier", llm.MAIN_MODEL, response.usage)
