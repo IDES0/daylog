@@ -16,7 +16,7 @@ from datetime import date, datetime, timedelta
 from telegram import Update
 from telegram.ext import ContextTypes
 
-from daylog import brief, goals, itinerary, reconcile
+from daylog import brief, goals, itinerary, llm, reconcile
 from daylog.tg import allowed_user_id, is_authorized, tz, vault
 from daylog.vault import Vault
 
@@ -80,6 +80,7 @@ async def reconcile_job(context: ContextTypes.DEFAULT_TYPE) -> None:
             outcomes.append(run_reconcile(v, day))
         except Exception:
             logger.exception("reconcile failed for %s", day)
+    llm.flush(v)
     # Quiet unless something changed that the user would want to know about.
     notable = [o for o in outcomes if "corrected" in o]
     if notable:

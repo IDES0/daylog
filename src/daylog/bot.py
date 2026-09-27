@@ -37,8 +37,10 @@ from daylog import (
     extract,
     goals,
     itinerary,
+    llm,
     rank_flow,
     rankings,
+    research_flow,
     trail,
     transcribe,
 )
@@ -428,6 +430,7 @@ async def _send_brief(bot: Bot, chat_id: int) -> None:
         return
 
     await bot.send_message(chat_id=chat_id, text=text)
+    llm.flush(vault)
 
 
 async def brief_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -763,6 +766,7 @@ async def _log_entry(transcript: str, message: Message, context: ContextTypes.DE
                     mode=location_change.get("mode"),
                 )
                 location_note = f"\n\n(Updated current location to {location_change['place']})"
+                context.application.create_task(research_flow.arrive(context, message.chat_id))
             except VaultError:
                 logger.exception("location commit failed")
                 location_note = "\n\n(location update didn't save — check bot logs)"
@@ -859,11 +863,23 @@ async def _log_entry(transcript: str, message: Message, context: ContextTypes.DE
             await rank_flow.prompt_after_entry(message, context, facts)
         except Exception:
             logger.exception("ranking prompt failed")
+        if _has_place_mentions(facts):
+            context.application.create_task(
+                research_flow.resolve_days(context, message.chat_id, [entry_time.date()])
+            )
     except Exception:
         logger.exception("failed to process entry")
         await message.reply_text(
             "Something went wrong logging that. Nothing was saved — try again?"
         )
+
+
+def _has_place_mentions(facts: dict[str, Any]) -> bool:
+    return any(
+        isinstance(item, dict) and item.get("place_mention") and not item.get("place")
+        for field_name in ("activities", "meals")
+        for item in facts.get(field_name) or []
+    )
 
 
 async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -928,6 +944,11 @@ async def _post_init(application: Application) -> None:  # type: ignore[type-arg
             BotCommand("place", "What's known about a place (/place Lakey Peak)"),
             BotCommand("rank", "Rank or re-rank a place (/rank Artisan)"),
             BotCommand("reconcile", "Rebuild a day from all its notes now"),
+            BotCommand("explore", "Research the spots around where you are"),
+            BotCommand("research", "Write a research file on a place (/research Mentawai)"),
+            BotCommand("trip", "Reconstruct the stops of your last multi-day trip"),
+            BotCommand("backfill", "Link unlinked place names in recent entries"),
+            BotCommand("usage", "API spend this month"),
             BotCommand("rankings", "Your rankings (/rankings food)"),
         ]
     )
@@ -945,6 +966,14 @@ def build_application() -> Application:  # type: ignore[type-arg]
     application.add_handler(CommandHandler("place", place_command))
     application.add_handler(CommandHandler("rank", rank_flow.rank_command))
     application.add_handler(CommandHandler("reconcile", daily.reconcile_command))
+    application.add_handler(CommandHandler("explore", research_flow.explore_command))
+    application.add_handler(CommandHandler("research", research_flow.research_command))
+    application.add_handler(CommandHandler("trip", research_flow.trip_command))
+    application.add_handler(CommandHandler("backfill", research_flow.backfill_command))
+    application.add_handler(CommandHandler("usage", research_flow.usage_command))
+    application.add_handler(
+        CallbackQueryHandler(research_flow.handle_place_callback, pattern=r"^place:")
+    )
     application.add_handler(CommandHandler("rankings", rank_flow.rankings_command))
     application.add_handler(CallbackQueryHandler(rank_flow.handle_rank_callback, pattern=r"^rank:"))
     application.add_handler(MessageHandler(filters.VOICE, handle_voice))

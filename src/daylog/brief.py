@@ -17,12 +17,13 @@ from typing import Any
 import anthropic
 from anthropic.types import MessageParam, WebSearchTool20260209Param
 
+from daylog import llm
 from daylog.places import PlaceIndex, describe_for_brief
 from daylog.vault import Vault
 
 logger = logging.getLogger(__name__)
 
-MODEL = "claude-sonnet-5"
+MODEL = llm.MAIN_MODEL
 PROMPT_PATH = Path(__file__).parent / "prompts" / "brief.md"
 
 WEB_SEARCH_TOOL: WebSearchTool20260209Param = {
@@ -195,6 +196,7 @@ def generate_brief(
         search_requests,
         WEB_SEARCH_TOOL["max_uses"],
     )
+    llm.record("brief", MODEL, response.usage)
     if response.stop_reason == "max_tokens":
         logger.warning("brief response was truncated by max_tokens")
 

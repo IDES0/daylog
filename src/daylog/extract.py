@@ -10,11 +10,12 @@ from typing import Any
 import anthropic
 from anthropic.types import MessageParam, ToolChoiceToolParam, ToolParam
 
+from daylog import llm
 from daylog.places import KINDS, PlaceIndex, outline
 
 logger = logging.getLogger(__name__)
 
-MODEL = "claude-sonnet-5"
+MODEL = llm.MAIN_MODEL
 PROMPT_PATH = Path(__file__).parent / "prompts" / "extract.md"
 RECONCILE_PROMPT_PATH = Path(__file__).parent / "prompts" / "reconcile.md"
 
@@ -522,6 +523,7 @@ def extract(
         response.usage.input_tokens,
         response.usage.output_tokens,
     )
+    llm.record("reconcile" if reconcile else "extract", MODEL, response.usage)
 
     for block in response.content:
         if block.type == "tool_use":
