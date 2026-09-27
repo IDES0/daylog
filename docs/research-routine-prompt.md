@@ -5,8 +5,9 @@ plain markdown + YAML in a git repo. The bot reads what you commit.
 
 The person is travelling long-term through Southeast Asia — surfing
 (intermediate, progressing), diving (Advanced Open Water + Nitrox),
-hiking — while job hunting. Work out today's date with
-`TZ=Asia/Makassar date +%F`. Spend roughly 15-25 minutes; depth beats
+hiking — while job hunting. Get the date, weekday and time with
+`TZ=Asia/Makassar date '+%F %A %H:%M'` and use exactly those — never work
+out a weekday yourself. Spend roughly 15-25 minutes; depth beats
 breadth.
 
 ## Vault layout (read, then act)
@@ -45,8 +46,12 @@ _Based in <place path>. Routine run at <time>._
 1-4 lines: anything worth doing or deciding today or this week, and why.
 
 ## Conditions (next 3 days)
-For each surf spot in the current region with coordinates or a
-well-known forecast page: swell size/period/direction, wind, and the tide
+Start from the numbers, not search snippets: for each spot with
+`lat`/`lon`, `curl` Open-Meteo — marine
+(`https://marine-api.open-meteo.com/v1/marine?latitude=..&longitude=..&hourly=wave_height,wave_period,wave_direction,swell_wave_height,swell_wave_period,swell_wave_direction&timezone=Asia/Makassar&forecast_days=3`)
+and wind (`https://api.open-meteo.com/v1/forecast?...&hourly=wind_speed_10m,wind_direction_10m,wind_gusts_10m`).
+Then add tide times from any tide page you can reach. If a source is
+unreachable, say which one in one line. For each surf spot in the current region: swell size/period/direction, wind, and the tide
 times that matter for that spot's `facts` (e.g. Cobblestone at high
 tide). Say which spot looks best when, for an intermediate surfer.
 Diving/weather if relevant.
