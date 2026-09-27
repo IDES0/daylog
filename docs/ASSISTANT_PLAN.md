@@ -1,6 +1,6 @@
 # daylog → journal + personal assistant: plan
 
-Status: draft for discussion, 2026-09-27. Supersedes the SPEC's phase gate for
+Status: built 2026-09-27 (steps 1-8; step 9's routine needs repo access, see below). Supersedes the SPEC's phase gate for
 the parts listed here once agreed (update CLAUDE.md "Current phase" then).
 
 ## The two halves
@@ -179,3 +179,25 @@ Each step ships on its own and is useful alone.
   the vault.
 - Rankings model: ordered list per category built by pairwise comparisons
   (Beli-style), score derived from position.
+
+## As built (2026-09-27)
+
+Differences from the plan above, and why:
+
+- **itinerary.yaml was kept, not renamed to wishlist.yaml.** It gained
+  `place_id`, `why` and research fields and now holds intentions only; the
+  rename would have churned the calendar feed and hard-date confirmation
+  for no behavior gain.
+- **Research on the bot runs on Sonnet 5 with web search** (llm.py prices
+  every call). A live resolve run costs about $0.10, chat $0.01-0.10, a
+  plan about $0.30, a weekly review about $0.01. The deep daily research
+  is the cloud routine's job, on the user's plan rather than the API.
+- **Long calls stream.** Non-streaming web-search requests were dropped as
+  idle mid-request in live testing.
+- **Activity types have a fixed vocabulary** after the first live weekly
+  review split "diving" and "scuba diving".
+- **The research routine** (`docs/research-routine-prompt.md`) writes
+  `research/daily/<date>.md`, works the `research: queued` wishlist, and
+  enriches existing spots. It never creates places (it lists suggestions
+  in the daily file) and never touches the journal. Creating it needs the
+  Claude GitHub app to have access to the vault repo.

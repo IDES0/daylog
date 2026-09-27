@@ -1,11 +1,13 @@
 # daylog
 
-A personal Telegram bot for voice/text journaling, goal and travel
-tracking, and a daily morning brief. No database, no web frontend — plain
+A personal Telegram bot in two halves: a **journal** that turns voice notes
+into quantified, place-linked facts, and an **assistant** that researches,
+plans and reviews on top of them. No database, no web frontend — plain
 markdown and YAML in a private git-backed vault, Telegram as the only UI.
 
-Full design intent lives in [`docs/SPEC.md`](docs/SPEC.md); project rules
-and current phase status live in [`CLAUDE.md`](CLAUDE.md). This file
+The original design is [`docs/SPEC.md`](docs/SPEC.md); what's being built
+now, and why, is [`docs/ASSISTANT_PLAN.md`](docs/ASSISTANT_PLAN.md); project
+rules live in [`CLAUDE.md`](CLAUDE.md). This file
 documents what's actually built and how to run it.
 
 ## What it does
@@ -96,10 +98,11 @@ in the vault:
 - Goals and itinerary, weighed for judgment (a slip worth mentioning, a
   destination decision), not a rote recap — `/status` already covers the
   plain numbers.
-- Curated `places.yaml` knowledge: per-destination checklists of real
-  must-do items (status: planned/todo/done, not just category tags), and
-  for surf/wind-sport spots, named breaks with skill level, ideal swell
-  direction, and ideal wind direction.
+- The places tree: each region's open checklist items, and the current
+  region's spots with their facts (break, tide, level). The current region
+  comes from location.yaml, never a hand-set flag.
+- The morning research routine's file for the day, the wishlist's research
+  timing, and the latest plan.
 - Live swell and wind forecasts (Open-Meteo, free, no key) for the current
   location **and** any curated nearby spots, so the brief can say "swell's
   better at X than where you are" instead of only reporting one spot.
@@ -139,37 +142,39 @@ password.
 
 ```
 src/daylog/
-  bot.py          Telegram handlers + entrypoint. Every handler checks the
-                   sender against TELEGRAM_ALLOWED_USER_ID first — the
-                   only auth layer, so it runs before anything else.
+  bot.py           Telegram entrypoint: journaling pipeline, commands, job
+                   schedule. Feature handlers live in *_flow.py modules.
+  tg.py            Shared Telegram plumbing: the one auth check
+                   (TELEGRAM_ALLOWED_USER_ID), vault handle, tz, chunking.
   vault.py         The ONLY module that touches the filesystem or git.
-                   Everything else works with plain data in memory.
+                   Syncs with the remote at most once a minute.
   transcribe.py    Voice (OGG) -> text via faster-whisper, lazy-loaded.
-  extract.py       Transcript -> structured facts via one forced
-                   tool-use Claude call (goal_progress, goal_slips,
-                   itinerary_changes, corrections, location_change,
-                   other_day_notes). Validates the returned shape before
-                   trusting it (a schema-obeying tool call can still put
-                   the wrong Python type in a field) and is grounded with
-                   places.yaml's curated spot names, so a garbled
-                   transcription of an obscure real place has something
-                   concrete to match against instead of defaulting to a
-                   famous but wrong one.
-  dateparse.py     Deterministic (non-LLM) parsing for the small date-
-                   override vocabulary — a control-flow signal, not
-                   fact extraction, so it's exact rather than inferred.
-  goals.py         Goal resolution against the live list, slip tracking,
-                   hard-deadline confirmation logic. Pure data in/out.
-  itinerary.py     Same pattern as goals.py, for travel/destinations.
-  brief.py         Morning brief: gathers vault context, one Claude call
-                   with web_search, returns plain text (not parsed).
-  calendar_feed.py Pure logic: goals/itinerary/journal data -> .ics bytes.
-  calendar_server.py  Minimal stdlib HTTP server exposing calendar_feed.py
-                   at an unguessable path. The bot's only HTTP surface.
+  extract.py       Transcript -> structured facts (activities, meals, felt,
+                   goal progress, itinerary changes, place links, ...) via
+                   one forced tool call, grounded in the places tree.
+  places.py        The places tree (country -> region -> town -> spot):
+                   lookup, disambiguation by region, prompt outlines.
+  trail.py         Where the user has been — derived from location.yaml +
+                   journal place links, never stored.
+  daily.py         The 4am day cutoff, end-of-day reconcile job, weekly
+                   review job.
+  reconcile.py     Rebuilds a multi-note day in one pass.
+  rankings.py      Beli-style tiers + binary insertion; rank_flow.py is
+                   the Telegram side.
+  llm.py           Pricing, monthly spend ledger (usage.yaml), budget
+                   caps, and streamed calls for long requests.
+  research.py      Web-search agent: resolve place names, map a region,
+                   reconstruct a trip, write research files.
+                   research_flow.py: confirm cards, /explore, /trip, ...
+  wishlist_flow.py itinerary.yaml as a researched wishlist (/want).
+  chat.py          The assistant: vault read tools, web search, proposal
+                   tools. chat_flow.py: routing, menu, history.
+  planner.py       2-3 dated route options; plan_flow.py applies a pick.
+  review.py        Weekly numbers (exact) + the weekly review.
+  brief.py         Morning brief (uses routine research, plans, wishlist).
+  goals.py, itinerary.py, dateparse.py, calendar_feed.py,
+  calendar_server.py, sources/{marine,wind}.py   as before.
   prompts/*.md     All LLM system prompts — never inlined in Python.
-  sources/
-    marine.py      Swell/wave forecast, Open-Meteo marine API.
-    wind.py        Wind speed/gusts/direction, Open-Meteo forecast API.
 tests/             pytest, temp git repo fixtures — never the real vault.
 ```
 
@@ -182,13 +187,18 @@ schema below uses invented example data.
 
 ```
 daylog-vault/
-  journal/YYYY-MM-DD.md   # frontmatter + raw transcript + LLM summary
+  journal/YYYY-MM-DD.md   # frontmatter + raw transcript + summary
+  places/<region>.yaml     # the places tree, one file per region
+  location.yaml            # where the user was based: stays, trips, transit
+  itinerary.yaml           # the wishlist: intentions + hard dates
   goals.yaml               # hard/soft goals, slip_history
-  itinerary.yaml           # candidate destinations, hard/soft dates
-  places.yaml               # hand-curated destination knowledge
-  location.yaml             # date-ranged location history (from: / to:)
-  profile.yaml               # durable personal preferences
-  briefs/                    # sent morning briefs, for reference
+  rankings.yaml            # ordered lists per category and tier
+  research/<place>.md      # destination research files
+  research/daily/<date>.md # the morning research routine's output
+  plans/<date>.md          # planner output (+ the chosen option)
+  reviews/<week>.md        # weekly reviews
+  usage.yaml               # API spend per month and kind
+  profile.yaml             # durable personal preferences
 ```
 
 ```yaml
@@ -215,44 +225,51 @@ daylog-vault/
 ```
 
 ```yaml
-# places.yaml
-- name: Example Bay, Somewhere
-  activities: [surf, diving]
-  cost_tier: mid
-  notes: free-text summary of the destination
-  checklist:                       # actionable must-dos, not category tags
+# places/example-island.yaml — a node's region is its parent chain
+- id: example-island
+  name: Example Island
+  kind: region
+  parent: somecountry
+  checklist:
     - item: Dive the reef pass
       status: todo
-      notes: best on an incoming tide
-  surf_spots:                      # named breaks, for swell comparison + skill matching
-    - name: Left Point
-      lat: 0.0
-      lon: 0.0
-      break_type: left
-      ideal_swell_direction: SW, 4-6ft
-      level: intermediate
-  wind_spots:                      # named wind-sport spots, for foiling/kiting
-    - name: The Bay (wind foiling)
-      lat: 0.0
-      lon: 0.0
-      notes: check direction before booking, blows out on onshore days
+- id: example-town
+  name: Example Town
+  kind: town
+  parent: example-island
+- id: left-point
+  name: Left Point
+  kind: surf_spot
+  parent: example-town
+  aliases: [the point]          # spoken names learned from the journal
+  lat: 0.0
+  lon: 0.0
+  confidence: approximate       # verified | approximate | inferred
+  description: Long left over reef.
+  facts: {break: left, swell_tide: "SW 4-6ft, mid tide", level: intermediate}
+  sources: [{url: "https://example.com", fetched: 2026-01-01}]
+  my_notes: [{date: 2026-01-02, text: best at dawn}]
 ```
 
 ## Interacting with the bot
 
 | Input | Effect |
 |---|---|
-| Voice note | Transcribed, extracted, appended to today's journal entry |
-| Text message | Same pipeline as voice, text in instead of transcribed audio |
-| Text that's *only* a date phrase, then a voice note | The voice note logs under that date instead of today |
-| `/backdate` | Same as above, via an inline button list instead of typing the phrase |
-| `/status` | Plain read of current goals + itinerary — no LLM |
-| `/upcoming` | Dated goals/itinerary items, soonest first, overdue ones flagged — no LLM |
-| `/brief` | Generate and send the morning brief on demand |
-| `/start` | Registers the chat, confirms the bot is alive |
-| Confirm/Cancel buttons | Appear when extraction detects a hard-deadline move or a correction; nothing hard ever moves, and nothing already-logged is removed, without this |
+| Voice note | Transcribed and logged to today (before `DAY_CUTOFF_HOUR`, yesterday) |
+| 📝 Yesterday / 📅 Pick date / ✍️ Type an entry | Menu buttons: the next voice note or typed message is logged to that day |
+| Any other typed text | Goes to the assistant (vault tools + web search); changes come back as confirm cards |
+| `/trail [days\|all]`, `/place <name>` | Where you've been; what's known about a place |
+| `/rank <place>`, `/rankings [category]` | Beli-style rankings |
+| `/explore`, `/trip`, `/backfill [days]` | Research: spots around you; a trip's stops; unlinked place names |
+| `/research <place>`, `/want <place>`, `/wishlist` | Research files and the wishlist |
+| `/plan` | 2-3 dated route options to pick from |
+| `/review`, `/reconcile [date]` | Weekly review now; rebuild a day from all its notes |
+| `/usage` | API spend this month vs budget |
+| `/status`, `/upcoming`, `/brief`, `/backdate`, `/start` | As before |
 
-All commands also appear in Telegram's native `/` command menu.
+Scheduled: morning brief (`BRIEF_HOUR`), reconcile (`DAY_CUTOFF_HOUR`),
+weekly review + plan (Sunday `REVIEW_HOUR`), and the cloud research
+routine at 05:30 (see `docs/research-routine-prompt.md`).
 
 ## Running locally
 
@@ -275,6 +292,11 @@ Requires a local clone of the private vault repo at the path set by
 | `VAULT_PATH` | Path to the local clone of `daylog-vault` |
 | `BRIEF_HOUR` | Local hour (0-23) the scheduled brief sends, default `7` |
 | `TZ` | IANA timezone, used for the brief schedule and date resolution |
+| `DAY_CUTOFF_HOUR` | Local hour the journal day ends and the reconcile runs, default `4` |
+| `REVIEW_HOUR` | Local hour of the Sunday weekly review, default `20` |
+| `WEEKLY_PLAN` | `0` to skip the plan that follows the weekly review |
+| `MONTHLY_BUDGET_USD` | Optional API work (research, planning, chat web search) pauses above this, default `40` |
+| `RESEARCH_RUN_BUDGET_USD` | Per research run cap, default `1.50` |
 | `CALENDAR_FEED_SECRET` | Optional. Enables the calendar feed at `/calendar/<secret>.ics`; unset disables it entirely |
 | `PORT` | Only relevant with `CALENDAR_FEED_SECRET` set. Railway injects this itself; default `8080` for local testing |
 
@@ -312,11 +334,6 @@ Railway, Dockerfile-based build (`railway.json`):
 
 ## Current phase status
 
-Phase 1 (capture loop) is built and has been in real daily use since
-deployment. Goal tracking, itinerary tracking, `/status`, and the morning
-brief (with swell/wind/curated-places research) were each added as
-deliberate, explicit exceptions to the original "prove Phase 1 for 10 days
-first" gate — see `CLAUDE.md` for the up-to-date record of what's an
-intentional exception versus still-gated. RSS feeds and the jobs-repo diff
-source from the original spec are not built; nothing currently reads
-`sources/feeds.py` or `sources/jobs.py` because those files don't exist yet.
+The journal (steps 1-3) and the assistant (steps 4-9) from
+[`docs/ASSISTANT_PLAN.md`](docs/ASSISTANT_PLAN.md) are built. RSS feeds
+and the jobs-repo diff from the original spec are not.
