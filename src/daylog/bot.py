@@ -30,11 +30,26 @@ from telegram.ext import (
     filters,
 )
 
-from daylog import brief, calendar_server, extract, goals, itinerary, trail, transcribe
+from daylog import (
+    brief,
+    calendar_server,
+    extract,
+    goals,
+    itinerary,
+    rank_flow,
+    rankings,
+    trail,
+    transcribe,
+)
 from daylog.dateparse import parse_date_phrase
 from daylog.places import PlaceIndex
 from daylog.sources import marine, wind
-from daylog.vault import CorrectionConflictError, Vault, VaultError
+from daylog.tg import allowed_user_id as _allowed_user_id
+from daylog.tg import chunks as _chunks
+from daylog.tg import is_authorized as _is_authorized
+from daylog.tg import tz as _tz
+from daylog.tg import vault as _vault
+from daylog.vault import CorrectionConflictError, VaultError
 
 logger = logging.getLogger(__name__)
 
@@ -42,29 +57,6 @@ _PENDING_DATE_KEY = "pending_entry_date"
 _PENDING_SLIP_KEY = "pending_goal_slips"
 _PENDING_ITIN_KEY = "pending_itinerary_changes"
 _PENDING_CORRECTION_KEY = "pending_corrections"
-
-
-def _allowed_user_id() -> int:
-    return int(os.environ["TELEGRAM_ALLOWED_USER_ID"])
-
-
-def _vault() -> Vault:
-    """The vault, caught up with the remote (throttled — see Vault.sync)."""
-    vault = Vault(Path(os.environ.get("VAULT_PATH", "../daylog-vault")))
-    vault.sync()
-    return vault
-
-
-def _tz() -> ZoneInfo:
-    return ZoneInfo(os.environ.get("TZ", "UTC"))
-
-
-def _is_authorized(update: Update) -> bool:
-    user = update.effective_user
-    if user is None or user.id != _allowed_user_id():
-        logger.warning("rejected update from unauthorized user id=%s", user.id if user else None)
-        return False
-    return True
 
 
 def _active_goals_summary(goals_data: Any) -> list[dict[str, Any]]:
@@ -360,26 +352,18 @@ async def place_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     entries = vault.read_journal_range(date(2000, 1, 1), today)
     visited = trail.visits({d: e.frontmatter for d, e in entries.items()}, index)
     node = index.by_id[matches[0]]
-    card = _format_place_card(index, node, visited.get(node["id"], []), None)
+    category = rankings.category_for(node.get("kind"))
+    rank_line = (
+        rankings.describe(vault.read_yaml(rank_flow.RANKINGS_FILE, {}), category, node["id"])
+        if category
+        else None
+    )
+    card = _format_place_card(index, node, visited.get(node["id"], []), rank_line)
     if len(matches) > 1:
         others = ", ".join(index.path_name(m) for m in matches[1:5])
         card += f"\n\nAlso matching: {others}"
     for chunk in _chunks(card):
         await message.reply_text(chunk)
-
-
-def _chunks(text: str, limit: int = 4000) -> list[str]:
-    """Split on line boundaries under Telegram's 4096-char message limit."""
-    chunks: list[str] = []
-    current = ""
-    for line in text.splitlines(keepends=True):
-        if len(current) + len(line) > limit and current:
-            chunks.append(current)
-            current = ""
-        current += line
-    if current:
-        chunks.append(current)
-    return chunks or [""]
 
 
 def _brief_hour() -> int:
@@ -892,6 +876,10 @@ async def _log_entry(transcript: str, message: Message, context: ContextTypes.DE
             f"Logged {entry_time.date().isoformat()}:\n\n{summary}"
             f"{goals_note}{itinerary_note}{location_note}{other_day_note}"
         )
+        try:
+            await rank_flow.prompt_after_entry(message, context, facts)
+        except Exception:
+            logger.exception("ranking prompt failed")
     except Exception:
         logger.exception("failed to process entry")
         await message.reply_text(
@@ -959,6 +947,8 @@ async def _post_init(application: Application) -> None:  # type: ignore[type-arg
             BotCommand("backdate", "Log your next message under a recent past date"),
             BotCommand("trail", "Where you've been (/trail, /trail 60, /trail all)"),
             BotCommand("place", "What's known about a place (/place Lakey Peak)"),
+            BotCommand("rank", "Rank or re-rank a place (/rank Artisan)"),
+            BotCommand("rankings", "Your rankings (/rankings food)"),
         ]
     )
 
@@ -973,6 +963,9 @@ def build_application() -> Application:  # type: ignore[type-arg]
     application.add_handler(CommandHandler("backdate", backdate_command))
     application.add_handler(CommandHandler("trail", trail_command))
     application.add_handler(CommandHandler("place", place_command))
+    application.add_handler(CommandHandler("rank", rank_flow.rank_command))
+    application.add_handler(CommandHandler("rankings", rank_flow.rankings_command))
+    application.add_handler(CallbackQueryHandler(rank_flow.handle_rank_callback, pattern=r"^rank:"))
     application.add_handler(MessageHandler(filters.VOICE, handle_voice))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
     application.add_handler(CallbackQueryHandler(handle_goal_slip_callback, pattern=r"^goalslip:"))

@@ -32,6 +32,7 @@ Guidelines:
 - `activities`: one entry per distinct thing the user did, with a rough
   `hours` estimate. If no duration is stated or implied, omit `hours` for
   that activity rather than guessing.
+  Eating is not an activity — meals go in `meals`.
 - `location`: only if the transcript names or clearly implies a place.
   Omit it otherwise — don't infer from past entries you don't have.
 - `location_change`: only when the transcript explicitly says the user has
@@ -52,6 +53,13 @@ Guidelines:
   genuinely confident about (approximate is fine, this is for regional
   swell/wind comparison, not navigation) — leave them out rather than
   guess at coordinates for somewhere obscure.
+- `meals`: one item per meal or snack the user mentions, with what they
+  had, where (linked like activities), cost if stated, and their own
+  verdict in their words if they gave one. "Had a smoothie" counts.
+- `felt`: only what the user says about how they felt — energy, body
+  (sore, sick, hungover, stomach), mind (lazy, stoked, anxious) — with
+  when in the day. Never infer a feeling from what they did. `energy` is
+  1 (wrecked) to 5 (great), set only when clearly implied.
 - `goal_progress`: only when an activity clearly maps to a goal in the
   provided list. `goal_id` must be copied exactly from that list — never
   invent one, never use a goal's title as its id. `delta` is in that goal's

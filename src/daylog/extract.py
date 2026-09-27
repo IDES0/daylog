@@ -113,6 +113,69 @@ RECORD_JOURNAL_ENTRY_TOOL: ToolParam = {
                     "required": ["type"],
                 },
             },
+            "meals": {
+                "type": "array",
+                "description": "Everything the user says they ate or drank, one item per meal.",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "when": {
+                            "type": "string",
+                            "description": (
+                                "'breakfast', 'lunch', 'dinner', 'snack', or a clock time "
+                                "like '14:30' if stated."
+                            ),
+                        },
+                        "items": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "description": "What was eaten/drunk, e.g. ['octopus', 'smoothie'].",
+                        },
+                        "cost": {
+                            "type": "string",
+                            "description": "As stated, with currency, e.g. '200k IDR'.",
+                        },
+                        "verdict": {
+                            "type": "string",
+                            "description": "The user's own take, if given ('incredible', 'mid').",
+                        },
+                        **_PLACE_LINK_PROPERTIES,
+                    },
+                    "required": ["items"],
+                },
+            },
+            "felt": {
+                "type": "array",
+                "description": (
+                    "How the user says they felt — physically or mentally — at a point in "
+                    "the day. Only what's said, never inferred from activities."
+                ),
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "when": {
+                            "type": "string",
+                            "description": "'morning', 'afternoon', 'evening', 'night' or a time.",
+                        },
+                        "energy": {
+                            "type": "integer",
+                            "minimum": 1,
+                            "maximum": 5,
+                            "description": "1 exhausted .. 5 great, only if clearly implied.",
+                        },
+                        "body": {
+                            "type": "string",
+                            "description": "Physical state: 'sore legs', 'upset stomach'.",
+                        },
+                        "mind": {
+                            "type": "string",
+                            "description": "Mental state: 'lazy', 'stoked', 'anxious'.",
+                        },
+                        "note": {"type": "string", "description": "Anything else, briefly."},
+                    },
+                    "required": [],
+                },
+            },
             "goal_progress": {
                 "type": "array",
                 "items": {
@@ -308,6 +371,8 @@ class ExtractError(RuntimeError):
 # writing bad data no one notices until something downstream crashes.
 _ARRAY_FIELDS = (
     "activities",
+    "meals",
+    "felt",
     "goal_progress",
     "goal_slips",
     "itinerary_changes",
