@@ -19,6 +19,7 @@ def test_week_stats_are_exact(vault: Vault) -> None:
             "activities": [
                 {"type": "Surf", "hours": 2, "place": "lakey-peak"},
                 {"type": "screen_time", "hours": 2},
+                {"type": "Scuba Diving", "hours": 1},
             ],
             "meals": [{"items": ["smoothie"]}],
             "felt": [{"energy": 4}],
@@ -40,8 +41,8 @@ def test_week_stats_are_exact(vault: Vault) -> None:
     )
     stats = review.week_stats(vault.read_journal_range(date(2026, 9, 21), date(2026, 9, 27)))
     assert stats["days_logged"] == 2
-    assert stats["activity_counts"] == {"surf": 2, "screen_time": 1}
-    assert stats["activity_hours"] == {"surf": 4.5, "screen_time": 2.0}
+    assert stats["activity_counts"] == {"surf": 2, "screen_time": 1, "dive": 1}
+    assert stats["activity_hours"] == {"surf": 4.5, "screen_time": 2.0, "dive": 1.0}
     assert stats["goal_deltas"] == {"surf": 2.0, "jobs": 5.0}
     assert stats["avg_energy"] == 3.0
     assert stats["meals_logged"] == 1

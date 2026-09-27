@@ -33,6 +33,10 @@ Guidelines:
   `hours` estimate. If no duration is stated or implied, omit `hours` for
   that activity rather than guessing.
   Eating is not an activity — meals go in `meals`.
+  `type` is a short lowercase label, from this list whenever one fits so
+  weeks can be compared: surf, dive, snorkel, foil, hike, run, gym, yoga,
+  swim, climb, cliff_jump, skate, travel, job_search, interview, work,
+  study, call, social, party, sightseeing, errand, rest, screen_time.
 - `location`: only if the transcript names or clearly implies a place.
   Omit it otherwise — don't infer from past entries you don't have.
 - `location_change`: only when the transcript explicitly says the user has

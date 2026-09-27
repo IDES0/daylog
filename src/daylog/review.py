@@ -33,6 +33,33 @@ def week_label(any_day: date) -> str:
     return f"{year}-W{week:02d}"
 
 
+# Labels extraction used before it had a fixed vocabulary, folded into the
+# canonical ones so older weeks compare cleanly.
+_SYNONYMS = {
+    "scuba diving": "dive",
+    "diving": "dive",
+    "scuba": "dive",
+    "job applications": "job_search",
+    "job search": "job_search",
+    "job_applications": "job_search",
+    "socializing": "social",
+    "networking": "social",
+    "hiking": "hike",
+    "ferry": "travel",
+    "boat": "travel",
+    "driving": "travel",
+    "foiling": "foil",
+    "work/distraction": "screen_time",
+    "leisure": "rest",
+    "relax": "rest",
+}
+
+
+def canonical_type(label: str) -> str:
+    key = label.strip().lower()
+    return _SYNONYMS.get(key, key)
+
+
 def week_stats(entries: dict[date, JournalEntry]) -> dict[str, Any]:
     hours: dict[str, float] = defaultdict(float)
     counts: dict[str, int] = defaultdict(int)
@@ -46,7 +73,7 @@ def week_stats(entries: dict[date, JournalEntry]) -> dict[str, Any]:
         for a in fm.get("activities") or []:
             if not isinstance(a, dict):
                 continue
-            kind = str(a.get("type", "?")).lower()
+            kind = canonical_type(str(a.get("type", "?")))
             counts[kind] += 1
             if isinstance(a.get("hours"), int | float):
                 hours[kind] += float(a["hours"])
