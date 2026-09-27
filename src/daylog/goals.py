@@ -166,3 +166,16 @@ def _write_slip(
     if reason:
         entry["reason"] = reason
     history.append(entry)
+
+
+def active_summary(goals_data: Any) -> list[dict[str, Any]]:
+    return [
+        {
+            "id": g["id"],
+            "title": g.get("title", g["id"]),
+            "type": g.get("type", "soft"),
+            "metric": g.get("metric"),
+        }
+        for g in goals_data
+        if g.get("status", "active") == "active"
+    ]

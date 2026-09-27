@@ -357,6 +357,9 @@ class Vault:
             commit_message = f"journal: {entry_date.isoformat()}"
         else:
             merged_frontmatter = _merge_frontmatter(existing.frontmatter, frontmatter, entry_date)
+            # A new note after the end-of-day reconcile means the day needs
+            # reconciling again.
+            merged_frontmatter.pop("reconciled", None)
             transcript_body = f"{existing.transcript}\n\n### {heading}\n\n{transcript}"
             summary_body = f"{existing.summary}\n\n### {heading}\n\n{summary}"
             commit_message = f"journal: {entry_date.isoformat()} (+entry)"

@@ -188,3 +188,17 @@ def apply_confirmed_change(itinerary: list[Any], change: PendingChange, on: date
     if change.notes:
         entry["notes"] = change.notes
     _write_date(entry, change.old_date, change.new_date, change.reason, on)
+
+
+def active_summary(itinerary_data: Any) -> list[dict[str, Any]]:
+    return [
+        {
+            "id": e["id"],
+            "place": e.get("place", e["id"]),
+            "type": e.get("type", "soft"),
+            "status": e.get("status", "candidate"),
+            "date": current_date(e),
+        }
+        for e in itinerary_data
+        if e.get("status") not in ("done", "dropped")
+    ]

@@ -16,6 +16,7 @@ logger = logging.getLogger(__name__)
 
 MODEL = "claude-sonnet-5"
 PROMPT_PATH = Path(__file__).parent / "prompts" / "extract.md"
+RECONCILE_PROMPT_PATH = Path(__file__).parent / "prompts" / "reconcile.md"
 
 # Shared by every journal list whose items happen somewhere (activities,
 # meals): a resolved id when the place is already known, the name as said
@@ -458,6 +459,7 @@ def extract(
     current_location: str | None = None,
     places: list[Any] | None = None,
     current_location_entry: Any | None = None,
+    reconcile: bool = False,
     client: anthropic.Anthropic | None = None,
 ) -> dict[str, Any]:
     """Extract structured journal facts from a raw transcript.
@@ -478,11 +480,17 @@ def extract(
     but wrong one. `current_location_entry` (the open location.yaml entry)
     focuses that list on the region the user is in.
 
+    `reconcile` switches to whole-day mode (prompts/reconcile.md): the
+    transcript is all of a day's notes, and the result replaces the day's
+    record instead of adding to it.
+
     Returns a dict matching the journal frontmatter schema, plus a
     `summary` key the caller should pull out before writing to the vault.
     """
     client = client or anthropic.Anthropic()
     system_prompt = PROMPT_PATH.read_text(encoding="utf-8")
+    if reconcile:
+        system_prompt += RECONCILE_PROMPT_PATH.read_text(encoding="utf-8")
 
     tool_choice: ToolChoiceToolParam = {"type": "tool", "name": "record_journal_entry"}
     place_index = PlaceIndex(list(places or []))

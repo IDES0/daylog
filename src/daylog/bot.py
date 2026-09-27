@@ -33,6 +33,7 @@ from telegram.ext import (
 from daylog import (
     brief,
     calendar_server,
+    daily,
     extract,
     goals,
     itinerary,
@@ -42,6 +43,8 @@ from daylog import (
     transcribe,
 )
 from daylog.dateparse import parse_date_phrase
+from daylog.goals import active_summary as _active_goals_summary
+from daylog.itinerary import active_summary as _active_itinerary_summary
 from daylog.places import PlaceIndex
 from daylog.sources import marine, wind
 from daylog.tg import allowed_user_id as _allowed_user_id
@@ -59,19 +62,6 @@ _PENDING_ITIN_KEY = "pending_itinerary_changes"
 _PENDING_CORRECTION_KEY = "pending_corrections"
 
 
-def _active_goals_summary(goals_data: Any) -> list[dict[str, Any]]:
-    return [
-        {
-            "id": g["id"],
-            "title": g.get("title", g["id"]),
-            "type": g.get("type", "soft"),
-            "metric": g.get("metric"),
-        }
-        for g in goals_data
-        if g.get("status", "active") == "active"
-    ]
-
-
 def _goals_commit_message(
     applied_progress: list[goals.AppliedProgress], applied_slips: list[goals.AppliedSlip]
 ) -> str:
@@ -86,20 +76,6 @@ def _goals_reply_note(
     lines = [f"{p.title}: +{p.delta:g} (total {p.new_progress:g})" for p in applied_progress]
     lines += [f"{s.title}: moved to {s.new_date}" for s in applied_slips]
     return "\n".join(lines)
-
-
-def _active_itinerary_summary(itinerary_data: Any) -> list[dict[str, Any]]:
-    return [
-        {
-            "id": e["id"],
-            "place": e.get("place", e["id"]),
-            "type": e.get("type", "soft"),
-            "status": e.get("status", "candidate"),
-            "date": itinerary.current_date(e),
-        }
-        for e in itinerary_data
-        if e.get("status") not in ("done", "dropped")
-    ]
 
 
 def _itinerary_commit_message(applied: list[itinerary.AppliedChange]) -> str:
@@ -735,7 +711,10 @@ async def _log_entry(transcript: str, message: Message, context: ContextTypes.DE
 
         pending_date = context.user_data.pop(_PENDING_DATE_KEY, None) if context.user_data else None
         now = datetime.now(_tz())
-        entry_time = datetime.combine(pending_date, now.time()) if pending_date else now
+        # Before the day cutoff (4am by default) a note still belongs to the
+        # day that's ending — see daily.logical_day.
+        day = pending_date or daily.logical_day(now)
+        entry_time = datetime.combine(day, now.time())
 
         vault = _vault()
         goals_data = vault.read_goals()
@@ -948,6 +927,7 @@ async def _post_init(application: Application) -> None:  # type: ignore[type-arg
             BotCommand("trail", "Where you've been (/trail, /trail 60, /trail all)"),
             BotCommand("place", "What's known about a place (/place Lakey Peak)"),
             BotCommand("rank", "Rank or re-rank a place (/rank Artisan)"),
+            BotCommand("reconcile", "Rebuild a day from all its notes now"),
             BotCommand("rankings", "Your rankings (/rankings food)"),
         ]
     )
@@ -964,6 +944,7 @@ def build_application() -> Application:  # type: ignore[type-arg]
     application.add_handler(CommandHandler("trail", trail_command))
     application.add_handler(CommandHandler("place", place_command))
     application.add_handler(CommandHandler("rank", rank_flow.rank_command))
+    application.add_handler(CommandHandler("reconcile", daily.reconcile_command))
     application.add_handler(CommandHandler("rankings", rank_flow.rankings_command))
     application.add_handler(CallbackQueryHandler(rank_flow.handle_rank_callback, pattern=r"^rank:"))
     application.add_handler(MessageHandler(filters.VOICE, handle_voice))
@@ -978,6 +959,9 @@ def build_application() -> Application:  # type: ignore[type-arg]
     assert application.job_queue is not None
     application.job_queue.run_daily(
         send_scheduled_brief, time=dt_time(hour=_brief_hour(), tzinfo=_tz())
+    )
+    application.job_queue.run_daily(
+        daily.reconcile_job, time=dt_time(hour=daily.day_cutoff_hour(), minute=5, tzinfo=_tz())
     )
     return application
 
