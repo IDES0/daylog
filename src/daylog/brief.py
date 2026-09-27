@@ -43,6 +43,24 @@ def current_location(location_data: Any) -> Any | None:
     return location_data[-1] if location_data else None
 
 
+def matching_place(places_data: Any, location_name: str) -> Any | None:
+    """The places.yaml entry for the region containing `location_name`, if any.
+
+    places.yaml entries are curated per region ("Lombok, Indonesia") while
+    location.yaml records specific spots ("Kuta, Lombok, ID"). Match the
+    region — the first component of the place name — against the
+    location's components. Countries are deliberately never compared:
+    "Komodo, Indonesia" must not match whichever Indonesian region happens
+    to come first in the file.
+    """
+    parts = {part.strip().lower() for part in location_name.split(",") if part.strip()}
+    for place in places_data or []:
+        region = str(place.get("name", "")).split(",")[0].strip().lower()
+        if region and region in parts:
+            return place
+    return None
+
+
 def _date_reference_table(today: date, days: int = 7) -> str:
     """Explicit ISO date -> weekday-name pairs for today and the next `days` days.
 
@@ -169,14 +187,17 @@ def _format_wind_spots(wind_spots: Any) -> str:
     return "\n".join(lines)
 
 
-def _format_places(places_data: Any) -> str:
+def _format_places(places_data: Any, current_place: Any | None = None) -> str:
+    """`current_place` is derived from location.yaml by the caller — never a
+    hand-set flag in places.yaml, which silently went stale when the user
+    moved on and led the brief to file other regions' spots under it."""
     if not places_data:
         return "(none curated yet)"
     lines = []
     for p in places_data:
         activities = ", ".join(p.get("activities", [])) or "unspecified"
         notes = f" — {p['notes']}" if p.get("notes") else ""
-        tag = " [current]" if p.get("current") else ""
+        tag = " [current]" if current_place is not None and p is current_place else ""
         lines.append(f"- {p.get('name', '?')}{tag}: {activities}{notes}")
         if p.get("checklist"):
             lines.append(_format_checklist(p["checklist"]))
@@ -212,6 +233,7 @@ def generate_brief(
 
     current = current_location(location_data)
     location_line = current.get("place", "unknown") if current else "unknown"
+    current_place = matching_place(places_data, location_line) if current else None
 
     # marine_forecast may cover more than one spot (current location plus any
     # curated surf_spots nearby) — each spot's block is already labeled by
@@ -223,7 +245,7 @@ def generate_brief(
         f"Surfer profile:\n{_format_profile(profile_data)}\n\n"
         f"Goals:\n{_format_goals(goals_data)}\n\n"
         f"Itinerary:\n{_format_itinerary(itinerary_data)}\n\n"
-        f"Curated places knowledge:\n{_format_places(places_data)}\n\n"
+        f"Curated places knowledge:\n{_format_places(places_data, current_place)}\n\n"
         f"Marine/swell forecast (current location and any nearby curated surf spots):\n"
         f"{marine_forecast or '(not coastal, or unavailable)'}\n\n"
         f"Wind forecast (current location and any nearby curated surf/wind spots):\n"

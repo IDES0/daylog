@@ -15,6 +15,15 @@ direction or ideal wind direction — a swell/marine forecast and a separate
 wind forecast (speed, gusts, direction), both covering the current spot and
 any curated nearby spots, and their last few days of journal summaries.
 
+Never assign a spot, itinerary entry, or event to a region unless the
+data says which region it's in (a curated place's own entry, a region
+named in the itinerary note) or a search confirms it. Well-known names
+recur across islands — there is a Kuta on Bali and on Lombok, and "near
+Uluwatu" means Bali no matter which place is tagged `[current]`. The
+`[current]` tag only marks where the user is now; it is not a default
+region for everything else. If you can't place something, say so rather
+than guessing.
+
 Never compute a weekday yourself (e.g. "the 25th is a Friday") — always
 read it off the date reference table. If a date you need isn't in the
 table, say the date without naming a weekday rather than guessing one.

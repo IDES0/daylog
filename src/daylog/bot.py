@@ -284,25 +284,6 @@ def _brief_hour() -> int:
     return int(os.environ.get("BRIEF_HOUR", "7"))
 
 
-def _matching_place(places_data: Any, location_name: str) -> Any | None:
-    """The places.yaml entry whose name matches the current location, if any.
-
-    places.yaml entries are curated by name (e.g. "Lombok, Indonesia") while
-    location.yaml records specific spots (e.g. "Kuta, Lombok, ID") — match on
-    substring overlap in either direction rather than requiring exact equality.
-    """
-    name = location_name.lower()
-    for place in places_data or []:
-        place_name = str(place.get("name", "")).lower()
-        if not place_name:
-            continue
-        if place_name in name or name in place_name:
-            return place
-        if any(part.strip() in place_name for part in name.split(",")):
-            return place
-    return None
-
-
 def _relevant_spots(current: dict[str, Any] | None, places_data: Any) -> list[dict[str, Any]]:
     """Current location plus any curated surf_spots/wind_spots for the matching place.
 
@@ -320,7 +301,7 @@ def _relevant_spots(current: dict[str, Any] | None, places_data: Any) -> list[di
             "lon": current["lon"],
         }
     ]
-    place = _matching_place(places_data, str(current.get("place", "")))
+    place = brief.matching_place(places_data, str(current.get("place", "")))
     for key in ("surf_spots", "wind_spots"):
         for spot in (place or {}).get(key, []):
             if spot.get("lat") is not None and spot.get("lon") is not None:

@@ -36,6 +36,11 @@ Guidelines:
   they're merely considering (that's `itinerary_changes`). Compare against
   "Current location" above — if it's already correct, or the transcript
   doesn't clearly state a move, omit this entirely rather than guessing.
+  Name the place as "Town, Island/Region, Country". Many names recur
+  across islands (Kuta is on both Bali and Lombok; Gerupuk is Lombok) —
+  resolve the region from the route the transcript describes (e.g.
+  arriving from the Gili Islands by boat means Lombok) and from
+  "Current location", never from which one is more famous.
   Include `lat`/`lon` only for a real, identifiable place you're
   genuinely confident about (approximate is fine, this is for regional
   swell/wind comparison, not navigation) — leave them out rather than

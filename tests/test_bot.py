@@ -5,7 +5,7 @@ from zoneinfo import ZoneInfo
 
 import pytest
 
-from daylog import bot
+from daylog import bot, brief
 from daylog.sources import marine, wind
 
 _PLACES = [
@@ -24,13 +24,18 @@ _PLACES = [
 
 
 def test_matching_place_matches_by_substring() -> None:
-    place = bot._matching_place(_PLACES, "Kuta, Lombok, ID")
+    place = brief.matching_place(_PLACES, "Kuta, Lombok, ID")
     assert place is not None
     assert place["name"] == "Lombok, Indonesia"
 
 
 def test_matching_place_no_match_returns_none() -> None:
-    assert bot._matching_place(_PLACES, "Uluwatu, Bali, ID") is None
+    assert brief.matching_place(_PLACES, "Uluwatu, Bali, ID") is None
+
+
+def test_matching_place_ignores_shared_country() -> None:
+    assert brief.matching_place(_PLACES, "Komodo, Indonesia") is None
+    assert brief.matching_place(_PLACES, "Labuan Bajo, Flores, Indonesia") == _PLACES[1]
 
 
 def test_fetch_marine_forecast_combines_current_and_curated_surf_spots(
