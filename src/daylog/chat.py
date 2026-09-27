@@ -333,7 +333,8 @@ def respond(
     spent = 0.0
     text = ""
     for _ in range(MAX_TURNS):
-        response = client.messages.create(
+        response = llm.create(
+            client,
             model=llm.MAIN_MODEL,
             max_tokens=8000,
             system=[{"type": "text", "text": system, "cache_control": {"type": "ephemeral"}}],

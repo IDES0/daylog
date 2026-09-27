@@ -43,6 +43,23 @@ WEB_SEARCH_USD = 0.01  # $10 per 1,000 searches
 MAIN_MODEL = "claude-sonnet-5"
 
 
+def create(client: Any, **kwargs: Any) -> Any:
+    """messages.create, but streamed when the client supports it.
+
+    Long requests (web search, high effort) can sit for a minute or more
+    with no bytes on the wire, and an idle-connection timeout somewhere
+    between here and the API then drops them ("Server disconnected without
+    sending a response"). Streaming keeps data flowing; the final Message
+    is the same object create() would have returned. Test fakes that only
+    implement create() still work.
+    """
+    messages = client.messages
+    if hasattr(messages, "stream"):
+        with messages.stream(**kwargs) as stream:
+            return stream.get_final_message()
+    return messages.create(**kwargs)
+
+
 def monthly_budget() -> float:
     return float(os.environ.get("MONTHLY_BUDGET_USD", "40"))
 

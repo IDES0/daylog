@@ -193,7 +193,8 @@ def run(
         kwargs: dict[str, Any] = {}
         if force:
             kwargs["tool_choice"] = {"type": "tool", "name": "record_places"}
-        response = client.messages.create(
+        response = llm.create(
+            client,
             model=llm.MAIN_MODEL,
             max_tokens=16000,
             system=system,
@@ -236,7 +237,8 @@ def dossier(
     spent = 0.0
     text_parts: list[str] = []
     for _turn in range(MAX_TURNS):
-        response = client.messages.create(
+        response = llm.create(
+            client,
             model=llm.MAIN_MODEL,
             max_tokens=16000,
             system=system,

@@ -39,6 +39,7 @@ from daylog import (
     goals,
     itinerary,
     llm,
+    plan_flow,
     rank_flow,
     rankings,
     research_flow,
@@ -429,6 +430,7 @@ async def _send_brief(context: ContextTypes.DEFAULT_TYPE, chat_id: int) -> None:
                 for name, text in wishlist_flow.dossiers_for(vault, vault.read_itinerary()).items()
             },
             morning_research=vault.read_text(f"research/daily/{today.isoformat()}.md"),
+            current_plan=plan_flow.latest_plan(vault),
         )
     except Exception:
         logger.exception("failed to generate brief")
@@ -988,6 +990,7 @@ async def _post_init(application: Application) -> None:  # type: ignore[type-arg
             BotCommand("usage", "API spend this month"),
             BotCommand("want", "Add a destination to your wishlist (/want Mentawai)"),
             BotCommand("wishlist", "Destinations you want to go, with research status"),
+            BotCommand("plan", "Plan the next few weeks (2-3 options to pick from)"),
             BotCommand("rankings", "Your rankings (/rankings food)"),
         ]
     )
@@ -1018,6 +1021,8 @@ def build_application() -> Application:  # type: ignore[type-arg]
     application.add_handler(
         CallbackQueryHandler(chat_flow.handle_proposal_callback, pattern=r"^chatitin:")
     )
+    application.add_handler(CommandHandler("plan", plan_flow.plan_command))
+    application.add_handler(CallbackQueryHandler(plan_flow.handle_plan_callback, pattern=r"^plan:"))
     application.add_handler(
         CallbackQueryHandler(research_flow.handle_place_callback, pattern=r"^place:")
     )

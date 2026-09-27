@@ -149,6 +149,7 @@ def generate_brief(
     wind_forecast: str | None = None,
     dossier_digests: dict[str, str] | None = None,
     morning_research: str | None = None,
+    current_plan: str | None = None,
     client: anthropic.Anthropic | None = None,
 ) -> str:
     client = client or anthropic.Anthropic()
@@ -181,6 +182,11 @@ def generate_brief(
     if dossier_digests:
         digests = "\n\n".join(f"{name}:\n{text}" for name, text in dossier_digests.items())
         user_content += f"\n\nResearch on wishlist destinations (timing and events):\n{digests}"
+    if current_plan:
+        user_content += (
+            "\n\nThe user's latest travel plan (a line marked Chosen is what they picked):\n"
+            f"{current_plan[:3000]}"
+        )
     if morning_research:
         user_content += (
             "\n\nThis morning's deep research (from the scheduled research routine — "
@@ -189,7 +195,8 @@ def generate_brief(
         )
     messages: list[MessageParam] = [{"role": "user", "content": user_content}]
 
-    response = client.messages.create(
+    response = llm.create(
+        client,
         model=MODEL,
         max_tokens=8192,
         system=system_prompt,
