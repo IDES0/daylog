@@ -73,7 +73,12 @@ Guidelines:
   is the date they want to move to (infer a real ISO date from relative
   phrases like "push it a month" using today's actual date, don't pass the
   phrase through literally).
-- `itinerary_changes`: only when the user talks about travel plans.
+- `itinerary_changes`: only when the user talks about travel plans —
+  destinations they want to go to next, not places they are now. A surf
+  break, restaurant or beach near where they are is a place (link it in
+  activities), never an itinerary entry. Set `place_id` when the
+  destination is in Known places, and `why` to the goal ids it serves
+  (a surf trip serves the surf goal).
   - Referencing a place already in the itinerary list: set `id` to that
     exact id, omit `place`. A brand-new place: omit `id`, set `place` to
     a short name.

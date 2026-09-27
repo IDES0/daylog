@@ -43,6 +43,7 @@ from daylog import (
     research_flow,
     trail,
     transcribe,
+    wishlist_flow,
 )
 from daylog.dateparse import parse_date_phrase
 from daylog.goals import active_summary as _active_goals_summary
@@ -421,6 +422,11 @@ async def _send_brief(bot: Bot, chat_id: int) -> None:
             recent_journal=brief.recent_journal_summaries(vault, today),
             marine_forecast=marine_forecast,
             wind_forecast=wind_forecast,
+            dossier_digests={
+                name: wishlist_flow.dossier_digest(text)
+                for name, text in wishlist_flow.dossiers_for(vault, vault.read_itinerary()).items()
+            },
+            morning_research=vault.read_text(f"research/daily/{today.isoformat()}.md"),
         )
     except Exception:
         logger.exception("failed to generate brief")
@@ -949,6 +955,8 @@ async def _post_init(application: Application) -> None:  # type: ignore[type-arg
             BotCommand("trip", "Reconstruct the stops of your last multi-day trip"),
             BotCommand("backfill", "Link unlinked place names in recent entries"),
             BotCommand("usage", "API spend this month"),
+            BotCommand("want", "Add a destination to your wishlist (/want Mentawai)"),
+            BotCommand("wishlist", "Destinations you want to go, with research status"),
             BotCommand("rankings", "Your rankings (/rankings food)"),
         ]
     )
@@ -971,6 +979,11 @@ def build_application() -> Application:  # type: ignore[type-arg]
     application.add_handler(CommandHandler("trip", research_flow.trip_command))
     application.add_handler(CommandHandler("backfill", research_flow.backfill_command))
     application.add_handler(CommandHandler("usage", research_flow.usage_command))
+    application.add_handler(CommandHandler("want", wishlist_flow.want_command))
+    application.add_handler(CommandHandler("wishlist", wishlist_flow.wishlist_command))
+    application.add_handler(
+        CallbackQueryHandler(wishlist_flow.handle_want_callback, pattern=r"^want:")
+    )
     application.add_handler(
         CallbackQueryHandler(research_flow.handle_place_callback, pattern=r"^place:")
     )

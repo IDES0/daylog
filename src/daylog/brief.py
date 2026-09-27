@@ -147,6 +147,8 @@ def generate_brief(
     recent_journal: str,
     marine_forecast: str | None,
     wind_forecast: str | None = None,
+    dossier_digests: dict[str, str] | None = None,
+    morning_research: str | None = None,
     client: anthropic.Anthropic | None = None,
 ) -> str:
     client = client or anthropic.Anthropic()
@@ -176,6 +178,15 @@ def generate_brief(
         f"{wind_forecast or '(unavailable)'}\n\n"
         f"Recent journal entries:\n{recent_journal}"
     )
+    if dossier_digests:
+        digests = "\n\n".join(f"{name}:\n{text}" for name, text in dossier_digests.items())
+        user_content += f"\n\nResearch on wishlist destinations (timing and events):\n{digests}"
+    if morning_research:
+        user_content += (
+            "\n\nThis morning's deep research (from the scheduled research routine — "
+            f"already searched, use it rather than re-searching the same things):\n"
+            f"{morning_research}"
+        )
     messages: list[MessageParam] = [{"role": "user", "content": user_content}]
 
     response = client.messages.create(

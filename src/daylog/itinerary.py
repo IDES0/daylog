@@ -112,6 +112,28 @@ def _apply_non_date_fields(entry: Any, change: dict[str, Any]) -> None:
         entry["status"] = change["status"]
     if change.get("notes"):
         entry["notes"] = change["notes"]
+    if change.get("place_id"):
+        entry["place_id"] = change["place_id"]
+    for goal_id in change.get("why") or []:
+        why = entry.get("why")
+        if why is None:
+            why = []
+            entry["why"] = why
+        if goal_id not in why:
+            why.append(goal_id)
+
+
+def queue_research(entry: Any) -> None:
+    """Mark an intention for the next research pass, unless it already has one."""
+    if entry.get("research") not in ("queued", "done"):
+        entry["research"] = "queued"
+
+
+def wants_research(entry: Any) -> bool:
+    return entry.get("research") == "queued" and entry.get("status") in (
+        "candidate",
+        "planned",
+    )
 
 
 def apply_itinerary_changes(
@@ -163,6 +185,8 @@ def apply_itinerary_changes(
                 "status": change.get("status") or "candidate",
             }
             itinerary.append(entry)
+            if entry["status"] in ("candidate", "planned"):
+                queue_research(entry)
 
         _apply_non_date_fields(entry, change)
         if date_changing:

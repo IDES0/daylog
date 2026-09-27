@@ -218,9 +218,10 @@ RECORD_JOURNAL_ENTRY_TOOL: ToolParam = {
             "itinerary_changes": {
                 "type": "array",
                 "description": (
-                    "Only when the user talks about travel plans — a new place "
-                    "they're considering, committing to, dropping, or a date "
-                    "(visa expiry, firm commitment) being set or moved."
+                    "Only when the user talks about travel plans — a destination "
+                    "they want to go to, commit to, or drop, or a date (visa "
+                    "expiry, firm commitment) being set or moved. Never a spot "
+                    "near where they are now, and never where they already are."
                 ),
                 "items": {
                     "type": "object",
@@ -255,6 +256,15 @@ RECORD_JOURNAL_ENTRY_TOOL: ToolParam = {
                         },
                         "reason": {"type": "string"},
                         "notes": {"type": "string"},
+                        "place_id": {
+                            "type": "string",
+                            "description": "Known places id for this destination, if listed.",
+                        },
+                        "why": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "description": "Goal ids from the goal list this trip serves.",
+                        },
                     },
                     "required": [],
                 },

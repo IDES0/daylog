@@ -48,6 +48,12 @@ Treat each place's checklist as real must-dos, not background trivia — if
 something on it is upcoming, time-sensitive, or has never been mentioned
 before, surface it; don't silently repeat items with no news.
 
+If a "This morning's deep research" section is present, it is the
+product of a long research run done before this brief — lead with what
+in it is actionable today, and don't spend searches re-finding it.
+Research on wishlist destinations tells you their seasons and upcoming
+events; use it when weighing whether and when to move.
+
 Write a brief that:
 - Leads with anything concretely worth acting on today or this week —
   a swell window worth prioritizing, an event happening nearby, a deadline
