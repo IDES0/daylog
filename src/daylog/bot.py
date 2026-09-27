@@ -19,7 +19,7 @@ from typing import Any
 from zoneinfo import ZoneInfo
 
 from dotenv import load_dotenv
-from telegram import Bot, BotCommand, InlineKeyboardButton, InlineKeyboardMarkup, Message, Update
+from telegram import BotCommand, InlineKeyboardButton, InlineKeyboardMarkup, Message, Update
 from telegram.ext import (
     Application,
     ApplicationBuilder,
@@ -33,6 +33,7 @@ from telegram.ext import (
 from daylog import (
     brief,
     calendar_server,
+    chat_flow,
     daily,
     extract,
     goals,
@@ -400,7 +401,8 @@ def _fetch_wind_forecast(
     return _fetch_conditions(current, places_data, tz, wind.fetch_forecast)
 
 
-async def _send_brief(bot: Bot, chat_id: int) -> None:
+async def _send_brief(context: ContextTypes.DEFAULT_TYPE, chat_id: int) -> None:
+    bot = context.bot
     await bot.send_message(chat_id=chat_id, text="Building your brief...")
     try:
         vault = _vault()
@@ -435,7 +437,9 @@ async def _send_brief(bot: Bot, chat_id: int) -> None:
         )
         return
 
-    await bot.send_message(chat_id=chat_id, text=text)
+    for chunk in _chunks(text):
+        await bot.send_message(chat_id=chat_id, text=chunk)
+    chat_flow.remember(context, "The bot sent the morning brief", text)
     llm.flush(vault)
 
 
@@ -444,11 +448,11 @@ async def brief_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         return
     message = update.message
     assert message is not None
-    await _send_brief(context.bot, message.chat_id)
+    await _send_brief(context, message.chat_id)
 
 
 async def send_scheduled_brief(context: ContextTypes.DEFAULT_TYPE) -> None:
-    await _send_brief(context.bot, _allowed_user_id())
+    await _send_brief(context, _allowed_user_id())
 
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -457,13 +461,15 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     message = update.message
     assert message is not None
     await message.reply_text(
-        "daylog is listening. Send a voice note or text to log your day.\n\n"
-        'To log for a different day, send the date first (e.g. "yesterday", '
-        '"2 days ago", "2026-08-20") — it applies to your next message only. '
-        "Or use /backdate to pick from a short list instead of typing it.\n\n"
-        'Made a mistake earlier today? Just say the correction (e.g. "actually '
-        "I only surfed 1 hour, not 2\") — I'll ask you to confirm before "
-        "removing anything."
+        "daylog is listening.\n\n"
+        "🎙 A voice note logs today (before 4am it still counts as yesterday).\n"
+        "📝 Yesterday / 📅 Pick date: your next voice note or message logs to that day.\n"
+        "✍️ Type an entry: your next typed message is today's journal.\n"
+        "💬 Anything else you type goes to the assistant — ask about your trips, "
+        "plans, places, rankings, or where to go next.\n\n"
+        'Corrections work by voice too ("actually I only surfed 1 hour") — I\'ll ask '
+        "before removing anything.",
+        reply_markup=chat_flow.MENU,
     )
 
 
@@ -491,7 +497,10 @@ async def backdate_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         return
     message = update.message
     assert message is not None
-    today = datetime.now(_tz()).date()
+    await _send_backdate_picker(message, daily.logical_day(datetime.now(_tz())))
+
+
+async def _send_backdate_picker(message: Message, today: date) -> None:
     keyboard = InlineKeyboardMarkup(
         [
             [InlineKeyboardButton(label, callback_data=f"backdate:{d.isoformat()}")]
@@ -863,7 +872,8 @@ async def _log_entry(transcript: str, message: Message, context: ContextTypes.DE
 
         await message.reply_text(
             f"Logged {entry_time.date().isoformat()}:\n\n{summary}"
-            f"{goals_note}{itinerary_note}{location_note}{other_day_note}"
+            f"{goals_note}{itinerary_note}{location_note}{other_day_note}",
+            reply_markup=chat_flow.MENU,
         )
         try:
             await rank_flow.prompt_after_entry(message, context, facts)
@@ -917,23 +927,44 @@ async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 
 
 async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Menu buttons, then journal (when a day was picked), else the assistant."""
     if not _is_authorized(update):
         return
     message = update.message
     assert message is not None and message.text is not None
-    text = message.text
+    text = message.text.strip()
+    assert context.user_data is not None
+    now = datetime.now(_tz())
+    today = daily.logical_day(now)
 
-    today = datetime.now(_tz()).date()
+    if text == chat_flow.BTN_YESTERDAY:
+        context.user_data[_PENDING_DATE_KEY] = today - timedelta(days=1)
+        await message.reply_text(
+            f"Logging to yesterday ({_format_short_date(today - timedelta(days=1))}) — "
+            "send a voice note or type it."
+        )
+        return
+    if text == chat_flow.BTN_PICK:
+        await _send_backdate_picker(message, today)
+        return
+    if text == chat_flow.BTN_TYPE:
+        context.user_data[_PENDING_DATE_KEY] = today
+        await message.reply_text(f"Type today's entry ({_format_short_date(today)}).")
+        return
+
+    if context.user_data.get(_PENDING_DATE_KEY) is not None:
+        await _log_entry(text, message, context)
+        return
+
     override_date = parse_date_phrase(text, today=today)
     if override_date is not None:
-        assert context.user_data is not None
         context.user_data[_PENDING_DATE_KEY] = override_date
         await message.reply_text(
             f"Got it — your next message will be logged as {override_date.isoformat()}."
         )
         return
 
-    await _log_entry(text, message, context)
+    await chat_flow.handle_chat(message, context, text)
 
 
 async def _post_init(application: Application) -> None:  # type: ignore[type-arg]
@@ -983,6 +1014,9 @@ def build_application() -> Application:  # type: ignore[type-arg]
     application.add_handler(CommandHandler("wishlist", wishlist_flow.wishlist_command))
     application.add_handler(
         CallbackQueryHandler(wishlist_flow.handle_want_callback, pattern=r"^want:")
+    )
+    application.add_handler(
+        CallbackQueryHandler(chat_flow.handle_proposal_callback, pattern=r"^chatitin:")
     )
     application.add_handler(
         CallbackQueryHandler(research_flow.handle_place_callback, pattern=r"^place:")

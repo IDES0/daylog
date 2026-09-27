@@ -131,7 +131,7 @@ def _short(d: date) -> str:
     return f"{d.strftime('%b')} {d.day}"
 
 
-def format_trail(days: list[TrailDay], index: PlaceIndex) -> str:
+def format_trail(days: list[TrailDay], index: PlaceIndex, with_kinds: bool = False) -> str:
     """Grouped by stay: a header per base, then one line per day that has
     linked places. Days with nothing linked are folded into the header."""
     if not days:
@@ -156,7 +156,12 @@ def format_trail(days: list[TrailDay], index: PlaceIndex) -> str:
             names = []
             for place_id in d.place_ids:
                 node = index.get(place_id)
-                names.append(f"{node.get('name')}" if node else place_id)
+                if node is None:
+                    names.append(place_id)
+                elif with_kinds:
+                    names.append(f"{node.get('name')} ({node.get('kind')})")
+                else:
+                    names.append(str(node.get("name")))
             block.append(f"  {_short(d.day)}: {', '.join(names)}")
     if block:
         blocks.append("\n".join(block))

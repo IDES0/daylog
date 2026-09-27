@@ -1,0 +1,177 @@
+"""Telegram side of the chat assistant, and the persistent journaling menu.
+
+Routing (see bot.handle_text / handle_voice):
+- a voice note is a journal entry for today (or the date picked first);
+- typed text after tapping a menu button is a journal entry for that day;
+- any other typed text goes to the assistant.
+
+Conversation history lives in bot_data (single-user bot), so the morning
+brief and weekly review can be added to it from scheduled jobs — a reply
+to the brief then has the brief as context.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import logging
+import uuid
+from datetime import datetime
+from typing import Any
+
+from anthropic.types import MessageParam
+from telegram import (
+    InlineKeyboardButton,
+    InlineKeyboardMarkup,
+    Message,
+    ReplyKeyboardMarkup,
+    Update,
+)
+from telegram.ext import ContextTypes
+
+from daylog import chat, itinerary, llm, research_flow
+from daylog.places import PlaceIndex
+from daylog.tg import allowed_user_id, chunks, is_authorized, tz, vault
+from daylog.vault import VaultError
+
+logger = logging.getLogger(__name__)
+
+HISTORY_KEY = "chat_history"
+_PROPOSALS_KEY = "chat_proposals"
+
+BTN_YESTERDAY = "📝 Yesterday"
+BTN_PICK = "📅 Pick date"
+BTN_TYPE = "✍️ Type an entry"
+MENU_BUTTONS = (BTN_YESTERDAY, BTN_PICK, BTN_TYPE)
+
+MENU = ReplyKeyboardMarkup(
+    [[BTN_YESTERDAY, BTN_PICK], [BTN_TYPE]],
+    resize_keyboard=True,
+    is_persistent=True,
+    input_field_placeholder="Ask anything — voice notes log today",
+)
+
+
+def history(context: ContextTypes.DEFAULT_TYPE) -> list[MessageParam]:
+    stored: list[MessageParam] = context.bot_data.setdefault(HISTORY_KEY, [])
+    return stored
+
+
+def remember(context: ContextTypes.DEFAULT_TYPE, label: str, text: str) -> None:
+    """Add something the bot sent on its own (brief, review) to the conversation."""
+    hist = history(context)
+    hist.extend(
+        [
+            {"role": "user", "content": f"[{label}]"},
+            {"role": "assistant", "content": text},
+        ]
+    )
+    context.bot_data[HISTORY_KEY] = chat.trim_history(hist)
+
+
+async def handle_chat(message: Message, context: ContextTypes.DEFAULT_TYPE, text: str) -> None:
+    v = vault()
+    await context.bot.send_chat_action(chat_id=message.chat_id, action="typing")
+    try:
+        result = await asyncio.to_thread(
+            chat.respond,
+            v,
+            list(history(context)),
+            text,
+            datetime.now(tz()),
+            allow_web=llm.can_spend(v),
+        )
+    except Exception:
+        logger.exception("chat failed")
+        await message.reply_text("Something went wrong answering that — check bot logs.")
+        return
+    context.bot_data[HISTORY_KEY] = result.new_history
+    for chunk in chunks(result.text):
+        await message.reply_text(chunk, reply_markup=MENU)
+    for proposal in result.proposals:
+        await _send_proposal(message, context, proposal)
+    for job in result.research_jobs:
+        context.application.create_task(_run_research_job(context, message.chat_id, job))
+    llm.flush(v)
+
+
+async def _send_proposal(
+    message: Message, context: ContextTypes.DEFAULT_TYPE, proposal: dict[str, Any]
+) -> None:
+    token = uuid.uuid4().hex[:10]
+    context.bot_data.setdefault(_PROPOSALS_KEY, {})[token] = proposal
+    keyboard = InlineKeyboardMarkup(
+        [
+            [
+                InlineKeyboardButton("Confirm", callback_data=f"chatitin:ok:{token}"),
+                InlineKeyboardButton("No", callback_data=f"chatitin:no:{token}"),
+            ]
+        ]
+    )
+    await message.reply_text(
+        f"🗺 {proposal.get('summary', 'Itinerary change')}", reply_markup=keyboard
+    )
+
+
+def apply_proposal(itinerary_data: Any, proposal: dict[str, Any], on: Any) -> str:
+    """Apply a confirmed chat proposal. The tap *is* the confirmation, so a hard
+    date is applied directly rather than asked about a second time."""
+    change = {
+        k: proposal[k]
+        for k in ("id", "place", "place_id", "status", "new_date", "why", "notes")
+        if proposal.get(k)
+    }
+    applied, pending = itinerary.apply_itinerary_changes(itinerary_data, [change], on=on)
+    for p in pending:
+        itinerary.apply_confirmed_change(itinerary_data, p, on=on)
+    return "; ".join([a.summary for a in applied] + [f"{p.place}: {p.new_date}" for p in pending])
+
+
+async def handle_proposal_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not is_authorized(update):
+        return
+    query = update.callback_query
+    assert query is not None and query.data is not None
+    await query.answer()
+    _, action, token = query.data.split(":", 2)
+    proposal = context.bot_data.get(_PROPOSALS_KEY, {}).pop(token, None)
+    if proposal is None:
+        await query.edit_message_text("This proposal expired (the bot restarted).")
+        return
+    if action == "no":
+        await query.edit_message_text(f"Left as is: {proposal.get('summary')}")
+        return
+    v = vault()
+    data = v.read_itinerary()
+    try:
+        outcome = apply_proposal(data, proposal, datetime.now(tz()).date())
+        v.write_itinerary(data, f"itinerary: {proposal.get('place') or proposal.get('id')}")
+    except VaultError:
+        logger.exception("applying chat proposal failed")
+        await query.edit_message_text("Saving failed — check bot logs.")
+        return
+    await query.edit_message_text(f"Done: {outcome or proposal.get('summary')}")
+
+
+async def _run_research_job(
+    context: ContextTypes.DEFAULT_TYPE, chat_id: int, job: dict[str, Any]
+) -> None:
+    try:
+        if job.get("job") == "explore":
+            await research_flow.arrive(context, chat_id, force=True)
+            return
+        v = vault()
+        index = PlaceIndex(v.read_places())
+        name = str(job.get("place") or "")
+        matches = index.resolve(name) if name else []
+        place_id = matches[0] if matches else None
+        label = index.path_name(place_id) if place_id else name
+        path, text = await research_flow.write_dossier(v, place_id, label)
+        for chunk in chunks(f"{text}\n\n(saved to {path})"):
+            await context.bot.send_message(chat_id=chat_id, text=chunk)
+    except Exception:
+        logger.exception("research job from chat failed: %s", job)
+        await context.bot.send_message(chat_id=chat_id, text="That research job failed.")
+
+
+async def send_menu(context: ContextTypes.DEFAULT_TYPE, text: str) -> None:
+    await context.bot.send_message(chat_id=allowed_user_id(), text=text, reply_markup=MENU)
