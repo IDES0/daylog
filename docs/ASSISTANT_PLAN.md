@@ -158,13 +158,24 @@ Each step ships on its own and is useful alone.
 4. **Planner + brief integration.** `/plan`, weekly run, brief uses it.
 5. Later: weekly review against intentions, map image of the trail.
 
-## Decisions needed
+## Decisions (answered 2026-09-27)
 
-1. **Confirm vs auto-write for researched places.** Recommendation: confirm
-   new places and inferred trip stops; auto-write notes on known places.
-2. **Research spend.** Each resolve/arrive call is a Sonnet call with up to ~5
-   searches — cents per entry, a few dollars for the backfill. OK?
-3. **Place granularity.** Recommendation: include food/stays/venues (kind-
-   tagged) so everything you name resolves; the brief filters.
-4. **Gate.** Agreeing to this plan is the "explicit conversation" CLAUDE.md
-   requires; update its Current phase section to point here.
+1. **Confirm-before-write: yes.** The planner proposes soft itineraries and
+   asks for preferences; nothing inferred lands without a confirm.
+2. **Spend: yes, and more of it** — the user wants 5-10x today's research
+   depth (a real multi-minute, many-source research run every morning).
+   Model and runtime choices are open, see "Open questions".
+3. **Granularity: everything, including food** — plus structured meal and
+   how-I-felt logging and Beli-style personal rankings of places.
+4. **Gate: agreed**; CLAUDE.md now points here.
+
+## Open questions (in discussion)
+
+- Telegram becomes a chat with the assistant by default, with journaling
+  moved to explicit menu buttons (today / yesterday / pick a date). Do
+  voice notes stay journal-by-default?
+- Where the deep research runs: API calls from the bot (per-token cost)
+  vs. a scheduled Claude Code routine on the user's plan that writes into
+  the vault.
+- Rankings model: ordered list per category built by pairwise comparisons
+  (Beli-style), score derived from position.
