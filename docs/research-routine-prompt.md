@@ -30,7 +30,9 @@ breadth.
 - `plans/*.md` — travel plans; the latest may have a "Chosen:" line.
 - `research/` — your output. `research/daily/` for daily files,
   `research/<place-id>.md` for destination research files.
-- `profile.yaml` — preferences, if present.
+- `profile.md` — their own operating principles and risk rules; read it
+  first and let it decide emphasis (anchor sport, what to skip, their rules).
+- `profile.yaml` — preferences: `surf_comfort_face_m`, `fly_rules`.
 
 ## Job 0 — inbox (read-only Gmail)
 
@@ -82,7 +84,11 @@ and wind (`https://api.open-meteo.com/v1/forecast?...&hourly=wind_speed_10m,wind
 Then add tide times from any tide page you can reach. If a source is
 unreachable, say which one in one line. For each surf spot in the current region: swell size/period/direction, wind, and the tide
 times that matter for that spot's `facts` (e.g. Cobblestone at high
-tide). Say which spot looks best when, for an intermediate surfer.
+tide). Say which spot looks best when, for an intermediate surfer; spots
+with a `surf:` profile list their swell window, offshore direction and
+tide — use them. For `fly_site` nodes (paragliding launches) give the
+flyable window per day from Open-Meteo wind at 850 hPa, gusts, rain
+probability and CAPE, applying `fly_rules` strictly.
 Diving/weather if relevant.
 
 ## Around here (next 7 days)
