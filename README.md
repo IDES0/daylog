@@ -173,7 +173,11 @@ src/daylog/
   review.py        Weekly numbers (exact) + the weekly review.
   brief.py         Morning brief (uses routine research, plans, wishlist).
   goals.py, itinerary.py, dateparse.py, calendar_feed.py,
-  calendar_server.py, sources/{marine,wind}.py   as before.
+  calendar_server.py       as before.
+  sources/surf.py  Surfline-style hourly ratings per spot (`surf:` profiles).
+  sources/fly.py   Paragliding flyability per launch (`fly:` profiles + user rules).
+  edits.py         Confirmed edits proposed by chat (places, journal, goals, ...).
+  sources/{marine,wind}.py   daily fallback numbers for unprofiled regions.
   prompts/*.md     All LLM system prompts — never inlined in Python.
 tests/             pytest, temp git repo fixtures — never the real vault.
 ```
@@ -198,7 +202,8 @@ daylog-vault/
   plans/<date>.md          # planner output (+ the chosen option)
   reviews/<week>.md        # weekly reviews
   usage.yaml               # API spend per month and kind
-  profile.yaml             # durable personal preferences
+  profile.yaml             # durable preferences (surf comfort, fly rules)
+  profile.md               # the user's operating principles — read by chat, planner, review, brief
 ```
 
 ```yaml
@@ -265,6 +270,8 @@ daylog-vault/
 | `/plan` | 2-3 dated route options to pick from |
 | `/review`, `/reconcile [date]` | Weekly review now; rebuild a day from all its notes |
 | `/usage` | API spend this month vs budget |
+| `/surf`, `/fly` | Rated surf windows per spot / paragliding flyability per launch — no LLM cost |
+| `/undo` | Revert one of the bot's recent changes |
 | `/status`, `/upcoming`, `/brief`, `/backdate`, `/start` | As before |
 
 Scheduled: morning brief (`BRIEF_HOUR`), reconcile (`DAY_CUTOFF_HOUR`),
