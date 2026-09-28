@@ -10,7 +10,9 @@ have changed: events in the next weeks, ferry/flight schedules and
 prices from where they are, current season conditions. Then call
 `record_plan` once.
 
-What a good plan does:
+What a good plan does (their operating principles, when given, outrank
+generic advice — e.g. depth in one anchor sport over collecting
+certificates, fun protected over duty):
 - Fits the hard constraints first. A deadline (visa expiry, a start date
   they've committed to) is a wall, not a preference. If their journal
   says they're unsure whether to honor one, plan around it and say so.

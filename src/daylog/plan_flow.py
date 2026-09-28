@@ -79,6 +79,8 @@ def build_context(v: Vault, now: datetime) -> str:
         f"Date reference:\n{brief._date_reference_table(today, days=60)}\n\n"
         f"Currently in: {where}\n\n"
         f"Profile:\n{chr(10).join(profile_lines) or '(none)'}\n\n"
+        f"Their own operating principles (weigh plans against these):\n"
+        f"{v.read_principles().strip() or '(none written)'}\n\n"
         f"Goals:\n{chr(10).join(goal_lines) or '(none)'}\n\n"
         f"Hard deadlines:\n{chr(10).join(hard) or '(none recorded)'}\n\n"
         f"Last 30 days:\n{trail_text}\n\n"

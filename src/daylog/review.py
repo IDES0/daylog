@@ -105,6 +105,7 @@ def build_input(
     goals_lines: str,
     last_review: str | None,
     spend: str,
+    principles: str = "",
 ) -> str:
     days = []
     for d, entry in sorted(entries.items()):
@@ -114,6 +115,8 @@ def build_input(
         heading = f"## {d.isoformat()} ({d.strftime('%A')})"
         days.append(f"{heading}\n{entry.summary}\n{json.dumps(fm, default=str)}")
     return (
+        f"Their own operating principles (the lens for this review):\n"
+        f"{principles.strip() or '(none written)'}\n\n"
         f"Goals:\n{goals_lines}\n\n"
         f"This week's numbers (computed, exact):\n{json.dumps(stats, default=str, indent=1)}\n\n"
         f"API spend: {spend}\n\n"

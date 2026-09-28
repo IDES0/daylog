@@ -319,6 +319,11 @@ class Vault:
     def profile_path(self) -> Path:
         return self.path / "profile.yaml"
 
+    def read_principles(self) -> str:
+        """profile.md — the user's own operating principles (what drives them, how
+        their motivation works, their rules). Private to the vault; '' if absent."""
+        return self.read_text("profile.md") or ""
+
     def read_profile(self) -> Any:
         """Load profile.yaml — hand-curated durable preferences, read-only for now."""
         if not self.profile_path.exists():

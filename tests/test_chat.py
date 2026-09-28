@@ -148,3 +148,10 @@ def test_apply_proposal_applies_hard_dates_without_a_second_prompt() -> None:
     )
     assert data[0]["deadline"] == date(2026, 10, 20)
     assert "2026-10-20" in outcome
+
+
+def test_context_block_carries_the_users_principles(vault: Vault) -> None:
+    _seed(vault)
+    vault.write_text("profile.md", "- Play turns motivation on; duty turns it off.\n", "profile")
+    block = chat.context_block(vault, NOW.date(), NOW)
+    assert "Their own operating principles:\n- Play turns motivation on" in block

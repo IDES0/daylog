@@ -476,6 +476,7 @@ async def _send_brief(context: ContextTypes.DEFAULT_TYPE, chat_id: int) -> None:
             },
             morning_research=vault.read_text(f"research/daily/{today.isoformat()}.md"),
             current_plan=plan_flow.latest_plan(vault),
+            principles=vault.read_principles(),
         )
     except Exception:
         logger.exception("failed to generate brief")

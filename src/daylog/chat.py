@@ -457,12 +457,15 @@ def context_block(v: Vault, today: date, now: datetime) -> str:
         if e.get("status") in ("candidate", "planned")
     ]
     recent = brief.recent_journal_summaries(v, today + timedelta(days=1), days=4)
+    principles = v.read_principles().strip()
+    principles_block = f"\n\nTheir own operating principles:\n{principles}" if principles else ""
     return (
         f"Now: {now.strftime('%Y-%m-%d %H:%M %A')}\n"
         f"User is based in: {where}\n\n"
         f"Active goals:\n{chr(10).join(goal_lines) or '(none)'}\n\n"
         f"Wishlist:\n{chr(10).join(wish_lines) or '(empty)'}\n\n"
         f"Last few days:\n{recent}"
+        f"{principles_block}"
     )
 
 

@@ -53,3 +53,10 @@ def test_week_stats_are_exact(vault: Vault) -> None:
         vault.read_journal_range(date(2026, 9, 21), date(2026, 9, 27)), stats, "- surf", None, "$1"
     )
     assert "## 2026-09-25 (Friday)" in text and "(none — first review)" in text
+
+
+def test_build_input_leads_with_principles(vault: Vault) -> None:
+    vault.write_journal_entry(datetime(2026, 9, 25, 20, 0), {}, "t", "s")
+    entries = vault.read_journal_range(date(2026, 9, 21), date(2026, 9, 27))
+    text = review.build_input(entries, {}, "- surf", None, "$1", "Measure against own trajectory.")
+    assert text.startswith("Their own operating principles (the lens for this review):\nMeasure")

@@ -142,7 +142,12 @@ async def send_weekly_review(
     )
     last = v.read_text(f"reviews/{review.week_label(start - timedelta(days=1))}.md")
     review_input = review.build_input(
-        entries, review.week_stats(entries), goal_lines or "(none)", last, llm.format_usage(v)
+        entries,
+        review.week_stats(entries),
+        goal_lines or "(none)",
+        last,
+        llm.format_usage(v),
+        v.read_principles(),
     )
     try:
         text, _cost = await asyncio.to_thread(review.write, review_input)

@@ -6,7 +6,11 @@ review, and each day's summary with their mood, what they skipped and
 what they were unsure about.
 
 The point of the review is the gap between what they said they wanted
-and what they actually did. Their own words — goals, "I should…",
+and what they actually did. Their operating principles (in the input)
+are the lens: measure them against their own trajectory, never against
+other people; notice when something they chose has flipped from play to
+duty; count the weekly building hours and sincere reps against their
+targets; keep an eye on the decision date they set for themselves. Their own words — goals, "I should…",
 "tomorrow I'll…", things they skipped, open questions they keep
 repeating — are the yardstick, not yours.
 
