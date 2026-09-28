@@ -412,8 +412,10 @@ def conditions_reports(
     comfort = profile.get("surf_comfort_face_m") if isinstance(profile, dict) else None
     rules = profile.get("fly_rules") if isinstance(profile, dict) else None
     tz = str(_tz())
-    rated_surf = surf.report(index.region_nodes(here, ("surf_spot",)), tz, comfort_face=comfort)
-    rated_fly = fly.report(index.region_nodes(here, ("fly_site",)), tz, rules)
+    surf_spots = index.with_coordinates(index.region_nodes(here, ("surf_spot",)))
+    fly_sites = index.with_coordinates(index.region_nodes(here, ("fly_site",)))
+    rated_surf = surf.report(surf_spots, tz, comfort_face=comfort)
+    rated_fly = fly.report(fly_sites, tz, rules)
     return rated_surf, rated_fly
 
 

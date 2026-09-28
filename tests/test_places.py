@@ -83,3 +83,13 @@ def test_ancestors_survive_a_cycle() -> None:
         {"id": "b", "name": "B", "kind": "town", "parent": "a"},
     ]
     assert [n["id"] for n in PlaceIndex(nodes).ancestors("a")] == ["b"]
+
+
+def test_with_coordinates_borrows_the_nearest_ancestors() -> None:
+    index = _index()
+    nodes = index.with_coordinates([index.by_id["ramen-otaku"], index.by_id["ekas-bay"]])
+    # ramen-otaku has no coords and neither do kuta/lombok/indonesia in the fixture → dropped
+    assert [n["id"] for n in nodes] == ["ekas-bay"]
+    index.by_id["kuta"]["lat"], index.by_id["kuta"]["lon"] = -8.9, 116.3
+    nodes = index.with_coordinates([index.by_id["ramen-otaku"]])
+    assert nodes[0]["lat"] == -8.9 and "lat" not in index.by_id["ramen-otaku"]

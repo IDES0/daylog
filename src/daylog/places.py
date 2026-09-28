@@ -203,6 +203,21 @@ class PlaceIndex:
         region = self.region_of(place["id"]) or place
         return self.descendants(region["id"], kinds)
 
+    def with_coordinates(self, nodes: list[Any]) -> list[Any]:
+        """Copies of `nodes`, each given its nearest ancestor's lat/lon when it has
+        none — a spot a few hundred metres from its town sits in the same weather
+        model cell, so the town's coordinates forecast it just as well."""
+        out = []
+        for node in nodes:
+            if node.get("lat") is not None and node.get("lon") is not None:
+                out.append(node)
+                continue
+            for ancestor in self.ancestors(node["id"]):
+                if ancestor.get("lat") is not None and ancestor.get("lon") is not None:
+                    out.append({**node, "lat": ancestor["lat"], "lon": ancestor["lon"]})
+                    break
+        return out
+
     def forecast_spots(self, place: Any | None) -> list[Any]:
         """Surf/wind spots with coordinates in the same region as `place`."""
         if place is None:
