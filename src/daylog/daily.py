@@ -141,6 +141,8 @@ async def send_weekly_review(
         for g in goals.active_summary(v.read_goals())
     )
     last = v.read_text(f"reviews/{review.week_label(start - timedelta(days=1))}.md")
+    weekly_docs = v.list_docs("research/weekly")
+    weekly_research = v.read_text(weekly_docs[-1]) if weekly_docs else None
     review_input = review.build_input(
         entries,
         review.week_stats(entries),
@@ -148,6 +150,7 @@ async def send_weekly_review(
         last,
         llm.format_usage(v),
         v.read_principles(),
+        weekly_research,
     )
     try:
         text, _cost = await asyncio.to_thread(review.write, review_input)

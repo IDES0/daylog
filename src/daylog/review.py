@@ -106,6 +106,7 @@ def build_input(
     last_review: str | None,
     spend: str,
     principles: str = "",
+    weekly_research: str | None = None,
 ) -> str:
     days = []
     for d, entry in sorted(entries.items()):
@@ -120,6 +121,8 @@ def build_input(
         f"Goals:\n{goals_lines}\n\n"
         f"This week's numbers (computed, exact):\n{json.dumps(stats, default=str, indent=1)}\n\n"
         f"API spend: {spend}\n\n"
+        f"This week's research routine (focus guides, discovery, next-move check):\n"
+        f"{(weekly_research or '(none this week)')[:4000]}\n\n"
         f"Last week's review:\n{last_review or '(none — first review)'}\n\n"
         f"This week's journal:\n\n" + "\n\n".join(days)
     )

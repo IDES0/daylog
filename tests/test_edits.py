@@ -196,3 +196,35 @@ def test_place_edit_can_change_the_places_own_kind(vault: Vault) -> None:
         vault, {"edit": "place", "place_id": "ramen-otaku", "kind": "venue"}, TODAY
     )
     assert "kind food → venue" in outcome
+
+
+def test_edit_focus_add_remove_replace() -> None:
+    profile: dict[str, Any] = {"surf_skill": "intermediate"}
+    assert edits.edit_focus(profile, {"action": "add", "item": "Surf: rights technique"}) == (
+        "focus +Surf: rights technique"
+    )
+    with pytest.raises(edits.EditError, match="already"):
+        edits.edit_focus(profile, {"action": "add", "item": "Surf: rights technique"})
+    edits.edit_focus(profile, {"action": "add", "item": "Paragliding: APPI 3"})
+    assert (
+        edits.edit_focus(profile, {"action": "remove", "item": "appi"})
+        == "focus -Paragliding: APPI 3"
+    )
+    edits.edit_focus(profile, {"list": "research_less", "action": "add", "item": "nightlife"})
+    edits.edit_focus(profile, {"action": "replace", "items": ["A", "B"]})
+    assert profile["focus"] == ["A", "B"] and profile["research_less"] == ["nightlife"]
+    with pytest.raises(edits.EditError, match="can only edit"):
+        edits.edit_focus(profile, {"list": "goals", "action": "add", "item": "x"})
+
+
+def test_focus_edit_through_chat_writes_profile_and_shows_in_context(vault: Vault) -> None:
+    _seed(vault)
+    vault.write_yaml("profile.yaml", {"surf_skill": "intermediate"}, "profile")
+    tools = chat.Tools(vault, TODAY)
+    assert tools.run(
+        "propose_focus_edit", {"action": "add", "item": "Surf: rights", "summary": "x"}
+    ).startswith("Proposed")
+    apply_edit(vault, tools.proposals[0], TODAY)
+    assert vault.read_profile()["focus"] == ["Surf: rights"]
+    block = chat.context_block(vault, TODAY, datetime(2026, 9, 28, 9, 0))
+    assert "Current focus (their explicit steer):\n- Surf: rights" in block

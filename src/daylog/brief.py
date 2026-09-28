@@ -182,6 +182,12 @@ def generate_brief(
     if dossier_digests:
         digests = "\n\n".join(f"{name}:\n{text}" for name, text in dossier_digests.items())
         user_content += f"\n\nResearch on wishlist destinations (timing and events):\n{digests}"
+    focus = (profile_data or {}).get("focus") if isinstance(profile_data, dict) else None
+    if focus:
+        user_content += (
+            "\n\nWhat the user is focused on right now (lead with these):\n"
+            + "\n".join(f"- {f}" for f in focus)
+        )
     if principles:
         user_content += (
             "\n\nThe user's own operating principles and rules (use them to choose "

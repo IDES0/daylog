@@ -84,9 +84,18 @@ TOOLS: list[ToolParam] = [
     ),
     _tool(
         "get_research",
-        "The research file for a place id, if one exists (seasons, events, getting there).",
-        {"place_id": {"type": "string"}},
+        "A research file: a place id (destination research), or a path under research/ "
+        "such as 'decisions/paragliding-school', 'focus/surf-technique', 'daily/2026-09-28' "
+        "or 'weekly/2026-10-04'. Call list_research to see what exists.",
+        {"place_id": {"type": "string", "description": "Place id or research/ path."}},
         ["place_id"],
+    ),
+    _tool(
+        "list_research",
+        "List the research files: destination research, decisions in progress, focus "
+        "guides, and recent daily/weekly routine files.",
+        {},
+        [],
     ),
     _tool(
         "add_place_note",
@@ -201,6 +210,21 @@ TOOLS: list[ToolParam] = [
             "summary": {"type": "string"},
         },
         ["summary"],
+    ),
+    _tool(
+        "propose_focus_edit",
+        "Change what research and the brief centre on right now: the user's explicit "
+        "`focus` list (e.g. 'Surf: rights technique — pop-up, stay low'), or their research "
+        "preferences (`research_more` / `research_less`). add/remove one item, or replace "
+        "the whole list.",
+        {
+            "list": {"type": "string", "enum": ["focus", "research_more", "research_less"]},
+            "action": {"type": "string", "enum": ["add", "remove", "replace"]},
+            "item": {"type": "string"},
+            "items": {"type": "array", "items": {"type": "string"}},
+            "summary": {"type": "string"},
+        },
+        ["action", "summary"],
     ),
     _tool(
         "start_ranking",
@@ -337,7 +361,20 @@ class Tools:
         )
 
     def t_get_research(self, place_id: str) -> str:
-        return self.v.read_text(f"research/{place_id}.md") or "No research file for that place yet."
+        path = place_id.strip().removeprefix("research/").removesuffix(".md")
+        if ".." in path:
+            return "Bad path."
+        return self.v.read_text(f"research/{path}.md") or "No research file there yet."
+
+    def t_list_research(self) -> str:
+        lines = []
+        for folder in ("research", "research/decisions", "research/focus"):
+            lines += self.v.list_docs(folder)
+        for folder in ("research/daily", "research/weekly"):
+            lines += self.v.list_docs(folder)[-3:]
+        return (
+            "\n".join(p.removeprefix("research/").removesuffix(".md") for p in lines) or "None yet."
+        )
 
     def t_add_place_note(self, place_id: str, text: str) -> str:
         files = self.v.read_place_files()
@@ -385,6 +422,9 @@ class Tools:
     def t_propose_goal_edit(self, **change: Any) -> str:
         return self._propose("goal", change)
 
+    def t_propose_focus_edit(self, **change: Any) -> str:
+        return self._propose("focus", change)
+
     def t_start_ranking(self, place_id: str) -> str:
         if place_id not in self.index.by_id:
             return f"No place with id {place_id}."
@@ -427,6 +467,8 @@ def edits_preview(v: Vault, kind: str, change: dict[str, Any], today: date) -> s
         return edits.edit_location(copy.deepcopy(list(v.read_location())), change)
     if kind == "goal":
         return edits.edit_goal(copy.deepcopy(list(v.read_goals())), change, today)
+    if kind == "focus":
+        return edits.edit_focus(copy.deepcopy(v.read_profile() or {}), change)
     raise edits.EditError(f"unknown edit kind {kind!r}")
 
 
@@ -459,10 +501,14 @@ def context_block(v: Vault, today: date, now: datetime) -> str:
     recent = brief.recent_journal_summaries(v, today + timedelta(days=1), days=4)
     principles = v.read_principles().strip()
     principles_block = f"\n\nTheir own operating principles:\n{principles}" if principles else ""
+    profile = v.read_profile() or {}
+    focus = profile.get("focus") if isinstance(profile, dict) else None
+    focus_lines = "\n".join(f"- {f}" for f in focus or []) or "(none set — infer from goals)"
     return (
         f"Now: {now.strftime('%Y-%m-%d %H:%M %A')}\n"
         f"User is based in: {where}\n\n"
         f"Active goals:\n{chr(10).join(goal_lines) or '(none)'}\n\n"
+        f"Current focus (their explicit steer):\n{focus_lines}\n\n"
         f"Wishlist:\n{chr(10).join(wish_lines) or '(empty)'}\n\n"
         f"Last few days:\n{recent}"
         f"{principles_block}"

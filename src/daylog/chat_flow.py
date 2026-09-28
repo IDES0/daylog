@@ -119,6 +119,7 @@ _ICONS = {
     "journal": "📓",
     "location": "🧭",
     "goal": "🎯",
+    "focus": "🔭",
 }
 
 
@@ -179,6 +180,11 @@ def apply_edit(v: Vault, proposal: dict[str, Any], today: date) -> str:
         data = v.read_goals()
         outcome = edits.edit_goal(data, proposal, today)
         v.write_goals(data, f"goals: {outcome}")
+        return outcome
+    if kind == "focus":
+        profile = v.read_profile() or {}
+        outcome = edits.edit_focus(profile, proposal)
+        v.write_profile(profile, f"profile: {outcome}")
         return outcome
     raise edits.EditError(f"unknown edit kind {kind!r}")
 

@@ -308,3 +308,46 @@ def edit_goal(goals_data: list[Any], edit: dict[str, Any], on: date) -> str:
             else:
                 goal["target_window"] = [on, new_date]
     return f"{'created' if created else 'updated'} goal {goal['title']}"
+
+
+# -- focus & research preferences (profile.yaml) ------------------------------------
+
+FOCUS_LISTS = ("focus", "research_more", "research_less")
+
+
+def edit_focus(profile: Any, edit: dict[str, Any]) -> str:
+    """add / remove / replace items in profile.yaml's `focus` list (what research and
+    the brief should centre on right now) or the research_more / research_less lists.
+
+    `focus` is the explicit steer; anything not listed is inferred from goals and
+    dates by the research routine."""
+    target = edit.get("list", "focus")
+    if target not in FOCUS_LISTS:
+        raise EditError(f"can only edit {', '.join(FOCUS_LISTS)}")
+    if not isinstance(profile, dict):
+        raise EditError("profile.yaml is not a mapping")
+    items = profile.get(target)
+    if items is None:
+        items = []
+        profile[target] = items
+    action = edit.get("action", "add")
+    if action == "replace":
+        new_items = [str(i) for i in edit.get("items") or []]
+        items.clear()
+        items.extend(new_items)
+        return f"{target} set to {len(new_items)} item(s)"
+    text = str(edit.get("item", "")).strip()
+    if not text:
+        raise EditError("nothing to add or remove")
+    if action == "add":
+        if text in items:
+            raise EditError(f"already in {target}")
+        items.append(text)
+        return f"{target} +{text}"
+    if action == "remove":
+        match = next((i for i in items if text.lower() in str(i).lower()), None)
+        if match is None:
+            raise EditError(f"nothing in {target} matches {text!r}")
+        items.remove(match)
+        return f"{target} -{match}"
+    raise EditError(f"unknown action {action!r}")

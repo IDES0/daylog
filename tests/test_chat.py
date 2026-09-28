@@ -155,3 +155,16 @@ def test_context_block_carries_the_users_principles(vault: Vault) -> None:
     vault.write_text("profile.md", "- Play turns motivation on; duty turns it off.\n", "profile")
     block = chat.context_block(vault, NOW.date(), NOW)
     assert "Their own operating principles:\n- Play turns motivation on" in block
+
+
+def test_research_tools_read_decisions_and_focus(vault: Vault) -> None:
+    _seed(vault)
+    vault.write_text("research/decisions/paragliding-school.md", "# PG school\n", "d")
+    vault.write_text("research/focus/surf-technique.md", "# Rights\n", "f")
+    tools = chat.Tools(vault, NOW.date())
+    listing = tools.run("list_research", {})
+    assert "decisions/paragliding-school" in listing and "focus/surf-technique" in listing
+    assert (
+        tools.run("get_research", {"place_id": "decisions/paragliding-school"}) == "# PG school\n"
+    )
+    assert tools.run("get_research", {"place_id": "../goals"}) == "Bad path."

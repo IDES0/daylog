@@ -324,6 +324,9 @@ class Vault:
         their motivation works, their rules). Private to the vault; '' if absent."""
         return self.read_text("profile.md") or ""
 
+    def write_profile(self, profile: Any, commit_message: str) -> Path:
+        return self.write_yaml("profile.yaml", profile, commit_message)
+
     def read_profile(self) -> Any:
         """Load profile.yaml — hand-curated durable preferences, read-only for now."""
         if not self.profile_path.exists():
