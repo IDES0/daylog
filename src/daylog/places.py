@@ -24,6 +24,7 @@ KINDS = (
     "town",
     "surf_spot",
     "wind_spot",
+    "fly_site",
     "dive_site",
     "hike",
     "viewpoint",
@@ -194,6 +195,13 @@ class PlaceIndex:
         if node is not None:
             return node
         return self.resolve_location(str(location_entry.get("place", "")))
+
+    def region_nodes(self, place: Any | None, kinds: Iterable[str]) -> list[Any]:
+        """Nodes of `kinds` anywhere in `place`'s region (or under `place` itself)."""
+        if place is None:
+            return []
+        region = self.region_of(place["id"]) or place
+        return self.descendants(region["id"], kinds)
 
     def forecast_spots(self, place: Any | None) -> list[Any]:
         """Surf/wind spots with coordinates in the same region as `place`."""

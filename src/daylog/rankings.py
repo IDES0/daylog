@@ -27,6 +27,7 @@ CATEGORIES: dict[str, tuple[str, ...]] = {
     "stay": ("stay",),
     "outdoors": ("hike", "viewpoint", "beach"),
     "nightlife": ("venue",),
+    "flying": ("fly_site",),
 }
 
 TIERS = ("liked", "fine", "disliked")

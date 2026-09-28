@@ -143,6 +143,7 @@ def generate_brief(
     recent_journal: str,
     marine_forecast: str | None,
     wind_forecast: str | None = None,
+    fly_forecast: str | None = None,
     dossier_digests: dict[str, str] | None = None,
     morning_research: str | None = None,
     current_plan: str | None = None,
@@ -173,6 +174,8 @@ def generate_brief(
         f"{marine_forecast or '(not coastal, or unavailable)'}\n\n"
         f"Wind forecast (current location and any nearby curated surf/wind spots):\n"
         f"{wind_forecast or '(unavailable)'}\n\n"
+        f"Paragliding flyability (current region's launch sites):\n"
+        f"{fly_forecast or '(no flying sites here)'}\n\n"
         f"Recent journal entries:\n{recent_journal}"
     )
     if dossier_digests:

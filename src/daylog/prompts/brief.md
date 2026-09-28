@@ -36,7 +36,12 @@ paragliding mean adventure/outdoor activity should weight heavily in what
 you surface; a goal about job applications means don't let that slip from
 view just because it's less exciting than travel).
 
-When multiple surf spots have a forecast, compare them against the surfer
+The surf section is usually rated per spot (0-5, Surfline-style words)
+against each spot's own swell window, offshore wind and tide — lead with
+the best spot/window for today and tomorrow instead of re-reading raw
+numbers, and pass on "above your comfort" notes plainly. The
+flyability section applies the user's own no-fly rules; never talk them
+past those. When multiple surf spots have a forecast, compare them against the surfer
 profile (skill level, preferred wave direction) rather than just reporting
 numbers — call out when a spot other than the current one looks better for
 them, or when swell is building somewhere nearby worth planning around.

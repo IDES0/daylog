@@ -51,7 +51,7 @@ from daylog.dateparse import parse_date_phrase
 from daylog.goals import active_summary as _active_goals_summary
 from daylog.itinerary import active_summary as _active_itinerary_summary
 from daylog.places import PlaceIndex
-from daylog.sources import marine, wind
+from daylog.sources import fly, marine, surf, wind
 from daylog.tg import allowed_user_id as _allowed_user_id
 from daylog.tg import chunks as _chunks
 from daylog.tg import is_authorized as _is_authorized
@@ -402,6 +402,47 @@ def _fetch_wind_forecast(
     return _fetch_conditions(current, places_data, tz, wind.fetch_forecast)
 
 
+def conditions_reports(
+    vault: Any, current: dict[str, Any] | None, places_data: Any
+) -> tuple[str | None, str | None]:
+    """(rated surf report, flyability report) for the current region — free, no LLM."""
+    index = PlaceIndex(list(places_data or []))
+    here = index.current_place(current)
+    profile = vault.read_profile() or {}
+    comfort = profile.get("surf_comfort_face_m") if isinstance(profile, dict) else None
+    rules = profile.get("fly_rules") if isinstance(profile, dict) else None
+    tz = str(_tz())
+    rated_surf = surf.report(index.region_nodes(here, ("surf_spot",)), tz, comfort_face=comfort)
+    rated_fly = fly.report(index.region_nodes(here, ("fly_site",)), tz, rules)
+    return rated_surf, rated_fly
+
+
+async def surf_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """/surf — rated conditions for every profiled spot around you (no API cost)."""
+    if not _is_authorized(update):
+        return
+    message = update.message
+    assert message is not None
+    vault = _vault()
+    current = brief.current_location(vault.read_location())
+    rated, _ = conditions_reports(vault, current, vault.read_places())
+    for chunk in _chunks(rated or "No surf spots with a profile around here yet."):
+        await message.reply_text(chunk)
+
+
+async def fly_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """/fly — paragliding flyability for launch sites around you (no API cost)."""
+    if not _is_authorized(update):
+        return
+    message = update.message
+    assert message is not None
+    vault = _vault()
+    current = brief.current_location(vault.read_location())
+    _, rated = conditions_reports(vault, current, vault.read_places())
+    for chunk in _chunks(rated or "No launch sites with a profile around here yet."):
+        await message.reply_text(chunk)
+
+
 async def _send_brief(context: ContextTypes.DEFAULT_TYPE, chat_id: int) -> None:
     bot = context.bot
     await bot.send_message(chat_id=chat_id, text="Building your brief...")
@@ -412,7 +453,10 @@ async def _send_brief(context: ContextTypes.DEFAULT_TYPE, chat_id: int) -> None:
         places_data = vault.read_places()
 
         current = brief.current_location(location_data)
-        marine_forecast = _fetch_marine_forecast(current, places_data, _tz())
+        rated_surf, rated_fly = conditions_reports(vault, current, places_data)
+        # Spots with a surf profile get per-spot ratings; the plain daily
+        # numbers are the fallback for regions nobody has profiled yet.
+        marine_forecast = rated_surf or _fetch_marine_forecast(current, places_data, _tz())
         wind_forecast = _fetch_wind_forecast(current, places_data, _tz())
 
         text = brief.generate_brief(
@@ -425,6 +469,7 @@ async def _send_brief(context: ContextTypes.DEFAULT_TYPE, chat_id: int) -> None:
             recent_journal=brief.recent_journal_summaries(vault, today),
             marine_forecast=marine_forecast,
             wind_forecast=wind_forecast,
+            fly_forecast=rated_fly,
             dossier_digests={
                 name: wishlist_flow.dossier_digest(text)
                 for name, text in wishlist_flow.dossiers_for(vault, vault.read_itinerary()).items()
@@ -988,6 +1033,8 @@ async def _post_init(application: Application) -> None:  # type: ignore[type-arg
             BotCommand("trip", "Reconstruct the stops of your last multi-day trip"),
             BotCommand("backfill", "Link unlinked place names in recent entries"),
             BotCommand("usage", "API spend this month"),
+            BotCommand("surf", "Rated surf forecast for spots around you"),
+            BotCommand("fly", "Paragliding flyability for launches around you"),
             BotCommand("want", "Add a destination to your wishlist (/want Mentawai)"),
             BotCommand("wishlist", "Destinations you want to go, with research status"),
             BotCommand("plan", "Plan the next few weeks (2-3 options to pick from)"),
@@ -1015,6 +1062,8 @@ def build_application() -> Application:  # type: ignore[type-arg]
     application.add_handler(CommandHandler("trip", research_flow.trip_command))
     application.add_handler(CommandHandler("backfill", research_flow.backfill_command))
     application.add_handler(CommandHandler("usage", research_flow.usage_command))
+    application.add_handler(CommandHandler("surf", surf_command))
+    application.add_handler(CommandHandler("fly", fly_command))
     application.add_handler(CommandHandler("want", wishlist_flow.want_command))
     application.add_handler(CommandHandler("wishlist", wishlist_flow.wishlist_command))
     application.add_handler(
