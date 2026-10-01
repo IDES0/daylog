@@ -6,11 +6,12 @@ doing anything else — this is the only auth layer, so it must run first.
 
 from __future__ import annotations
 
+import io
 import logging
 import os
 import tempfile
 import uuid
-from collections.abc import Callable
+from collections.abc import Callable, Coroutine
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 from datetime import time as dt_time
@@ -19,7 +20,14 @@ from typing import Any
 from zoneinfo import ZoneInfo
 
 from dotenv import load_dotenv
-from telegram import BotCommand, InlineKeyboardButton, InlineKeyboardMarkup, Message, Update
+from telegram import (
+    BotCommand,
+    InlineKeyboardButton,
+    InlineKeyboardMarkup,
+    InputFile,
+    Message,
+    Update,
+)
 from telegram.ext import (
     Application,
     ApplicationBuilder,
@@ -35,6 +43,7 @@ from daylog import (
     calendar_server,
     chat_flow,
     daily,
+    export,
     extract,
     goals,
     itinerary,
@@ -505,6 +514,44 @@ async def send_scheduled_brief(context: ContextTypes.DEFAULT_TYPE) -> None:
     await _send_brief(context, _allowed_user_id())
 
 
+EXPORT_DEFAULT_DAYS = 90
+
+
+async def export_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """/export [days|all] — the journal as CSV files: one row per day, one per meal."""
+    if not _is_authorized(update):
+        return
+    message = update.message
+    assert message is not None
+    vault = _vault()
+    dates = vault.list_journal_dates()
+    if not dates:
+        await message.reply_text("Nothing logged yet.")
+        return
+    arg = (context.args or [str(EXPORT_DEFAULT_DAYS)])[0].lower()
+    end = max(dates)
+    if arg == "all":
+        start_day = min(dates)
+    elif arg.isdigit() and int(arg) > 0:
+        start_day = end - timedelta(days=int(arg) - 1)
+    else:
+        await message.reply_text("Usage: /export, /export 30 or /export all")
+        return
+    entries = vault.read_journal_range(start_day, end)
+    files = (
+        (
+            "daylog-days.csv",
+            export.to_csv(export.day_rows(entries, vault.read_location()), export.DAY_COLUMNS),
+        ),
+        ("daylog-meals.csv", export.to_csv(export.meal_rows(entries), export.MEAL_COLUMNS)),
+    )
+    for filename, text in files:
+        await message.reply_document(
+            InputFile(io.BytesIO(text.encode("utf-8")), filename=filename),
+            caption=f"{len(entries)} days, {start_day.isoformat()} to {end.isoformat()}",
+        )
+
+
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not _is_authorized(update):
         return
@@ -513,8 +560,8 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     await message.reply_text(
         "daylog is listening.\n\n"
         "🎙 A voice note logs today (before 4am it still counts as yesterday).\n"
-        "📝 Yesterday / 📅 Pick date: your next voice note or message logs to that day.\n"
-        "✍️ Type an entry: your next typed message is today's journal.\n"
+        "📝 Log: pick a day, then your next voice note or message logs to it.\n"
+        "🌊 Surf · 🪂 Fly · ☀️ Brief · 🗺 Plan run those right away; ⋯ More has the rest.\n"
         "💬 Anything else you type goes to the assistant — ask about your trips, "
         "plans, places, rankings, or where to go next.\n\n"
         'Corrections work by voice too ("actually I only surfed 1 hour") — I\'ll ask '
@@ -920,9 +967,16 @@ async def _log_entry(transcript: str, message: Message, context: ContextTypes.DE
             )
             return
 
+        food_note = ""
+        if facts.get("meals"):
+            logged = vault.read_journal_entry(entry_time.date())
+            food_line = export.day_summary(logged.frontmatter) if logged else None
+            if food_line:
+                food_note = f"\n\n{food_line} so far that day"
+
         await message.reply_text(
             f"Logged {entry_time.date().isoformat()}:\n\n{summary}"
-            f"{goals_note}{itinerary_note}{location_note}{other_day_note}",
+            f"{goals_note}{itinerary_note}{location_note}{other_day_note}{food_note}",
             reply_markup=chat_flow.MENU,
         )
         try:
@@ -976,6 +1030,28 @@ async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     await _log_entry(transcript, message, context)
 
 
+_Command = Callable[[Update, ContextTypes.DEFAULT_TYPE], Coroutine[Any, Any, None]]
+
+
+def _button_commands() -> dict[str, _Command]:
+    """Menu button label -> the command it runs (the same handler as /command)."""
+    return {
+        chat_flow.BTN_SURF: surf_command,
+        chat_flow.BTN_FLY: fly_command,
+        chat_flow.BTN_BRIEF: brief_command,
+        chat_flow.BTN_PLAN: plan_flow.plan_command,
+        chat_flow.BTN_STATUS: status,
+        chat_flow.BTN_UPCOMING: upcoming,
+        chat_flow.BTN_TRAIL: trail_command,
+        chat_flow.BTN_RANKINGS: rank_flow.rankings_command,
+        chat_flow.BTN_WISHLIST: wishlist_flow.wishlist_command,
+        chat_flow.BTN_REVIEW: daily.review_command,
+        chat_flow.BTN_UNDO: chat_flow.undo_command,
+        chat_flow.BTN_USAGE: research_flow.usage_command,
+        chat_flow.BTN_EXPORT: export_command,
+    }
+
+
 async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Menu buttons, then journal (when a day was picked), else the assistant."""
     if not _is_authorized(update):
@@ -987,19 +1063,18 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     now = datetime.now(_tz())
     today = daily.logical_day(now)
 
-    if text == chat_flow.BTN_YESTERDAY:
-        context.user_data[_PENDING_DATE_KEY] = today - timedelta(days=1)
-        await message.reply_text(
-            f"Logging to yesterday ({_format_short_date(today - timedelta(days=1))}) — "
-            "send a voice note or type it."
-        )
-        return
-    if text == chat_flow.BTN_PICK:
+    if text == chat_flow.BTN_LOG:
         await _send_backdate_picker(message, today)
         return
-    if text == chat_flow.BTN_TYPE:
-        context.user_data[_PENDING_DATE_KEY] = today
-        await message.reply_text(f"Type today's entry ({_format_short_date(today)}).")
+    if text == chat_flow.BTN_MORE:
+        await message.reply_text("More:", reply_markup=chat_flow.MORE_MENU)
+        return
+    if text == chat_flow.BTN_BACK:
+        await message.reply_text("Back to the main menu.", reply_markup=chat_flow.MENU)
+        return
+    command = _button_commands().get(text)
+    if command is not None:
+        await command(update, context)
         return
 
     if context.user_data.get(_PENDING_DATE_KEY) is not None:
@@ -1017,34 +1092,24 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     await chat_flow.handle_chat(message, context, text)
 
 
+# What Telegram's "/" list shows. Kept short on purpose — the reply keyboard
+# covers the everyday actions, and every other command still works typed.
+MENU_COMMANDS = (
+    ("brief", "Get a daily brief now"),
+    ("surf", "Rated surf forecast for spots around you"),
+    ("plan", "Plan the next few weeks (2-3 options to pick from)"),
+    ("status", "Show current goals and itinerary"),
+    ("export", "Your journal as CSV files (/export 30, /export all)"),
+    ("undo", "Revert one of the bot's recent changes"),
+    ("start", "How to use daylog"),
+)
+
+
 async def _post_init(application: Application) -> None:  # type: ignore[type-arg]
     # Registers Telegram's native "/" command menu, so the available
     # commands are tappable instead of something to remember/type exactly.
     await application.bot.set_my_commands(
-        [
-            BotCommand("start", "How to use daylog"),
-            BotCommand("status", "Show current goals and itinerary"),
-            BotCommand("upcoming", "Show dated goals/itinerary, earliest first"),
-            BotCommand("brief", "Get a daily brief now"),
-            BotCommand("backdate", "Log your next message under a recent past date"),
-            BotCommand("trail", "Where you've been (/trail, /trail 60, /trail all)"),
-            BotCommand("place", "What's known about a place (/place Lakey Peak)"),
-            BotCommand("rank", "Rank or re-rank a place (/rank Artisan)"),
-            BotCommand("reconcile", "Rebuild a day from all its notes now"),
-            BotCommand("explore", "Research the spots around where you are"),
-            BotCommand("research", "Write a research file on a place (/research Mentawai)"),
-            BotCommand("trip", "Reconstruct the stops of your last multi-day trip"),
-            BotCommand("backfill", "Link unlinked place names in recent entries"),
-            BotCommand("usage", "API spend this month"),
-            BotCommand("surf", "Rated surf forecast for spots around you"),
-            BotCommand("fly", "Paragliding flyability for launches around you"),
-            BotCommand("want", "Add a destination to your wishlist (/want Mentawai)"),
-            BotCommand("wishlist", "Destinations you want to go, with research status"),
-            BotCommand("plan", "Plan the next few weeks (2-3 options to pick from)"),
-            BotCommand("review", "This week's review now"),
-            BotCommand("undo", "Revert one of the bot's recent changes"),
-            BotCommand("rankings", "Your rankings (/rankings food)"),
-        ]
+        [BotCommand(name, description) for name, description in MENU_COMMANDS]
     )
 
 
@@ -1084,6 +1149,7 @@ def build_application() -> Application:  # type: ignore[type-arg]
         CallbackQueryHandler(research_flow.handle_place_callback, pattern=r"^place:")
     )
     application.add_handler(CommandHandler("rankings", rank_flow.rankings_command))
+    application.add_handler(CommandHandler("export", export_command))
     application.add_handler(CallbackQueryHandler(rank_flow.handle_rank_callback, pattern=r"^rank:"))
     application.add_handler(MessageHandler(filters.VOICE, handle_voice))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))

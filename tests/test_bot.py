@@ -207,3 +207,22 @@ def test_resolve_other_day_notes_only_keeps_known_fact_fields() -> None:
     )
 
     assert resolved[0].facts == {}
+
+
+def test_every_menu_button_is_routed() -> None:
+    """Each button on both keyboards either runs a command or is handled inline."""
+    from daylog import chat_flow
+
+    inline = {chat_flow.BTN_LOG, chat_flow.BTN_MORE, chat_flow.BTN_BACK}
+    labels = {
+        label
+        for keyboard in (chat_flow.MENU, chat_flow.MORE_MENU)
+        for row in keyboard.keyboard
+        for label in (button.text for button in row)
+    }
+    assert labels == inline | set(bot._button_commands())
+
+
+def test_slash_list_is_short_and_every_entry_has_a_handler() -> None:
+    names = [name for name, _ in bot.MENU_COMMANDS]
+    assert len(names) <= 8 and len(set(names)) == len(names)

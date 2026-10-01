@@ -261,7 +261,10 @@ daylog-vault/
 | Input | Effect |
 |---|---|
 | Voice note | Transcribed and logged to today (before `DAY_CUTOFF_HOUR`, yesterday) |
-| 📝 Yesterday / 📅 Pick date / ✍️ Type an entry | Menu buttons: the next voice note or typed message is logged to that day |
+| 📝 Log | Pick a day (today included); the next voice note or typed message is logged to it |
+| 🌊 Surf / 🪂 Fly / ☀️ Brief / 🗺 Plan | Menu buttons that run `/surf`, `/fly`, `/brief`, `/plan` |
+| ⋯ More | A second keyboard: status, upcoming, trail, rankings, wishlist, review, undo, usage, export |
+| `/export [days\|all]` | The journal as two CSV files (one row per day, one per meal) with rough nutrition estimates, energy/mood/focus and hours per activity |
 | Any other typed text | Goes to the assistant (vault tools + web search); changes come back as confirm cards |
 | `/trail [days\|all]`, `/place <name>` | Where you've been; what's known about a place |
 | `/rank <place>`, `/rankings [category]` | Beli-style rankings |

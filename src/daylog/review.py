@@ -60,11 +60,27 @@ def canonical_type(label: str) -> str:
     return _SYNONYMS.get(key, key)
 
 
+def _avg(values: list[int]) -> float | None:
+    return round(sum(values) / len(values), 1) if values else None
+
+
+def _has_number(item: Any, key: str) -> bool:
+    return (
+        isinstance(item, dict)
+        and isinstance(item.get(key), int | float)
+        and not isinstance(item.get(key), bool)
+    )
+
+
 def week_stats(entries: dict[date, JournalEntry]) -> dict[str, Any]:
     hours: dict[str, float] = defaultdict(float)
     counts: dict[str, int] = defaultdict(int)
     goal_deltas: dict[str, float] = defaultdict(float)
     energy: list[int] = []
+    mood: list[int] = []
+    focus: list[int] = []
+    kcal: list[float] = []
+    protein: list[float] = []
     places: list[str] = []
     meals = 0
     skipped: list[str] = []
@@ -83,8 +99,17 @@ def week_stats(entries: dict[date, JournalEntry]) -> dict[str, Any]:
             if isinstance(g, dict) and isinstance(g.get("delta"), int | float):
                 goal_deltas[str(g.get("goal_id"))] += float(g["delta"])
         for f in fm.get("felt") or []:
-            if isinstance(f, dict) and isinstance(f.get("energy"), int):
-                energy.append(f["energy"])
+            if not isinstance(f, dict):
+                continue
+            for key, scores in (("energy", energy), ("mood", mood), ("focus", focus)):
+                if isinstance(f.get(key), int):
+                    scores.append(f[key])
+        day_kcal = [m["kcal"] for m in fm.get("meals") or [] if _has_number(m, "kcal")]
+        day_protein = [m["protein_g"] for m in fm.get("meals") or [] if _has_number(m, "protein_g")]
+        if day_kcal:
+            kcal.append(sum(day_kcal))
+        if day_protein:
+            protein.append(sum(day_protein))
         meals += len(fm.get("meals") or [])
         skipped += [str(s) for s in fm.get("skipped") or []]
     return {
@@ -92,7 +117,12 @@ def week_stats(entries: dict[date, JournalEntry]) -> dict[str, Any]:
         "activity_counts": dict(sorted(counts.items(), key=lambda kv: -kv[1])),
         "activity_hours": {k: round(v, 1) for k, v in sorted(hours.items(), key=lambda kv: -kv[1])},
         "goal_deltas": dict(goal_deltas),
-        "avg_energy": round(sum(energy) / len(energy), 1) if energy else None,
+        "avg_energy": _avg(energy),
+        "avg_mood": _avg(mood),
+        "avg_focus": _avg(focus),
+        # Rough estimates, averaged over the days that have any.
+        "avg_kcal_per_day": round(sum(kcal) / len(kcal)) if kcal else None,
+        "avg_protein_g_per_day": round(sum(protein) / len(protein)) if protein else None,
         "meals_logged": meals,
         "places_visited": places,
         "skipped": skipped,

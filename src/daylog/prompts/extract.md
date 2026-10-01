@@ -60,10 +60,17 @@ Guidelines:
 - `meals`: one item per meal or snack the user mentions, with what they
   had, where (linked like activities), cost if stated, and their own
   verdict in their words if they gave one. "Had a smoothie" counts.
+  Always add your own rough nutrition estimate for each meal — `kcal`,
+  `protein_g`, `carbs_g`, `fat_g` — from the items and any portion they
+  mention, assuming a normal serving otherwise. These are the one place you
+  estimate rather than report: a ballpark is the point, don't leave them
+  out for lack of detail.
 - `felt`: only what the user says about how they felt — energy, body
   (sore, sick, hungover, stomach), mind (lazy, stoked, anxious) — with
   when in the day. Never infer a feeling from what they did. `energy` is
-  1 (wrecked) to 5 (great), set only when clearly implied.
+  1 (wrecked) to 5 (great), set only when clearly implied. `mood` (1 low
+  to 5 great) and `focus` (1 scattered to 5 locked in) work the same way:
+  a number only when what they said clearly implies one.
 - `goal_progress`: only when an activity clearly maps to a goal in the
   provided list. `goal_id` must be copied exactly from that list — never
   invent one, never use a goal's title as its id. `delta` is in that goal's

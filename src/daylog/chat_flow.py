@@ -2,7 +2,8 @@
 
 Routing (see bot.handle_text / handle_voice):
 - a voice note is a journal entry for today (or the date picked first);
-- typed text after tapping a menu button is a journal entry for that day;
+- typed text after picking a day under "📝 Log" is a journal entry for that day;
+- the other menu buttons run the matching command;
 - any other typed text goes to the assistant.
 
 Conversation history lives in bot_data (single-user bot), so the morning
@@ -38,16 +39,46 @@ logger = logging.getLogger(__name__)
 HISTORY_KEY = "chat_history"
 _PROPOSALS_KEY = "chat_proposals"
 
-BTN_YESTERDAY = "📝 Yesterday"
-BTN_PICK = "📅 Pick date"
-BTN_TYPE = "✍️ Type an entry"
-MENU_BUTTONS = (BTN_YESTERDAY, BTN_PICK, BTN_TYPE)
+BTN_SURF = "🌊 Surf"
+BTN_FLY = "🪂 Fly"
+BTN_BRIEF = "☀️ Brief"
+BTN_LOG = "📝 Log"
+BTN_PLAN = "🗺 Plan"
+BTN_MORE = "⋯ More"
+
+BTN_STATUS = "📌 Status"
+BTN_UPCOMING = "📅 Upcoming"
+BTN_TRAIL = "🧭 Trail"
+BTN_RANKINGS = "🏆 Rankings"
+BTN_WISHLIST = "⭐ Wishlist"
+BTN_REVIEW = "📊 Review"
+BTN_UNDO = "↩️ Undo"
+BTN_USAGE = "💸 Usage"
+BTN_EXPORT = "📤 Export"
+BTN_BACK = "⬅ Back"
+
+_PLACEHOLDER = "Ask anything — voice notes log today"
 
 MENU = ReplyKeyboardMarkup(
-    [[BTN_YESTERDAY, BTN_PICK], [BTN_TYPE]],
+    [[BTN_SURF, BTN_FLY, BTN_BRIEF], [BTN_LOG, BTN_PLAN, BTN_MORE]],
     resize_keyboard=True,
     is_persistent=True,
-    input_field_placeholder="Ask anything — voice notes log today",
+    input_field_placeholder=_PLACEHOLDER,
+)
+
+# The second page, swapped in by "⋯ More". Everything here is also a typed
+# command; commands that need an argument (/place, /rank, /research, /want)
+# stay typed, or just ask the assistant.
+MORE_MENU = ReplyKeyboardMarkup(
+    [
+        [BTN_STATUS, BTN_UPCOMING, BTN_TRAIL],
+        [BTN_RANKINGS, BTN_WISHLIST, BTN_REVIEW],
+        [BTN_UNDO, BTN_USAGE, BTN_EXPORT],
+        [BTN_BACK],
+    ],
+    resize_keyboard=True,
+    is_persistent=True,
+    input_field_placeholder=_PLACEHOLDER,
 )
 
 

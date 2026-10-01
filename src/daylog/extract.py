@@ -142,6 +142,16 @@ RECORD_JOURNAL_ENTRY_TOOL: ToolParam = {
                             "type": "string",
                             "description": "The user's own take, if given ('incredible', 'mid').",
                         },
+                        "kcal": {
+                            "type": "integer",
+                            "description": (
+                                "Your rough estimate of the meal's calories, from the items "
+                                "and any portion said (assume a normal serving otherwise)."
+                            ),
+                        },
+                        "protein_g": {"type": "integer", "description": "Rough estimate, grams."},
+                        "carbs_g": {"type": "integer", "description": "Rough estimate, grams."},
+                        "fat_g": {"type": "integer", "description": "Rough estimate, grams."},
                         **_PLACE_LINK_PROPERTIES,
                     },
                     "required": ["items"],
@@ -165,6 +175,18 @@ RECORD_JOURNAL_ENTRY_TOOL: ToolParam = {
                             "minimum": 1,
                             "maximum": 5,
                             "description": "1 exhausted .. 5 great, only if clearly implied.",
+                        },
+                        "mood": {
+                            "type": "integer",
+                            "minimum": 1,
+                            "maximum": 5,
+                            "description": "1 low .. 5 great, only if clearly implied.",
+                        },
+                        "focus": {
+                            "type": "integer",
+                            "minimum": 1,
+                            "maximum": 5,
+                            "description": "1 scattered .. 5 locked in, only if clearly implied.",
                         },
                         "body": {
                             "type": "string",
