@@ -28,7 +28,10 @@ The ledger is the foundation; the assistant is only as good as its grounding.
   surface is three things: the read-only calendar feed (secret path), a
   one-page read-only status view (a short path the user chose), and one
   inlet for the phone's daily health numbers (secret path).
-- **The bot never contacts third parties.** It drafts; the user sends.
+- **The bot never contacts anyone on its own.** It may draft a message, and
+  send it only after the user taps Confirm on the exact text and recipient.
+  (Sending isn't built; today it only drafts.) The research routines stay
+  read-only for email.
 - **Every handler checks the Telegram user id first.** There is no other
   auth layer.
 - **Hard dates never move silently.** A hard goal or itinerary date changes
@@ -105,6 +108,7 @@ The ledger is the foundation; the assistant is only as good as its grounding.
 | 2026-09-28 | Research follows an explicit focus list in `profile.yaml`; two routines (daily, weekly) |
 | 2026-10-02 | Meals carry rough nutrition estimates; mood and focus scored beside energy |
 | 2026-10-02 | Read-only status page and a health inlet allowed on the web server |
+| 2026-10-02 | "Never messages third parties" narrowed to "never without a Confirm on the exact text and recipient", so confirmed email can be added later |
 | 2026-10-02 | The CSV export is a session tool (`python -m daylog.export`), not a bot command |
 
 ## Not built
