@@ -62,3 +62,25 @@ def test_render_is_one_escaped_page_without_scripts(vault: Vault) -> None:
     assert "width:50%" in html
     assert "1 of 7" in html and "2 h" in html and "~600 kcal" in html
     assert "<script" not in html and "<form" not in html
+
+
+def test_stay_rows_are_newest_first_with_what_was_done(vault: Vault) -> None:
+    location = [
+        {"place": "Bali", "from": "2026-09-01", "to": "2026-09-10"},
+        {"place": "Lakey", "from": "2026-09-24", "to": None},
+    ]
+    vault.write_journal_entry(
+        datetime(2026, 9, 5, 9, 0),
+        {"activities": [{"type": "foil", "hours": 1}, {"type": "Surf", "hours": 3}]},
+        "t",
+        "s",
+    )
+    vault.write_journal_entry(
+        datetime(2026, 9, 30, 9, 0), {"activities": [{"type": "surf", "hours": 2}]}, "t", "s"
+    )
+    entries = vault.read_journal_range(date(2026, 9, 1), TODAY)
+
+    assert dashboard.stay_rows(location, entries, TODAY) == [
+        {"place": "Lakey", "when": "Sep 24 – Oct 2 · now", "did": "surf 2 h"},
+        {"place": "Bali", "when": "Sep 1 – Sep 10", "did": "surf 3 h · foil 1 h"},
+    ]

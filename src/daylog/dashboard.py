@@ -12,10 +12,11 @@ from datetime import date, timedelta
 from html import escape
 from typing import Any
 
-from daylog import brief, export, review
-from daylog.vault import Vault
+from daylog import brief, export, review, trail
+from daylog.vault import JournalEntry, Vault
 
 RECENT_DAYS = 7
+MAX_STAYS = 15
 OPEN = ("candidate", "planned")
 
 _CSS = """
@@ -35,6 +36,7 @@ li { padding:10px 0; border-top:1px solid var(--line); }
 .row { display:flex; justify-content:space-between; gap:12px; }
 .row span:last-child { color:var(--muted); white-space:nowrap; font-variant-numeric:tabular-nums; }
 .track { height:6px; background:var(--line); border-radius:3px; margin-top:6px; }
+.sub { color:var(--muted); font-size:14px; margin-top:2px; }
 .fill { height:6px; background:var(--bar); border-radius:3px; }
 """
 
@@ -111,6 +113,35 @@ def goal_rows(goals: Any) -> list[dict[str, Any]]:
     return rows
 
 
+def stay_rows(
+    location_data: Any, entries: dict[date, JournalEntry], today: date
+) -> list[dict[str, str]]:
+    """Each stay, newest first: place, dates, and what the journal says was done there."""
+    rows = []
+    for stay in reversed(trail.stays(location_data)):
+        end = stay.end or today
+        # A move day belongs to the place arrived at, so it isn't counted twice.
+        days = {
+            d: e
+            for d, e in entries.items()
+            if stay.start <= d and (d < stay.end if stay.end else d <= today)
+        }
+        stats = review.week_stats(days)
+        did = [f"{kind.replace('_', ' ')} {h:g} h" for kind, h in stats["activity_hours"].items()]
+        if not did:
+            did = [kind.replace("_", " ") for kind in stats["activity_counts"]]
+        nights = (end - stay.start).days
+        span = _short(stay.start) if nights == 0 else f"{_short(stay.start)} – {_short(end)}"
+        rows.append(
+            {
+                "place": stay.place,
+                "when": span + ("" if stay.end else " · now"),
+                "did": " · ".join(did[:4]) or (stay.notes or ""),
+            }
+        )
+    return rows[:MAX_STAYS]
+
+
 def _item(left: str, right: str, extra: str = "") -> str:
     return (
         f'<li><div class="row"><span>{escape(left)}</span>'
@@ -141,7 +172,17 @@ def render(vault: Vault, today: date) -> str:
         right = " ".join(x for x in (g["value"], g["metric"]) if x) or g["when"]
         goals.append(_item(g["title"], right, bar))
 
-    entries = vault.read_journal_range(today - timedelta(days=RECENT_DAYS - 1), today)
+    dates = vault.list_journal_dates()
+    everything = vault.read_journal_range(min(dates), today) if dates else {}
+    been = [
+        _item(
+            r["place"], r["when"], f'<div class="sub">{escape(r["did"])}</div>' if r["did"] else ""
+        )
+        for r in stay_rows(vault.read_location() or [], everything, today)
+    ]
+
+    week_start = today - timedelta(days=RECENT_DAYS - 1)
+    entries = {d: e for d, e in everything.items() if d >= week_start}
     stats = review.week_stats(entries)
     week = [_item("Days logged", f"{stats['days_logged']} of {RECENT_DAYS}")]
     week += [
@@ -168,6 +209,7 @@ def render(vault: Vault, today: date) -> str:
         + _section("Next", legs, "Nothing dated on the itinerary.")
         + _section("Goals", goals, "No active goals.")
         + _section(f"Last {RECENT_DAYS} days", week, "Nothing logged.")
+        + _section("Where I've been", been, "No locations logged.")
         + f'<p class="muted" style="margin-top:32px">Read-only · built {today.isoformat()} '
         "from the vault · change things in Telegram</p></main></body></html>"
     )
