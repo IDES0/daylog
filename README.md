@@ -307,7 +307,7 @@ Requires a local clone of the private vault repo at the path set by
 | `WEEKLY_PLAN` | `0` to skip the plan that follows the weekly review |
 | `MONTHLY_BUDGET_USD` | Optional API work (research, planning, chat web search) pauses above this, default `40` |
 | `RESEARCH_RUN_BUDGET_USD` | Per research run cap, default `1.50` |
-| `CALENDAR_FEED_SECRET` | Optional. Enables the calendar feed at `/calendar/<secret>.ics`; unset disables it entirely |
+| `CALENDAR_FEED_SECRET` | Optional. Enables the calendar feed at `/calendar/<secret>.ics` and the read-only status page at `/status/<secret>` (location, next legs, goals, last 7 days); unset disables both |
 | `PORT` | Only relevant with `CALENDAR_FEED_SECRET` set. Railway injects this itself; default `8080` for local testing |
 
 ## Testing

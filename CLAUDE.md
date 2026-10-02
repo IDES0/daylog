@@ -5,7 +5,9 @@ Full spec in docs/SPEC.md — read it before implementing anything.
 
 ## Non-negotiables
 - No database. Vault is plain markdown + YAML files.
-- No web frontend. Telegram is the interface.
+- No interactive web frontend. Telegram is the interface. The only web
+  surface is read-only, at secret paths: the calendar feed and a one-page
+  status view (changed 2026-10-02).
 - Research reads the web properly: search, fetch and read full pages
   (the Stage 1 "RSS and public APIs only" rule was lifted 2026-09-27).
 - The bot never messages third parties. It drafts; the user sends.
