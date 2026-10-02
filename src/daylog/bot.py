@@ -6,7 +6,6 @@ doing anything else — this is the only auth layer, so it must run first.
 
 from __future__ import annotations
 
-import io
 import logging
 import os
 import tempfile
@@ -24,7 +23,6 @@ from telegram import (
     BotCommand,
     InlineKeyboardButton,
     InlineKeyboardMarkup,
-    InputFile,
     Message,
     Update,
 )
@@ -46,7 +44,6 @@ from daylog import (
     export,
     extract,
     goals,
-    health,
     itinerary,
     llm,
     plan_flow,
@@ -515,47 +512,6 @@ async def send_scheduled_brief(context: ContextTypes.DEFAULT_TYPE) -> None:
     await _send_brief(context, _allowed_user_id())
 
 
-EXPORT_DEFAULT_DAYS = 90
-
-
-async def export_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """/export [days|all] — the journal as CSV files: one row per day, one per meal."""
-    if not _is_authorized(update):
-        return
-    message = update.message
-    assert message is not None
-    vault = _vault()
-    dates = vault.list_journal_dates()
-    if not dates:
-        await message.reply_text("Nothing logged yet.")
-        return
-    arg = (context.args or [str(EXPORT_DEFAULT_DAYS)])[0].lower()
-    end = max(dates)
-    if arg == "all":
-        start_day = min(dates)
-    elif arg.isdigit() and int(arg) > 0:
-        start_day = end - timedelta(days=int(arg) - 1)
-    else:
-        await message.reply_text("Usage: /export, /export 30 or /export all")
-        return
-    entries = vault.read_journal_range(start_day, end)
-    files = (
-        (
-            "daylog-days.csv",
-            export.to_csv(
-                export.day_rows(entries, vault.read_location(), vault.read_yaml(health.FILE, {})),
-                export.DAY_COLUMNS,
-            ),
-        ),
-        ("daylog-meals.csv", export.to_csv(export.meal_rows(entries), export.MEAL_COLUMNS)),
-    )
-    for filename, text in files:
-        await message.reply_document(
-            InputFile(io.BytesIO(text.encode("utf-8")), filename=filename),
-            caption=f"{len(entries)} days, {start_day.isoformat()} to {end.isoformat()}",
-        )
-
-
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not _is_authorized(update):
         return
@@ -854,7 +810,7 @@ async def _log_entry(transcript: str, message: Message, context: ContextTypes.DE
         summary = facts.pop("summary", "")
 
         # goal_progress stays in facts — it's part of the journal frontmatter
-        # schema too (SPEC §5.1) — but goal_slips, itinerary_changes,
+        # schema too (see docs/DESIGN.md) — but goal_slips, itinerary_changes,
         # corrections, and location_change are bookkeeping for other
         # files/edits, not facts about the day, so none of them belong in
         # the journal file.
@@ -1052,7 +1008,6 @@ def _button_commands() -> dict[str, _Command]:
         chat_flow.BTN_REVIEW: daily.review_command,
         chat_flow.BTN_UNDO: chat_flow.undo_command,
         chat_flow.BTN_USAGE: research_flow.usage_command,
-        chat_flow.BTN_EXPORT: export_command,
     }
 
 
@@ -1103,7 +1058,6 @@ MENU_COMMANDS = (
     ("surf", "Rated surf forecast for spots around you"),
     ("plan", "Plan the next few weeks (2-3 options to pick from)"),
     ("status", "Show current goals and itinerary"),
-    ("export", "Your journal as CSV files (/export 30, /export all)"),
     ("undo", "Revert one of the bot's recent changes"),
     ("start", "How to use daylog"),
 )
@@ -1153,7 +1107,6 @@ def build_application() -> Application:  # type: ignore[type-arg]
         CallbackQueryHandler(research_flow.handle_place_callback, pattern=r"^place:")
     )
     application.add_handler(CommandHandler("rankings", rank_flow.rankings_command))
-    application.add_handler(CommandHandler("export", export_command))
     application.add_handler(CallbackQueryHandler(rank_flow.handle_rank_callback, pattern=r"^rank:"))
     application.add_handler(MessageHandler(filters.VOICE, handle_voice))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))

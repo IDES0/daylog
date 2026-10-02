@@ -2,13 +2,12 @@
 
 A personal Telegram bot in two halves: a **journal** that turns voice notes
 into quantified, place-linked facts, and an **assistant** that researches,
-plans and reviews on top of them. No database, no web frontend — plain
-markdown and YAML in a private git-backed vault, Telegram as the only UI.
+plans and reviews on top of them. No database — plain markdown and YAML in a
+private git-backed vault, with Telegram as the interface.
 
-The original design is [`docs/SPEC.md`](docs/SPEC.md); what's being built
-now, and why, is [`docs/ASSISTANT_PLAN.md`](docs/ASSISTANT_PLAN.md); project
-rules live in [`CLAUDE.md`](CLAUDE.md). This file
-documents what's actually built and how to run it.
+This file documents what's built and how to run it. Why it's built this way,
+the rules and the decision log are in [`docs/DESIGN.md`](docs/DESIGN.md);
+the short working rules are in [`CLAUDE.md`](CLAUDE.md).
 
 ## What it does
 
@@ -116,27 +115,24 @@ in the vault:
 Scheduled once daily at `BRIEF_HOUR` (local `TZ`), and available on demand
 via `/brief`.
 
-### Calendar feed (optional, read-only)
-A small HTTP server (`calendar_server.py`) serves an iCalendar (`.ics`)
-feed at `/calendar/<CALENDAR_FEED_SECRET>.ics` — Google Calendar and Apple
-Calendar can both subscribe to it directly by URL, no OAuth or per-provider
-integration needed. It's built fresh from vault data on every request:
-- Goal/itinerary deadlines and target windows, as all-day events.
-- One all-day event per journal day, titled from that day's distinct
-  activity types (plus location, if recorded), with the full daily summary
-  as the event description.
+### Web surface (optional)
+A small HTTP server (`calendar_server.py`) serves three things, each off
+until its variable is set, and 404s everything else:
 
-It's **one-way and read-only by construction** — editing or deleting an
-event in Google/Apple Calendar has no effect on the vault; this is a view
-onto daylog's data, not another way to write to it. Refresh timing is
-whatever the calendar app's own subscription-polling interval is (commonly
-several hours), not instant. The endpoint is opt-in: with
-`CALENDAR_FEED_SECRET` unset the server doesn't start at all, and any path
-other than the exact configured secret 404s — this is the only HTTP
-surface the bot has, so the secret is the only thing standing between your
-goals/itinerary/journal history and anyone who finds the URL. Generate a
-real one (e.g. `openssl rand -hex 16`), and treat the full feed URL like a
-password.
+- **Calendar feed** at `/calendar/<CALENDAR_FEED_SECRET>.ics`. Google and
+  Apple Calendar subscribe to it by URL. Built fresh on every request: goal
+  and itinerary dates as all-day events, and one event per journal day with
+  the day's summary. Read-only: editing an event in the calendar app changes
+  nothing in the vault. Refresh is the calendar app's own polling interval.
+  It carries journal summaries, so treat the URL like a password.
+- **Status page** at `/status/<STATUS_PAGE_SLUG>` (or under the feed secret
+  if no slug is set): one static page with the current place, the next dated
+  legs, active goals, the last 7 days and where you've been. No scripts or
+  forms. A short slug is guessable, so anyone who finds it can read the page.
+- **Health inlet** at `POST /health/<HEALTH_INGEST_SECRET>`: one small JSON
+  object a day from an iOS Shortcut (`{"date": "2026-10-02", "steps": 8423}`),
+  merged into `health.yaml`. Numbers may carry units ("1.9 mi"); the reply
+  names what was saved and what was skipped.
 
 ## Architecture
 
@@ -172,8 +168,15 @@ src/daylog/
   planner.py       2-3 dated route options; plan_flow.py applies a pick.
   review.py        Weekly numbers (exact) + the weekly review.
   brief.py         Morning brief (uses routine research, plans, wishlist).
-  goals.py, itinerary.py, dateparse.py, calendar_feed.py,
-  calendar_server.py       as before.
+  goals.py         Goal resolution, slip tracking, confirmation logic.
+  itinerary.py     The same hard/soft/slip pattern for travel.
+  dateparse.py     Date phrases ("yesterday", "3 days ago") for backdating.
+  calendar_feed.py The .ics feed; calendar_server.py serves it, the status
+                   page and the health inlet.
+  dashboard.py     The read-only status page (one static HTML page).
+  health.py        Validates and merges the phone's daily numbers.
+  export.py        The journal as CSV tables for analysis; run from a shell
+                   (`python -m daylog.export days|meals [N|all]`).
   sources/surf.py  Surfline-style hourly ratings per spot (`surf:` profiles).
   sources/fly.py   Paragliding flyability per launch (`fly:` profiles + user rules).
   edits.py         Confirmed edits proposed by chat (places, journal, goals, ...).
@@ -202,6 +205,7 @@ daylog-vault/
   plans/<date>.md          # planner output (+ the chosen option)
   reviews/<week>.md        # weekly reviews
   usage.yaml               # API spend per month and kind
+  health.yaml              # the phone's daily numbers (steps, distance, ...) by date
   profile.yaml             # durable preferences (surf comfort, fly rules)
   profile.md               # the user's operating principles — read by chat, planner, review, brief
 ```
@@ -263,8 +267,7 @@ daylog-vault/
 | Voice note | Transcribed and logged to today (before `DAY_CUTOFF_HOUR`, yesterday) |
 | 📝 Log | Pick a day (today included); the next voice note or typed message is logged to it |
 | 🌊 Surf / 🪂 Fly / ☀️ Brief / 🗺 Plan | Menu buttons that run `/surf`, `/fly`, `/brief`, `/plan` |
-| ⋯ More | A second keyboard: status, upcoming, trail, rankings, wishlist, review, undo, usage, export |
-| `/export [days\|all]` | The journal as two CSV files (one row per day, one per meal) with rough nutrition estimates, energy/mood/focus and hours per activity |
+| ⋯ More | A second keyboard: status, upcoming, trail, rankings, wishlist, review, undo, usage |
 | Any other typed text | Goes to the assistant (vault tools + web search); changes come back as confirm cards |
 | `/trail [days\|all]`, `/place <name>` | Where you've been; what's known about a place |
 | `/rank <place>`, `/rankings [category]` | Beli-style rankings |
@@ -275,11 +278,18 @@ daylog-vault/
 | `/usage` | API spend this month vs budget |
 | `/surf`, `/fly` | Rated surf windows per spot / paragliding flyability per launch — no LLM cost |
 | `/undo` | Revert one of the bot's recent changes |
-| `/status`, `/upcoming`, `/brief`, `/backdate`, `/start` | As before |
+| `/status`, `/upcoming` | Goals and itinerary now; the same as a dated timeline |
+| `/brief`, `/backdate`, `/start` | The brief now; pick a day to log to; how to use the bot |
 
 Scheduled: morning brief (`BRIEF_HOUR`), reconcile (`DAY_CUTOFF_HOUR`),
 weekly review + plan (Sunday `REVIEW_HOUR`), and the cloud research
-routine at 05:30 (see `docs/research-routine-prompt.md`).
+routines: daily at 05:30 and weekly on Sunday (see
+`docs/research-routine-prompt.md` and `docs/research-weekly-prompt.md`).
+
+For analysis, the journal exports as CSV from a shell or a Claude Code
+session: `uv run python -m daylog.export days > days.csv` (one row per day:
+place, rough nutrition, energy/mood/focus, hours per activity, phone
+numbers) and `... meals` (one row per meal).
 
 ## Running locally
 
@@ -298,7 +308,7 @@ Requires a local clone of the private vault repo at the path set by
 |---|---|
 | `TELEGRAM_BOT_TOKEN` | Bot token from @BotFather |
 | `TELEGRAM_ALLOWED_USER_ID` | Numeric Telegram user id — the only user the bot will respond to |
-| `ANTHROPIC_API_KEY` | For extraction and the morning brief |
+| `ANTHROPIC_API_KEY` | For extraction, chat, research, the brief and reviews |
 | `VAULT_PATH` | Path to the local clone of `daylog-vault` |
 | `BRIEF_HOUR` | Local hour (0-23) the scheduled brief sends, default `7` |
 | `TZ` | IANA timezone, used for the brief schedule and date resolution |
@@ -307,10 +317,10 @@ Requires a local clone of the private vault repo at the path set by
 | `WEEKLY_PLAN` | `0` to skip the plan that follows the weekly review |
 | `MONTHLY_BUDGET_USD` | Optional API work (research, planning, chat web search) pauses above this, default `40` |
 | `RESEARCH_RUN_BUDGET_USD` | Per research run cap, default `1.50` |
-| `CALENDAR_FEED_SECRET` | Optional. Enables the calendar feed at `/calendar/<secret>.ics` and the read-only status page at `/status/<secret>` (location, next legs, goals, last 7 days); unset disables both |
+| `CALENDAR_FEED_SECRET` | Optional. Enables the calendar feed at `/calendar/<secret>.ics`, and the status page at `/status/<secret>` unless `STATUS_PAGE_SLUG` is set |
 | `STATUS_PAGE_SLUG` | Optional. Serves the status page at `/status/<slug>` (e.g. `alex`) instead of under the feed secret. Short and typeable, so anyone who guesses it can read the page |
-| `HEALTH_INGEST_SECRET` | Optional. Enables `POST /health/<secret>`: a JSON object of the day's numbers from the phone (`{"date": "2026-10-02", "steps": 8423, "sleep_h": 7.2}`), merged into `health.yaml` and joined by date into `/export` and the status page; unset disables it |
-| `PORT` | Only relevant with `CALENDAR_FEED_SECRET` set. Railway injects this itself; default `8080` for local testing |
+| `HEALTH_INGEST_SECRET` | Optional. Enables `POST /health/<secret>`: a JSON object of the day's numbers from the phone (`{"date": "2026-10-02", "steps": 8423, "sleep_h": 7.2}`), merged into `health.yaml` and joined by date into the export and the status page; unset disables it |
+| `PORT` | For the web server. Railway injects this itself; default `8080` for local testing |
 
 ## Testing
 
@@ -340,12 +350,11 @@ Railway, Dockerfile-based build (`railway.json`):
   something that conflicted with it.
 - Git push to the vault goes over SSH on port 443 (`ssh.github.com`),
   since Railway blocks outbound port 22.
-- The calendar feed (if `CALENDAR_FEED_SECRET` is set) needs a public
+- The web server (feed, status page, health inlet) needs a public
   domain generated for this service in the Railway dashboard — Railway
   doesn't expose one by default just because a port is listening.
 
-## Current phase status
+## Status
 
-The journal (steps 1-3) and the assistant (steps 4-9) from
-[`docs/ASSISTANT_PLAN.md`](docs/ASSISTANT_PLAN.md) are built. RSS feeds
-and the jobs-repo diff from the original spec are not.
+The journal and the assistant are built and deployed. The decision log and
+what was deliberately not built are in [`docs/DESIGN.md`](docs/DESIGN.md).

@@ -1,8 +1,11 @@
 """The journal as tables, for analysis outside the bot.
 
 Built from the journal on demand, never stored — like the trail. One row
-per day and one row per meal, as CSV text the bot sends as files, ready for
-pandas or a spreadsheet. Nutrition numbers are the extractor's rough
+per day and one row per meal, as CSV text ready for pandas or a spreadsheet.
+Not a bot command: run it from a shell or a Claude Code session,
+
+    uv run python -m daylog.export days > days.csv
+    uv run python -m daylog.export meals 30 > meals.csv Nutrition numbers are the extractor's rough
 estimates, not measurements; other sources (heart rate, sleep) can be
 joined on `date` later.
 """
@@ -156,3 +159,38 @@ def day_summary(frontmatter: dict[str, Any]) -> str | None:
     if totals["protein_g"] is not None:
         parts.append(f"{totals['protein_g']:.0f} g protein")
     return "Food (rough): " + ", ".join(parts)
+
+
+def main(argv: list[str]) -> int:
+    """`python -m daylog.export days|meals [N|all]` — CSV on stdout (default: all)."""
+    import os
+    import sys
+    from datetime import timedelta
+    from pathlib import Path
+
+    from daylog.vault import Vault
+
+    table = argv[0] if argv else "days"
+    span = argv[1] if len(argv) > 1 else "all"
+    if table not in ("days", "meals") or not (span == "all" or span.isdigit()):
+        print("usage: python -m daylog.export days|meals [N|all]", file=sys.stderr)
+        return 2
+    vault = Vault(Path(os.environ.get("VAULT_PATH", "../daylog-vault")))
+    dates = vault.list_journal_dates()
+    if not dates:
+        return 0
+    end = max(dates)
+    start = min(dates) if span == "all" else end - timedelta(days=int(span) - 1)
+    entries = vault.read_journal_range(start, end)
+    if table == "meals":
+        sys.stdout.write(to_csv(meal_rows(entries), MEAL_COLUMNS))
+    else:
+        rows = day_rows(entries, vault.read_location(), vault.read_yaml(health.FILE, {}))
+        sys.stdout.write(to_csv(rows, DAY_COLUMNS))
+    return 0
+
+
+if __name__ == "__main__":
+    import sys
+
+    raise SystemExit(main(sys.argv[1:]))

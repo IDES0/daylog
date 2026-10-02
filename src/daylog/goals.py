@@ -4,7 +4,7 @@ Pure logic — no filesystem or git access (vault.py owns that). Callers pass
 in the structure from `vault.read_goals()` and this module mutates it in
 place, reporting what happened so bot.py can build a reply/commit message.
 
-Hard deadlines never move silently (SPEC): a `goal_slips` entry for a hard
+Hard deadlines never move silently (docs/DESIGN.md): a `goal_slips` entry for a hard
 goal is never applied here — it's returned as a `PendingSlip` for the
 caller to confirm with the user first, then apply via
 `apply_confirmed_slip` once they do. Soft goals apply immediately.
