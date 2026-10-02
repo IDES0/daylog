@@ -108,6 +108,7 @@ def _make_handler(
             try:
                 self._reply(200, _store_health(self.rfile.read(length)))
             except health.HealthError as exc:
+                logger.warning("health post rejected: %s", exc)
                 self._reply(400, f"{exc}\n")
             except Exception:
                 logger.exception("failed to store health data")

@@ -11,13 +11,14 @@ from __future__ import annotations
 
 import json
 import re
-from datetime import date
+from datetime import date, datetime
 from typing import Any
 
 FILE = "health.yaml"
 MAX_BODY_BYTES = 4096
 MAX_METRICS = 24
 _KEY = re.compile(r"^[a-z][a-z0-9_]{0,31}$")
+_NUMBER = re.compile(r"-?\d+(?:\.\d+)?")
 
 
 class HealthError(ValueError):
@@ -30,11 +31,25 @@ def _number(value: Any) -> float | None:
     if isinstance(value, int | float):
         return float(value)
     if isinstance(value, str):
-        try:
-            return float(value.replace(",", "").strip())
-        except ValueError:
-            return None
+        # Shortcuts often sends a number with its unit ("8,423 steps", "1.9 mi").
+        match = _NUMBER.search(value.replace(",", ""))
+        return float(match.group()) if match else None
     return None
+
+
+def _day(value: Any, default_day: date) -> date:
+    """The posted date, in ISO or a few common phone formats; else the default."""
+    text = str(value or "").strip()
+    try:
+        return date.fromisoformat(text[:10])
+    except ValueError:
+        pass
+    for fmt in ("%d/%m/%Y", "%m/%d/%Y", "%b %d, %Y", "%d %b %Y", "%B %d, %Y"):
+        try:
+            return datetime.strptime(text.split(" at ")[0], fmt).date()
+        except ValueError:
+            continue
+    return default_day
 
 
 def parse(body: bytes, default_day: date) -> tuple[date, dict[str, float]]:
@@ -48,12 +63,7 @@ def parse(body: bytes, default_day: date) -> tuple[date, dict[str, float]]:
     if not isinstance(data, dict):
         raise HealthError("expected a JSON object")
 
-    day = default_day
-    if data.get("date"):
-        try:
-            day = date.fromisoformat(str(data["date"])[:10])
-        except ValueError as exc:
-            raise HealthError("date must be YYYY-MM-DD") from exc
+    day = _day(data.get("date"), default_day)
 
     metrics: dict[str, float] = {}
     for key, value in data.items():
@@ -63,7 +73,7 @@ def parse(body: bytes, default_day: date) -> tuple[date, dict[str, float]]:
             continue
         metrics[name] = round(number, 2)
     if not metrics:
-        raise HealthError("no numeric metrics")
+        raise HealthError(f"no numeric metrics in fields: {', '.join(map(str, data)) or 'none'}")
     if len(metrics) > MAX_METRICS:
         raise HealthError("too many metrics")
     return day, metrics

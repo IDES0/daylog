@@ -20,7 +20,7 @@ def test_parse_keeps_numbers_and_normalises_keys() -> None:
 
 def test_parse_defaults_the_day_and_rejects_bad_bodies() -> None:
     assert health.parse(b'{"steps": 10}', DAY)[0] == DAY
-    for body in (b"nope", b"[1]", b'{"note": "x"}', b'{"date": "soon", "steps": 1}'):
+    for body in (b"nope", b"[1]", b'{"note": "x"}'):
         with pytest.raises(health.HealthError):
             health.parse(body, DAY)
     with pytest.raises(health.HealthError):
@@ -45,3 +45,13 @@ def test_round_trips_through_the_vault_into_the_export(vault: Vault) -> None:
     )
     assert rows[0]["health_steps"] == 9000.0
     assert "health_steps" in export.to_csv(rows, export.DAY_COLUMNS).splitlines()[0]
+
+
+def test_parse_accepts_numbers_with_units_and_loose_dates() -> None:
+    day, metrics = health.parse(
+        b'{"date": "Oct 2, 2026 at 11:30 PM", "steps": "8,423 steps", "distance_mi": "1.9 mi"}',
+        date(2026, 1, 1),
+    )
+    assert day == DAY
+    assert metrics == {"steps": 8423.0, "distance_mi": 1.9}
+    assert health.parse(b'{"date": "soon", "steps": 1}', DAY)[0] == DAY
