@@ -16,7 +16,7 @@ from collections import defaultdict
 from datetime import date
 from typing import Any
 
-from daylog import trail
+from daylog import health, trail
 from daylog.reconcile import note_count
 from daylog.review import canonical_type
 from daylog.vault import JournalEntry
@@ -96,8 +96,13 @@ def day_row(day: date, entry: JournalEntry) -> dict[str, Any]:
     }
 
 
-def day_rows(entries: dict[date, JournalEntry], location_data: Any = None) -> list[dict[str, Any]]:
-    """One row per logged day; `place` falls back to the location trail."""
+def day_rows(
+    entries: dict[date, JournalEntry], location_data: Any = None, health_data: Any = None
+) -> list[dict[str, Any]]:
+    """One row per logged day; `place` falls back to the location trail.
+
+    Phone measurements for the day, if any, are added as `health_*` columns.
+    """
     all_stays = trail.stays(location_data) if location_data else []
     rows = []
     for day, entry in sorted(entries.items()):
@@ -105,6 +110,7 @@ def day_rows(entries: dict[date, JournalEntry], location_data: Any = None) -> li
         if not row["place"]:
             stay = trail.stay_on(all_stays, day)
             row["place"] = stay.place if stay else ""
+        row.update({f"health_{k}": v for k, v in health.for_day(health_data, day).items()})
         rows.append(row)
     return rows
 

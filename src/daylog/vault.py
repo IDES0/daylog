@@ -10,6 +10,7 @@ from __future__ import annotations
 import io
 import logging
 import subprocess
+import threading
 import time
 from dataclasses import dataclass, field
 from datetime import date, datetime
@@ -67,6 +68,9 @@ class JournalEntry:
     transcript: str
     summary: str
     raw: str = field(repr=False)
+
+
+_GIT_LOCK = threading.Lock()
 
 
 def _yaml() -> YAML:
@@ -570,12 +574,15 @@ class Vault:
             self._push()
 
     def _run_git(self, *args: str) -> subprocess.CompletedProcess[str]:
-        return subprocess.run(
-            ["git", "-C", str(self.path), *args],
-            capture_output=True,
-            text=True,
-            check=False,
-        )
+        # One git command at a time: the HTTP server thread (health ingest)
+        # writes to the same repo as the bot's handlers.
+        with _GIT_LOCK:
+            return subprocess.run(
+                ["git", "-C", str(self.path), *args],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
 
     def _commit(self, *changed_paths: Path, message: str) -> None:
         # git -C resolves pathspecs against the vault dir, so a relative

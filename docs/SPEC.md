@@ -25,7 +25,7 @@ Everything else is a later phase.
 These are deliberate exclusions. Do not add them without an explicit decision.
 
 - **No database.** The vault is plain files. No SQLite, no Postgres, no ORM.
-- **No interactive web frontend.** Telegram is the interface. Obsidian reads the vault on mobile. A read-only status page and the calendar feed are served at secret paths (2026-10-02).
+- **No interactive web frontend.** Telegram is the interface. Obsidian reads the vault on mobile. A read-only status page and the calendar feed are served at secret paths, and one inlet accepts the phone's daily health numbers (2026-10-02).
 - **No scraping.** RSS feeds and public APIs only. If a source has no feed, skip it.
 - **No automated outbound messaging to third parties.** The bot may *draft* an inquiry
   and send the draft to the user. It never contacts anyone else.

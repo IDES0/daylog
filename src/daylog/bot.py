@@ -46,6 +46,7 @@ from daylog import (
     export,
     extract,
     goals,
+    health,
     itinerary,
     llm,
     plan_flow,
@@ -541,7 +542,10 @@ async def export_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     files = (
         (
             "daylog-days.csv",
-            export.to_csv(export.day_rows(entries, vault.read_location()), export.DAY_COLUMNS),
+            export.to_csv(
+                export.day_rows(entries, vault.read_location(), vault.read_yaml(health.FILE, {})),
+                export.DAY_COLUMNS,
+            ),
         ),
         ("daylog-meals.csv", export.to_csv(export.meal_rows(entries), export.MEAL_COLUMNS)),
     )

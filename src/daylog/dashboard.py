@@ -12,7 +12,7 @@ from datetime import date, timedelta
 from html import escape
 from typing import Any
 
-from daylog import brief, export, review, trail
+from daylog import brief, export, health, review, trail
 from daylog.vault import JournalEntry, Vault
 
 RECENT_DAYS = 7
@@ -196,6 +196,14 @@ def render(vault: Vault, today: date) -> str:
         if stats["avg_protein_g_per_day"] is not None:
             food += f", {stats['avg_protein_g_per_day']} g protein"
         week.append(_item("Food per logged day (rough)", food))
+    stored = vault.read_yaml(health.FILE, {})
+    phone: dict[str, list[float]] = {}
+    for offset in range(RECENT_DAYS):
+        for key, value in health.for_day(stored, today - timedelta(days=offset)).items():
+            phone.setdefault(key, []).append(value)
+    for key, values in phone.items():
+        avg = sum(values) / len(values)
+        week.append(_item(f"{key.replace('_', ' ')} (phone, daily avg)", f"{avg:,.1f}"))
     meals = sum(r["meals"] for r in export.day_rows(entries))
     week.append(_item("Meals mentioned", str(meals)))
 

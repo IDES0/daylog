@@ -1,10 +1,11 @@
-"""Minimal HTTP server for the bot's two read-only views.
+"""Minimal HTTP server: two read-only views and one data inlet.
 
-Telegram is the only interface that changes anything (CLAUDE.md: "No
-interactive web frontend"). This serves two things at unguessable paths and
-nothing else: the calendar feed (a .ics file for a calendar app to poll)
-and the status page (one static HTML page, see dashboard.py) — no forms,
-no scripts, no browsing.
+Telegram is the only interface that changes anything you'd call content
+(CLAUDE.md: "No interactive web frontend"). At unguessable paths this serves
+the calendar feed (a .ics file for a calendar app to poll) and the status
+page (one static HTML page, see dashboard.py), and accepts one thing: the
+phone's daily health numbers (see health.py), under its own secret — no
+forms, no scripts, no browsing.
 """
 
 from __future__ import annotations
@@ -17,7 +18,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
 
-from daylog import calendar_feed, daily, dashboard
+from daylog import calendar_feed, daily, dashboard, health
 from daylog.tg import tz
 from daylog.vault import Vault
 
@@ -43,7 +44,17 @@ def _build_status_bytes() -> bytes:
     return dashboard.render(vault, daily.logical_day(datetime.now(tz()))).encode("utf-8")
 
 
-def _make_handler(feed_path: str, status_path: str) -> type[BaseHTTPRequestHandler]:
+def _store_health(body: bytes) -> str:
+    vault = _vault()
+    day, metrics = health.parse(body, daily.logical_day(datetime.now(tz())))
+    stored = health.merge(vault.read_yaml(health.FILE, {}), day, metrics)
+    vault.write_yaml(health.FILE, stored, f"health: {day.isoformat()}")
+    return f"saved {len(metrics)} metrics for {day.isoformat()}\n"
+
+
+def _make_handler(
+    feed_path: str | None, status_path: str | None, health_path: str | None
+) -> type[BaseHTTPRequestHandler]:
     class Handler(BaseHTTPRequestHandler):
         def log_message(self, format: str, *args: Any) -> None:
             logger.info("calendar server: " + format, *args)
@@ -74,25 +85,63 @@ def _make_handler(feed_path: str, status_path: str) -> type[BaseHTTPRequestHandl
             self.end_headers()
             self.wfile.write(body)
 
+        def _reply(self, code: int, text: str) -> None:
+            body = text.encode("utf-8")
+            self.send_response(code)
+            self.send_header("Content-Type", "text/plain; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def do_POST(self) -> None:
+            if health_path is None or self.path != health_path:
+                self.send_response(404)
+                self.end_headers()
+                return
+            try:
+                length = int(self.headers.get("Content-Length") or 0)
+            except ValueError:
+                length = -1
+            if not 0 < length <= health.MAX_BODY_BYTES:
+                self._reply(413, "body missing or too large\n")
+                return
+            try:
+                self._reply(200, _store_health(self.rfile.read(length)))
+            except health.HealthError as exc:
+                self._reply(400, f"{exc}\n")
+            except Exception:
+                logger.exception("failed to store health data")
+                self._reply(500, "could not save\n")
+
     return Handler
 
 
 def start() -> None:
-    """Start the read-only server in a background thread, if configured.
+    """Start the server in a background thread, if configured.
 
-    Opt-in: with no CALENDAR_FEED_SECRET set, this does nothing — merging
-    the feature doesn't require immediate setup, and an unset secret must
-    never fall back to a guessable or open path.
+    Opt-in per feature: CALENDAR_FEED_SECRET enables the feed and the status
+    page, HEALTH_INGEST_SECRET enables the health inlet. With neither set
+    this does nothing, and an unset secret never falls back to a guessable
+    or open path.
     """
-    secret = os.environ.get("CALENDAR_FEED_SECRET")
-    if not secret:
-        logger.info("CALENDAR_FEED_SECRET not set — calendar feed server not started")
+    view_secret = os.environ.get("CALENDAR_FEED_SECRET")
+    health_secret = os.environ.get("HEALTH_INGEST_SECRET")
+    if not view_secret and not health_secret:
+        logger.info("no CALENDAR_FEED_SECRET or HEALTH_INGEST_SECRET — web server not started")
         return
 
-    feed_path = f"/calendar/{secret}.ics"
+    handler = _make_handler(
+        f"/calendar/{view_secret}.ics" if view_secret else None,
+        f"/status/{view_secret}" if view_secret else None,
+        f"/health/{health_secret}" if health_secret else None,
+    )
     port = int(os.environ.get("PORT", "8080"))
-    status_path = f"/status/{secret}"
-    server = ThreadingHTTPServer(("0.0.0.0", port), _make_handler(feed_path, status_path))
+    server = ThreadingHTTPServer(("0.0.0.0", port), handler)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
-    logger.info("read-only server on port %d: /calendar/<secret>.ics and /status/<secret>", port)
+    logger.info(
+        "web server on port %d: views %s, health inlet %s",
+        port,
+        "on" if view_secret else "off",
+        "on" if health_secret else "off",
+    )
