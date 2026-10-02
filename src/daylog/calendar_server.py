@@ -120,19 +120,24 @@ def start() -> None:
     """Start the server in a background thread, if configured.
 
     Opt-in per feature: CALENDAR_FEED_SECRET enables the feed and the status
-    page, HEALTH_INGEST_SECRET enables the health inlet. With neither set
+    page (STATUS_PAGE_SLUG moves the page to /status/<slug>),
+    HEALTH_INGEST_SECRET enables the health inlet. With neither set
     this does nothing, and an unset secret never falls back to a guessable
     or open path.
     """
     view_secret = os.environ.get("CALENDAR_FEED_SECRET")
     health_secret = os.environ.get("HEALTH_INGEST_SECRET")
-    if not view_secret and not health_secret:
+    # The status page lives at a path of the user's choosing when
+    # STATUS_PAGE_SLUG is set (short and typeable, so weaker than the
+    # secret); otherwise it shares the feed's secret.
+    status_slug = os.environ.get("STATUS_PAGE_SLUG", "").strip("/ ") or view_secret
+    if not view_secret and not health_secret and not status_slug:
         logger.info("no CALENDAR_FEED_SECRET or HEALTH_INGEST_SECRET — web server not started")
         return
 
     handler = _make_handler(
         f"/calendar/{view_secret}.ics" if view_secret else None,
-        f"/status/{view_secret}" if view_secret else None,
+        f"/status/{status_slug}" if status_slug else None,
         f"/health/{health_secret}" if health_secret else None,
     )
     port = int(os.environ.get("PORT", "8080"))

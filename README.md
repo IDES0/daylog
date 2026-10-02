@@ -308,6 +308,7 @@ Requires a local clone of the private vault repo at the path set by
 | `MONTHLY_BUDGET_USD` | Optional API work (research, planning, chat web search) pauses above this, default `40` |
 | `RESEARCH_RUN_BUDGET_USD` | Per research run cap, default `1.50` |
 | `CALENDAR_FEED_SECRET` | Optional. Enables the calendar feed at `/calendar/<secret>.ics` and the read-only status page at `/status/<secret>` (location, next legs, goals, last 7 days); unset disables both |
+| `STATUS_PAGE_SLUG` | Optional. Serves the status page at `/status/<slug>` (e.g. `alex`) instead of under the feed secret. Short and typeable, so anyone who guesses it can read the page |
 | `HEALTH_INGEST_SECRET` | Optional. Enables `POST /health/<secret>`: a JSON object of the day's numbers from the phone (`{"date": "2026-10-02", "steps": 8423, "sleep_h": 7.2}`), merged into `health.yaml` and joined by date into `/export` and the status page; unset disables it |
 | `PORT` | Only relevant with `CALENDAR_FEED_SECRET` set. Railway injects this itself; default `8080` for local testing |
 
