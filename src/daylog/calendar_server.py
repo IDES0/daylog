@@ -49,7 +49,10 @@ def _store_health(body: bytes) -> str:
     day, metrics = health.parse(body, daily.logical_day(datetime.now(tz())))
     stored = health.merge(vault.read_yaml(health.FILE, {}), day, metrics)
     vault.write_yaml(health.FILE, stored, f"health: {day.isoformat()}")
-    return f"saved {len(metrics)} metrics for {day.isoformat()}\n"
+    left_out = health.skipped(body, metrics)
+    note = f"; skipped (no number): {', '.join(left_out)}" if left_out else ""
+    logger.info("health saved for %s: %s%s", day, ", ".join(metrics), note)
+    return f"saved {', '.join(metrics)} for {day.isoformat()}{note}\n"
 
 
 def _make_handler(

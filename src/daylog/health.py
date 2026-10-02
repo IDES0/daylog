@@ -52,6 +52,13 @@ def _day(value: Any, default_day: date) -> date:
     return default_day
 
 
+def skipped(body: bytes, metrics: dict[str, float]) -> list[str]:
+    """Posted field names that weren't saved (empty, not a number, or an odd name)."""
+    data = json.loads(body)
+    names = [str(k).strip().lower().replace(" ", "_") for k in data]
+    return [n for n in names if n != "date" and n not in metrics]
+
+
 def parse(body: bytes, default_day: date) -> tuple[date, dict[str, float]]:
     """Validate a posted body into (day, metrics). Raises HealthError."""
     if len(body) > MAX_BODY_BYTES:

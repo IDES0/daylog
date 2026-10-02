@@ -55,3 +55,9 @@ def test_parse_accepts_numbers_with_units_and_loose_dates() -> None:
     assert day == DAY
     assert metrics == {"steps": 8423.0, "distance_mi": 1.9}
     assert health.parse(b'{"date": "soon", "steps": 1}', DAY)[0] == DAY
+
+
+def test_skipped_names_fields_that_carried_no_number() -> None:
+    body = b'{"date": "2026-10-02", "steps": 5, "flights": "", "Odd Name!": 3}'
+    _, metrics = health.parse(body, DAY)
+    assert health.skipped(body, metrics) == ["flights", "odd_name!"]
