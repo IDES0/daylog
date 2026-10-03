@@ -404,6 +404,8 @@ class ExtractError(RuntimeError):
 # Reject outright instead of guessing how to unpack it — the caller
 # already turns an ExtractError into "try again," which is far better than
 # writing bad data no one notices until something downstream crashes.
+EXTRACT_ATTEMPTS = 2
+
 _ARRAY_FIELDS = (
     "activities",
     "meals",
@@ -542,26 +544,38 @@ def extract(
     )
     messages: list[MessageParam] = [{"role": "user", "content": user_content}]
 
-    response = client.messages.create(
-        model=MODEL,
-        max_tokens=2048,
-        system=system_prompt,
-        tools=[RECORD_JOURNAL_ENTRY_TOOL],
-        tool_choice=tool_choice,
-        messages=messages,
-    )
+    # The model occasionally returns a malformed tool call (an array field
+    # as a JSON string). It's rare and random, so ask again once before
+    # giving up rather than losing the user's note.
+    error: ExtractError | None = None
+    for attempt in range(1, EXTRACT_ATTEMPTS + 1):
+        response = client.messages.create(
+            model=MODEL,
+            max_tokens=2048,
+            system=system_prompt,
+            tools=[RECORD_JOURNAL_ENTRY_TOOL],
+            tool_choice=tool_choice,
+            messages=messages,
+        )
+        logger.info(
+            "extract usage: input=%d output=%d",
+            response.usage.input_tokens,
+            response.usage.output_tokens,
+        )
+        llm.record("reconcile" if reconcile else "extract", MODEL, response.usage)
+        try:
+            return _facts_from(response)
+        except ExtractError as exc:
+            error = exc
+            logger.warning("extract attempt %d/%d: %s", attempt, EXTRACT_ATTEMPTS, exc)
+    assert error is not None
+    raise error
 
-    logger.info(
-        "extract usage: input=%d output=%d",
-        response.usage.input_tokens,
-        response.usage.output_tokens,
-    )
-    llm.record("reconcile" if reconcile else "extract", MODEL, response.usage)
 
+def _facts_from(response: Any) -> dict[str, Any]:
     for block in response.content:
         if block.type == "tool_use":
             facts = dict(block.input)
             _validate_shape(facts)
             return facts
-
     raise ExtractError(f"no tool_use block in response (stop_reason={response.stop_reason})")

@@ -950,8 +950,11 @@ async def _log_entry(transcript: str, message: Message, context: ContextTypes.DE
     except Exception:
         logger.exception("failed to process entry")
         await message.reply_text(
-            "Something went wrong logging that. Nothing was saved — try again?"
+            "Something went wrong logging that, so nothing was saved. Here's what I heard, "
+            "so it isn't lost — tap 📝 Log, pick the day, and paste it back, or just try again."
         )
+        for chunk in _chunks(transcript):
+            await message.reply_text(chunk)
 
 
 def _has_place_mentions(facts: dict[str, Any]) -> bool:
