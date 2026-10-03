@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
+import json
 import logging
 from datetime import date
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import anthropic
 from anthropic.types import MessageParam, ToolChoiceToolParam, ToolParam
@@ -572,10 +573,46 @@ def extract(
     raise error
 
 
+def _repair(facts: dict[str, Any]) -> dict[str, Any]:
+    """Undo the model's known double-encoding, strictly by parsing JSON.
+
+    The failure seen in the wild: an array field arrives as a JSON *string*,
+    either of that list or of the whole intended payload (summary and all).
+    Parse it; keep the result only if it is a list (for that field) or an
+    object whose keys are schema fields (then it supplies the payload).
+    Anything else is left as is, and _validate_shape rejects it.
+    """
+    schema = cast(dict[str, Any], RECORD_JOURNAL_ENTRY_TOOL["input_schema"])
+    known = set(schema["properties"])
+    repaired = dict(facts)
+    for field in _ARRAY_FIELDS:
+        value = repaired.get(field)
+        if not isinstance(value, str):
+            continue
+        try:
+            parsed = json.loads(value)
+        except ValueError:
+            continue
+        if isinstance(parsed, list):
+            repaired[field] = parsed
+        elif isinstance(parsed, dict) and parsed and set(parsed) <= known:
+            del repaired[field]
+            repaired = {**parsed, **{k: v for k, v in repaired.items() if k not in parsed}}
+        logger.warning("extract: repaired %r from a JSON string", field)
+    return repaired
+
+
 def _facts_from(response: Any) -> dict[str, Any]:
     for block in response.content:
         if block.type == "tool_use":
-            facts = dict(block.input)
-            _validate_shape(facts)
+            raw = dict(block.input)
+            facts = _repair(raw)
+            try:
+                _validate_shape(facts)
+            except ExtractError:
+                logger.warning(
+                    "extract: malformed tool input: %.600s", json.dumps(raw, default=str)
+                )
+                raise
             return facts
     raise ExtractError(f"no tool_use block in response (stop_reason={response.stop_reason})")

@@ -84,7 +84,7 @@ def test_extract_retries_once_after_a_malformed_tool_call(monkeypatch: pytest.Mo
 
     monkeypatch.setattr(llm, "record", lambda *a, **k: None)
     good = {"activities": [{"type": "surf"}], "summary": "Surfed."}
-    client = _Client({"activities": '[{"type": "surf"}]', "summary": "Surfed."}, good)
+    client = _Client({"activities": "surfed for 2 hours", "summary": "Surfed."}, good)
     facts = extract.extract("surfed", [], [], date(2026, 10, 3), client=client)  # type: ignore[arg-type]
     assert facts == good and client.calls == 2
 
@@ -93,3 +93,21 @@ def test_extract_retries_once_after_a_malformed_tool_call(monkeypatch: pytest.Mo
     with pytest.raises(ExtractError):
         extract.extract("surfed", [], [], date(2026, 10, 3), client=client)  # type: ignore[arg-type]
     assert client.calls == extract.EXTRACT_ATTEMPTS
+
+
+def test_repair_parses_a_stringified_list_or_whole_payload() -> None:
+    from daylog.extract import _repair
+
+    assert _repair({"activities": '[{"type": "surf"}]', "summary": "S"}) == {
+        "activities": [{"type": "surf"}],
+        "summary": "S",
+    }
+    whole = '{"activities": [{"type": "surf"}], "summary": "Surfed.", "meals": []}'
+    assert _repair({"activities": whole}) == {
+        "activities": [{"type": "surf"}],
+        "summary": "Surfed.",
+        "meals": [],
+    }
+    # not JSON, or JSON of the wrong shape: left for _validate_shape to reject
+    assert _repair({"activities": "surfed 2h"})["activities"] == "surfed 2h"
+    assert _repair({"activities": '{"weird": 1}'})["activities"] == '{"weird": 1}'
