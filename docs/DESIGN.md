@@ -63,7 +63,7 @@ The ledger is the foundation; the assistant is only as good as its grounding.
 - **`goals.yaml`**: hard goals (a deadline) and soft goals (a target window),
   optional metric/target/progress, and `slip_history`.
 - **`journal/YYYY-MM-DD.md`**: frontmatter (activities, meals, felt, goal
-  progress, ...), the verbatim transcript, a summary. A day ends at the 4am
+  progress, milestones, ...), the verbatim transcript, a summary. A day ends at the 4am
   cutoff; a day told in several notes is rebuilt once at day end.
 - **`health.yaml`**: the phone's daily numbers, kept beside the journal as
   reference, joined by date.
@@ -110,6 +110,7 @@ The ledger is the foundation; the assistant is only as good as its grounding.
 | 2026-10-02 | Read-only status page and a health inlet allowed on the web server |
 | 2026-10-02 | "Never messages third parties" narrowed to "never without a Confirm on the exact text and recipient", so confirmed email can be added later |
 | 2026-10-02 | The CSV export is a session tool (`python -m daylog.export`), not a bot command |
+| 2026-10-10 | Activities are summarised by days done, with hours only where said (hours alone undercounted); journal gains `milestones` (certs, PBs, firsts), listed on the status page; `freedive` and `paraglide` join the activity vocabulary |
 
 ## Not built
 

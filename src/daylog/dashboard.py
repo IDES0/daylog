@@ -18,6 +18,9 @@ from daylog.vault import JournalEntry, Vault
 RECENT_DAYS = 7
 MAX_STAYS = 15
 OPEN = ("candidate", "planned")
+MAX_MILESTONES = 10
+# Logged, but not what a stay was about.
+NOT_DOING = ("travel", "errand", "meal")
 
 _CSS = """
 :root { --bg:#fbfaf7; --fg:#1c1b19; --muted:#6b6862; --line:#e4e1da; --bar:#2f6f62; }
@@ -58,6 +61,19 @@ def _number(value: Any) -> float | None:
 
 def _short(d: date) -> str:
     return f"{d.strftime('%b')} {d.day}"
+
+
+def _days(n: int) -> str:
+    return f"{n} day" if n == 1 else f"{n} days"
+
+
+def activity_rows(stats: dict[str, Any]) -> list[tuple[str, str]]:
+    """(activity, "3 days · 4.5 h") by days done; hours only where some were said."""
+    rows = []
+    for kind, n in stats["activity_days"].items():
+        h = stats["activity_hours"].get(kind)
+        rows.append((kind.replace("_", " "), _days(n) + (f" · {h:g} h" if h else "")))
+    return rows
 
 
 def _when(entry: Any) -> tuple[date | None, str]:
@@ -127,9 +143,11 @@ def stay_rows(
             if stay.start <= d and (d < stay.end if stay.end else d <= today)
         }
         stats = review.week_stats(days)
-        did = [f"{kind.replace('_', ' ')} {h:g} h" for kind, h in stats["activity_hours"].items()]
-        if not did:
-            did = [kind.replace("_", " ") for kind in stats["activity_counts"]]
+        did = [
+            f"{kind.replace('_', ' ')} {_days(n)}"
+            for kind, n in stats["activity_days"].items()
+            if kind not in NOT_DOING
+        ]
         nights = (end - stay.start).days
         span = _short(stay.start) if nights == 0 else f"{_short(stay.start)} – {_short(end)}"
         rows.append(
@@ -181,13 +199,16 @@ def render(vault: Vault, today: date) -> str:
         for r in stay_rows(vault.read_location() or [], everything, today)
     ]
 
+    wins = [
+        _item(m["what"], _short(date.fromisoformat(m["date"])))
+        for m in reversed(review.week_stats(everything)["milestones"][-MAX_MILESTONES:])
+    ]
+
     week_start = today - timedelta(days=RECENT_DAYS - 1)
     entries = {d: e for d, e in everything.items() if d >= week_start}
     stats = review.week_stats(entries)
     week = [_item("Days logged", f"{stats['days_logged']} of {RECENT_DAYS}")]
-    week += [
-        _item(kind.replace("_", " "), f"{h:g} h") for kind, h in stats["activity_hours"].items()
-    ]
+    week += [_item(kind, value) for kind, value in activity_rows(stats)]
     for label, key in (("Energy", "avg_energy"), ("Mood", "avg_mood"), ("Focus", "avg_focus")):
         if stats[key] is not None:
             week.append(_item(f"{label} (1–5)", f"{stats[key]:g}"))
@@ -203,7 +224,8 @@ def render(vault: Vault, today: date) -> str:
             phone.setdefault(key, []).append(value)
     for key, values in phone.items():
         avg = sum(values) / len(values)
-        week.append(_item(f"{key.replace('_', ' ')} (phone, daily avg)", f"{avg:,.1f}"))
+        shown = f"{avg:,.0f}" if avg >= 100 else f"{avg:,.1f}"
+        week.append(_item(f"{key.replace('_', ' ')} (phone, daily avg)", shown))
     meals = sum(r["meals"] for r in export.day_rows(entries))
     week.append(_item("Meals mentioned", str(meals)))
 
@@ -216,6 +238,7 @@ def render(vault: Vault, today: date) -> str:
         f'<p class="muted">{escape(here)}</p>'
         + _section("Next", legs, "Nothing dated on the itinerary.")
         + _section("Goals", goals, "No active goals.")
+        + _section("Milestones", wins, "None logged yet.")
         + _section(f"Last {RECENT_DAYS} days", week, "Nothing logged.")
         + _section("Where I've been", been, "No locations logged.")
         + f'<p class="muted" style="margin-top:32px">Read-only · built {today.isoformat()} '

@@ -202,6 +202,28 @@ RECORD_JOURNAL_ENTRY_TOOL: ToolParam = {
                     "required": [],
                 },
             },
+            "milestones": {
+                "type": "array",
+                "description": (
+                    "Firsts and bests the user states: a certification passed, a personal "
+                    "best, a first time doing something. Only what they say, never a "
+                    "routine session."
+                ),
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "what": {
+                            "type": "string",
+                            "description": "Short: 'Wave 1 freediving passed', '23 m depth PB'.",
+                        },
+                        "type": {
+                            "type": "string",
+                            "description": "The activity type it belongs to, same labels.",
+                        },
+                    },
+                    "required": ["what"],
+                },
+            },
             "goal_progress": {
                 "type": "array",
                 "items": {
@@ -412,6 +434,7 @@ _ARRAY_FIELDS = (
     "meals",
     "felt",
     "goal_progress",
+    "milestones",
     "goal_slips",
     "itinerary_changes",
     "corrections",

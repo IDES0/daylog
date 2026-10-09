@@ -51,6 +51,7 @@ def test_render_is_one_escaped_page_without_scripts(vault: Vault) -> None:
             "activities": [{"type": "surf", "hours": 2}],
             "meals": [{"items": ["rice"], "kcal": 600, "protein_g": 20}],
             "felt": [{"energy": 4}],
+            "milestones": [{"what": "23 m <depth> PB", "type": "freedive"}],
         },
         "t",
         "s",
@@ -60,7 +61,8 @@ def test_render_is_one_escaped_page_without_scripts(vault: Vault) -> None:
     assert html.startswith("<!doctype html>")
     assert "Surf &lt;rights&gt;" in html and "<rights>" not in html
     assert "width:50%" in html
-    assert "1 of 7" in html and "2 h" in html and "~600 kcal" in html
+    assert "1 of 7" in html and "1 day · 2 h" in html and "~600 kcal" in html
+    assert "23 m &lt;depth&gt; PB" in html
     assert "<script" not in html and "<form" not in html
 
 
@@ -76,11 +78,22 @@ def test_stay_rows_are_newest_first_with_what_was_done(vault: Vault) -> None:
         "s",
     )
     vault.write_journal_entry(
+        datetime(2026, 9, 6, 9, 0), {"activities": [{"type": "surf"}, {"type": "travel"}]}, "t", "s"
+    )
+    vault.write_journal_entry(
         datetime(2026, 9, 30, 9, 0), {"activities": [{"type": "surf", "hours": 2}]}, "t", "s"
     )
     entries = vault.read_journal_range(date(2026, 9, 1), TODAY)
 
     assert dashboard.stay_rows(location, entries, TODAY) == [
-        {"place": "Lakey", "when": "Sep 24 – Oct 2 · now", "did": "surf 2 h"},
-        {"place": "Bali", "when": "Sep 1 – Sep 10", "did": "surf 3 h · foil 1 h"},
+        {"place": "Lakey", "when": "Sep 24 – Oct 2 · now", "did": "surf 1 day"},
+        {"place": "Bali", "when": "Sep 1 – Sep 10", "did": "surf 2 days · foil 1 day"},
+    ]
+
+
+def test_activity_rows_count_days_and_show_hours_only_when_said() -> None:
+    stats = {"activity_days": {"freedive": 2, "social": 2}, "activity_hours": {"freedive": 4.0}}
+    assert dashboard.activity_rows(stats) == [
+        ("freedive", "2 days · 4 h"),
+        ("social", "2 days"),
     ]

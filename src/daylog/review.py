@@ -52,6 +52,14 @@ _SYNONYMS = {
     "work/distraction": "screen_time",
     "leisure": "rest",
     "relax": "rest",
+    "freediving": "freedive",
+    "free diving": "freedive",
+    "freedive course": "freedive",
+    "paragliding": "paraglide",
+    "breakfast": "meal",
+    "brunch": "meal",
+    "lunch": "meal",
+    "dinner": "meal",
 }
 
 
@@ -75,6 +83,8 @@ def _has_number(item: Any, key: str) -> bool:
 def week_stats(entries: dict[date, JournalEntry]) -> dict[str, Any]:
     hours: dict[str, float] = defaultdict(float)
     counts: dict[str, int] = defaultdict(int)
+    days: dict[str, int] = defaultdict(int)
+    milestones: list[dict[str, str]] = []
     goal_deltas: dict[str, float] = defaultdict(float)
     energy: list[int] = []
     mood: list[int] = []
@@ -84,17 +94,24 @@ def week_stats(entries: dict[date, JournalEntry]) -> dict[str, Any]:
     places: list[str] = []
     meals = 0
     skipped: list[str] = []
-    for _, entry in sorted(entries.items()):
+    for day, entry in sorted(entries.items()):
         fm = entry.frontmatter
+        kinds_today: set[str] = set()
         for a in fm.get("activities") or []:
             if not isinstance(a, dict):
                 continue
             kind = canonical_type(str(a.get("type", "?")))
             counts[kind] += 1
+            kinds_today.add(kind)
             if isinstance(a.get("hours"), int | float):
                 hours[kind] += float(a["hours"])
             if a.get("place") and a["place"] not in places:
                 places.append(str(a["place"]))
+        for kind in kinds_today:
+            days[kind] += 1
+        for m in fm.get("milestones") or []:
+            if isinstance(m, dict) and m.get("what"):
+                milestones.append({"date": day.isoformat(), "what": str(m["what"])})
         for g in fm.get("goal_progress") or []:
             if isinstance(g, dict) and isinstance(g.get("delta"), int | float):
                 goal_deltas[str(g.get("goal_id"))] += float(g["delta"])
@@ -116,6 +133,9 @@ def week_stats(entries: dict[date, JournalEntry]) -> dict[str, Any]:
         "days_logged": len(entries),
         "activity_counts": dict(sorted(counts.items(), key=lambda kv: -kv[1])),
         "activity_hours": {k: round(v, 1) for k, v in sorted(hours.items(), key=lambda kv: -kv[1])},
+        # Hours are only logged when said, so days done is the steadier measure.
+        "activity_days": dict(sorted(days.items(), key=lambda kv: (-kv[1], -hours.get(kv[0], 0)))),
+        "milestones": milestones,
         "goal_deltas": dict(goal_deltas),
         "avg_energy": _avg(energy),
         "avg_mood": _avg(mood),

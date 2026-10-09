@@ -35,8 +35,10 @@ Guidelines:
   Eating is not an activity — meals go in `meals`.
   `type` is a short lowercase label, from this list whenever one fits so
   weeks can be compared: surf, dive, snorkel, foil, hike, run, gym, yoga,
-  swim, climb, cliff_jump, skate, travel, job_search, interview, work,
-  study, call, social, party, sightseeing, errand, rest, screen_time.
+  swim, freedive, climb, cliff_jump, skate, paraglide, travel, job_search,
+  interview, work, study, call, social, party, sightseeing, errand, rest,
+  screen_time. `dive` is scuba; breath-hold diving is `freedive`, and a
+  course day for a sport is that sport, not `study`.
 - `location`: only if the transcript names or clearly implies a place.
   Omit it otherwise — don't infer from past entries you don't have.
 - `location_change`: only when the transcript explicitly says the user has
@@ -71,6 +73,11 @@ Guidelines:
   1 (wrecked) to 5 (great), set only when clearly implied. `mood` (1 low
   to 5 great) and `focus` (1 scattered to 5 locked in) work the same way:
   a number only when what they said clearly implies one.
+- `milestones`: firsts and bests the user states — a certification or
+  course passed, a personal best (deepest dive, longest hold, biggest
+  wave), a first time doing something. Keep the number in `what` ("23 m
+  depth PB", "Wave 1 freediving passed") and set `type` to the activity
+  label. Only what they say; a normal session is not a milestone.
 - `goal_progress`: only when an activity clearly maps to a goal in the
   provided list. `goal_id` must be copied exactly from that list — never
   invent one, never use a goal's title as its id. `delta` is in that goal's

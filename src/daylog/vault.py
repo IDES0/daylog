@@ -28,6 +28,7 @@ _FRONTMATTER_KEY_ORDER = (
     "meals",
     "felt",
     "goal_progress",
+    "milestones",
     "skipped",
     "mood",
     "open_questions",
@@ -42,7 +43,7 @@ _SYNC_INTERVAL_SECONDS = 60
 # Frontmatter fields that get extended (list) or overwritten (scalar) when a
 # second entry lands on a day that already has one. Anything not listed here
 # is treated as a scalar (new value wins) when merging.
-_LIST_FIELDS_EXTEND = ("activities", "meals", "felt", "goal_progress")
+_LIST_FIELDS_EXTEND = ("activities", "meals", "felt", "goal_progress", "milestones")
 _LIST_FIELDS_DEDUPE = ("skipped", "open_questions")
 
 
