@@ -176,7 +176,7 @@ src/daylog/
   dashboard.py     The read-only status page (one static HTML page).
   health.py        Validates and merges the phone's daily numbers.
   analytics.py     Read-only PostHog queries for the personal site;
-                   site_flow.py: company-ref alerts and the brief's Site block.
+                   site_flow.py: the brief's Site block and /site.
   export.py        The journal as CSV tables for analysis; run from a shell
                    (`python -m daylog.export days|meals [N|all]`).
   sources/surf.py  Surfline-style hourly ratings per spot (`surf:` profiles).
@@ -208,7 +208,7 @@ daylog-vault/
   reviews/<week>.md        # weekly reviews
   usage.yaml               # API spend per month and kind
   health.yaml              # the phone's daily numbers (steps, distance, ...) by date
-  site.yaml                # site analytics summaries: daily counts, company-ref visits
+  site.yaml                # site analytics: one summary per day, written with the brief
   profile.yaml             # durable preferences (surf comfort, fly rules)
   profile.md               # the user's operating principles — read by chat, planner, review, brief
 ```
@@ -280,6 +280,7 @@ daylog-vault/
 | `/review`, `/reconcile [date]` | Weekly review now; rebuild a day from all its notes |
 | `/usage` | API spend this month vs budget |
 | `/surf`, `/fly` | Rated surf windows per spot / paragliding flyability per launch — no LLM cost |
+| `/site [days]` | The personal site's analytics from PostHog (default 7 days): visitors by day, ref, page, source, country and device; chess/spacetime use; company-ref visitors with recording links — no LLM cost |
 | `/undo` | Revert one of the bot's recent changes |
 | `/status`, `/upcoming` | Goals and itinerary now; the same as a dated timeline |
 | `/brief`, `/backdate`, `/start` | The brief now; pick a day to log to; how to use the bot |
@@ -323,7 +324,7 @@ Requires a local clone of the private vault repo at the path set by
 | `CALENDAR_FEED_SECRET` | Optional. Enables the calendar feed at `/calendar/<secret>.ics`, and the status page at `/status/<secret>` unless `STATUS_PAGE_SLUG` is set |
 | `STATUS_PAGE_SLUG` | Optional. Serves the status page at `/status/<slug>` (e.g. `alex`) instead of under the feed secret. Short and typeable, so anyone who guesses it can read the page |
 | `HEALTH_INGEST_SECRET` | Optional. Enables `POST /health/<secret>`: a JSON object of the day's numbers from the phone (`{"date": "2026-10-02", "steps": 8423, "sleep_h": 7.2}`), merged into `health.yaml` and joined by date into the export and the status page; unset disables it |
-| `POSTHOG_PERSONAL_API_KEY` | Optional. A read-only PostHog personal key (scopes `query:read` and friends). With `POSTHOG_PROJECT_ID`, enables a ~15-minute poll that alerts in Telegram when a visitor arrives through a company `?ref=` tag (not linkedin/github/test), and a Site block at the end of the morning brief. Never written to the vault or logs |
+| `POSTHOG_PERSONAL_API_KEY` | Optional. A read-only PostHog personal key (scopes `query:read` and friends). With `POSTHOG_PROJECT_ID`, enables a Site block at the end of the morning brief (last 24 h, including visitors who came through a company `?ref=` tag, i.e. not linkedin/github/test) and `/site [days]` for a deeper breakdown. Nothing polls. Never written to the vault or logs |
 | `POSTHOG_PROJECT_ID` | The PostHog project the site reports to |
 | `PORT` | For the web server. Railway injects this itself; default `8080` for local testing |
 

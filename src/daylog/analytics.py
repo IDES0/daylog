@@ -1,23 +1,20 @@
 """Read-only website analytics from PostHog, for the personal site.
 
-Two uses: a Telegram alert when someone arrives through a company ref (a
-`?ref=` tag handed out with a job application), and a "Site" section at
-the end of the morning brief. Both are HogQL queries against the PostHog
-query API (project POSTHOG_PROJECT_ID) with a read-only personal key from
-POSTHOG_PERSONAL_API_KEY.
+Two uses: a short "Site" block at the end of the morning brief (the last
+24 hours, including anyone who came in through a company `?ref=` tag),
+and `/site [days]` for a deeper breakdown on demand. Both are HogQL
+queries against the PostHog query API (project POSTHOG_PROJECT_ID) with a
+read-only personal key from POSTHOG_PERSONAL_API_KEY. Nothing polls.
 
-Only summaries reach the vault (`site.yaml`): counts, refs, dates, a
-country, and hashes of person+ref so an alert never repeats. No IPs, no
-person ids, no URLs.
+Only summaries reach the vault (`site.yaml`), written once a day with the
+brief: counts, refs, dates, a country. No IPs, person ids or recordings.
 """
 
 from __future__ import annotations
 
-import hashlib
 import logging
 import os
 from dataclasses import dataclass
-from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import httpx
@@ -26,13 +23,8 @@ logger = logging.getLogger(__name__)
 
 FILE = "site.yaml"
 HOST = "https://us.posthog.com"
-POLL_SECONDS = 15 * 60
-# Events land in PostHog a little late; re-reading a short overlap is
-# harmless because alerts are deduplicated by person+ref.
-OVERLAP = timedelta(minutes=10)
-FIRST_LOOKBACK = timedelta(days=1)
-MAX_ALERTED = 1000
 KEEP_DAYS = 120
+MAX_REPORT_DAYS = 90
 
 TEST_REFS = ("test", "claude-test")
 # Refs that are channels, not companies.
@@ -91,28 +83,18 @@ def _in(events: tuple[str, ...]) -> str:
     return "(" + ", ".join(repr(e) for e in events) + ")"
 
 
-def _ts(when: datetime) -> str:
-    """A UTC timestamp literal; built from a datetime, never from query input."""
-    return f"toDateTime('{when.astimezone(UTC).strftime('%Y-%m-%d %H:%M:%S')}', 'UTC')"
+def _window(days: int) -> str:
+    """Events in the last `days` days, minus setup tests. `days` is an int, never text."""
+    return f"timestamp > now() - INTERVAL {int(days)} DAY AND {_NOT_TEST}"
 
 
-def _parse_ts(value: Any) -> datetime | None:
-    try:
-        parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
-    except ValueError:
-        return None
-    return parsed if parsed.tzinfo else parsed.replace(tzinfo=UTC)
-
-
-# -- company-ref alerts -------------------------------------------------------
+# -- company-ref visitors -----------------------------------------------------
 
 
 @dataclass
 class Visit:
-    person: str
     ref: str
-    first_seen: datetime
-    last_seen: datetime
+    first_seen: str
     pages: list[str]
     resume: int
     chess: int
@@ -121,19 +103,12 @@ class Visit:
     country: str
     session: str
 
-    @property
-    def key(self) -> str:
-        """Hash of person+ref: enough to dedupe, nothing to identify anyone by."""
-        return hashlib.sha256(f"{self.person}|{self.ref}".encode()).hexdigest()[:16]
 
-
-def visits_hogql(since: datetime) -> str:
-    """Company-ref visitors with any event after `since`, totalled over two days."""
+def visits_hogql(days: int) -> str:
+    """One row per person+ref that arrived through a company ref, earliest first."""
     excluded = ", ".join(repr(r) for r in ("", *CHANNEL_REFS, *TEST_REFS))
     return (
-        "SELECT toString(person_id) AS person, "
-        f"{_REF} AS ref, "
-        "min(timestamp) AS first_seen, max(timestamp) AS last_seen, "
+        f"SELECT person_id, {_REF} AS ref, min(timestamp) AS first_seen, "
         "groupUniqArrayIf(properties.$pathname, event = '$pageview') AS pages, "
         "countIf(event = 'resume_download') AS resume, "
         f"countIf(event IN {_in(CHESS_EVENTS)}) AS chess, "
@@ -141,120 +116,76 @@ def visits_hogql(since: datetime) -> str:
         "any(properties.$geoip_city_name) AS city, "
         "any(properties.$geoip_country_code) AS country, "
         "argMin(properties.$session_id, timestamp) AS session "
-        "FROM events "
-        f"WHERE timestamp > now() - INTERVAL 2 DAY AND distinct_id != 'claude-test' "
-        f"AND {_REF} NOT IN ({excluded}) "
-        "GROUP BY person, ref "
-        f"HAVING last_seen > {_ts(since)} "
-        "ORDER BY first_seen LIMIT 200"
+        f"FROM events WHERE {_window(days)} AND {_REF} NOT IN ({excluded}) "
+        "GROUP BY person_id, ref ORDER BY first_seen LIMIT 100"
     )
 
 
-def _visit(row: dict[str, Any]) -> Visit | None:
-    first, last = _parse_ts(row.get("first_seen")), _parse_ts(row.get("last_seen"))
-    if not row.get("person") or not row.get("ref") or first is None or last is None:
-        return None
-    return Visit(
-        person=str(row["person"]),
-        ref=str(row["ref"]),
-        first_seen=first,
-        last_seen=last,
-        pages=sorted(str(p) for p in row.get("pages") or [] if p),
-        resume=int(row.get("resume") or 0),
-        chess=int(row.get("chess") or 0),
-        spacetime=int(row.get("spacetime") or 0),
-        city=str(row.get("city") or ""),
-        country=str(row.get("country") or ""),
-        session=str(row.get("session") or ""),
-    )
-
-
-def new_visits(
-    state: dict[str, Any], rows: list[dict[str, Any]], now: datetime
-) -> tuple[list[Visit], dict[str, Any]]:
-    """Visits not alerted before, and the state to save once they're sent."""
-    alerted = list(state.get("alerted") or [])
-    seen = set(alerted)
-    fresh: list[Visit] = []
-    cursor = _parse_ts(state.get("cursor")) or now - FIRST_LOOKBACK
-    for row in rows:
-        visit = _visit(row)
-        if visit is None:
-            continue
-        cursor = max(cursor, visit.last_seen)
-        if visit.key in seen:
-            continue
-        seen.add(visit.key)
-        alerted.append(visit.key)
-        fresh.append(visit)
-    log = list(state.get("company_visits") or [])
-    log += [
-        {
-            "date": v.first_seen.date().isoformat(),
-            "ref": v.ref,
-            "pages": len(v.pages),
-            "resume": v.resume > 0,
-            "chess": v.chess > 0,
-            "spacetime": v.spacetime > 0,
-            "country": v.country,
-        }
-        for v in fresh
+def visits(rows: list[dict[str, Any]]) -> list[Visit]:
+    return [
+        Visit(
+            ref=str(row["ref"]),
+            first_seen=str(row.get("first_seen") or "")[:10],
+            pages=sorted(str(p) for p in row.get("pages") or [] if p),
+            resume=int(row.get("resume") or 0),
+            chess=int(row.get("chess") or 0),
+            spacetime=int(row.get("spacetime") or 0),
+            city=str(row.get("city") or ""),
+            country=str(row.get("country") or ""),
+            session=str(row.get("session") or ""),
+        )
+        for row in rows
+        if row.get("ref")
     ]
-    new_state = dict(state)
-    new_state.update(cursor=cursor.isoformat(), alerted=alerted[-MAX_ALERTED:], company_visits=log)
-    return fresh, new_state
 
 
-def poll_since(state: dict[str, Any], now: datetime) -> datetime:
-    cursor = _parse_ts(state.get("cursor"))
-    return (cursor - OVERLAP) if cursor else now - FIRST_LOOKBACK
-
-
-def format_alert(visit: Visit) -> str:
+def format_visit(visit: Visit) -> str:
     did = []
     if visit.resume:
-        did.append("downloaded the resume")
+        did.append("resume")
     if visit.chess:
-        did.append("played chess")
+        did.append("chess")
     if visit.spacetime:
-        did.append("tried spacetime")
-    where = ", ".join(x for x in (visit.city, visit.country) if x) or "unknown"
-    lines = [
-        f"🔔 Site visit from ref={visit.ref}",
-        f"Pages: {', '.join(visit.pages) or '(none yet)'}",
-        f"Did: {'; '.join(did) or 'just looked'}",
-        f"From: {where}",
+        did.append("spacetime")
+    where = ", ".join(x for x in (visit.city, visit.country) if x)
+    bits = [
+        f"{len(visit.pages)} page{'s' if len(visit.pages) != 1 else ''}"
+        + (f" ({', '.join(visit.pages[:5])})" if visit.pages else ""),
+        "tried " + ", ".join(did) if did else "",
+        where,
     ]
+    line = f"• {visit.ref}: " + " · ".join(b for b in bits if b)
     if visit.session:
-        lines.append(f"Recording: {recording_url(visit.session)}")
-    return "\n".join(lines)
+        line += f"\n  {recording_url(visit.session)}"
+    return line
 
 
-# -- morning brief ------------------------------------------------------------
+# -- totals -------------------------------------------------------------------
 
 
-def summary_hogql() -> tuple[str, str]:
-    """(totals, by-ref) queries for the last 24 hours."""
-    window = f"timestamp > now() - INTERVAL 1 DAY AND {_NOT_TEST}"
-    totals = (
+def totals_hogql(days: int) -> str:
+    return (
         "SELECT uniqIf(person_id, event = '$pageview') AS people, "
         "countIf(event = '$pageview') AS views, "
         "countIf(event = 'resume_download') AS resume, "
         f"uniqIf(person_id, event IN {_in(CHESS_EVENTS)}) AS chess, "
         f"uniqIf(person_id, event IN {_in(SPACETIME_EVENTS)}) AS spacetime "
-        f"FROM events WHERE {window}"
+        f"FROM events WHERE {_window(days)}"
     )
-    by_ref = (
-        f"SELECT {_REF} AS ref, uniq(person_id) AS people, count() AS views "
-        f"FROM events WHERE event = '$pageview' AND {window} "
-        "GROUP BY ref ORDER BY people DESC, views DESC LIMIT 50"
+
+
+def breakdown_hogql(expr: str, days: int, limit: int = 10, event: str = "$pageview") -> str:
+    """People and count per value of `expr` (a fixed expression from this module)."""
+    return (
+        f"SELECT {expr} AS key, uniq(person_id) AS people, count() AS n "
+        f"FROM events WHERE event = '{event}' AND {_window(days)} "
+        f"GROUP BY key ORDER BY people DESC, n DESC LIMIT {int(limit)}"
     )
-    return totals, by_ref
 
 
 def summarize(totals: list[dict[str, Any]], by_ref: list[dict[str, Any]]) -> dict[str, Any]:
     row = totals[0] if totals else {}
-    refs = {str(r.get("ref") or "") or "(none)": int(r.get("people") or 0) for r in by_ref}
+    refs = {str(r.get("key") or "") or "(none)": int(r.get("people") or 0) for r in by_ref}
     return {
         "people": int(row.get("people") or 0),
         "views": int(row.get("views") or 0),
@@ -266,32 +197,112 @@ def summarize(totals: list[dict[str, Any]], by_ref: list[dict[str, Any]]) -> dic
     }
 
 
-def fetch_summary(client: httpx.Client | None = None) -> dict[str, Any]:
-    totals_q, by_ref_q = summary_hogql()
-    return summarize(query(totals_q, client), query(by_ref_q, client))
-
-
-def format_section(summary: dict[str, Any]) -> str:
-    if not summary["people"] and not summary["resume"]:
-        return "Site (last 24 h)\nNo visitors."
+def _headline(summary: dict[str, Any]) -> list[str]:
     refs = " · ".join(f"{ref} {n}" for ref, n in summary["by_ref"].items())
-    lines = [
-        "Site (last 24 h)",
+    return [
         f"Visitors: {summary['people']} ({summary['views']} page views)",
         f"By ref: {refs}" if refs else "",
-        f"Resume downloads: {summary['resume']}",
-        f"Chess: {summary['chess_people']} people · "
-        f"Spacetime: {summary['spacetime_people']} people",
+        f"Resume downloads: {summary['resume']} · chess: {summary['chess_people']} people"
+        f" · spacetime: {summary['spacetime_people']} people",
     ]
-    if summary["company_refs"]:
-        lines.append(f"Companies: {', '.join(summary['company_refs'])}")
+
+
+# -- the brief's block --------------------------------------------------------
+
+
+def fetch_brief(client: httpx.Client | None = None) -> tuple[dict[str, Any], list[Visit]]:
+    summary = summarize(
+        query(totals_hogql(1), client), query(breakdown_hogql(_REF, 1, limit=20), client)
+    )
+    company = visits(query(visits_hogql(1), client)) if summary["company_refs"] else []
+    return summary, company
+
+
+def format_brief(summary: dict[str, Any], company: list[Visit]) -> str:
+    if not summary["people"] and not summary["resume"]:
+        return "Site (last 24 h): no visitors."
+    lines = ["Site (last 24 h)", *_headline(summary)]
+    if company:
+        lines.append("Company refs:")
+        lines += [format_visit(v) for v in company]
+    lines.append("/site for more")
     return "\n".join(line for line in lines if line)
 
 
-def record_day(state: dict[str, Any], day: str, summary: dict[str, Any]) -> dict[str, Any]:
-    """Add one day's summary, keeping the last KEEP_DAYS days."""
+def record_day(
+    state: dict[str, Any], day: str, summary: dict[str, Any], company: list[Visit]
+) -> dict[str, Any]:
+    """Add one day's summary (no ids or cities), keeping the last KEEP_DAYS days."""
     days = dict(state.get("days") or {})
-    days[day] = summary
-    new_state = dict(state)
-    new_state["days"] = dict(sorted(days.items())[-KEEP_DAYS:])
-    return new_state
+    days[day] = {
+        **summary,
+        "company_visits": [
+            {
+                "ref": v.ref,
+                "pages": len(v.pages),
+                "resume": v.resume > 0,
+                "chess": v.chess > 0,
+                "spacetime": v.spacetime > 0,
+                "country": v.country,
+            }
+            for v in company
+        ],
+    }
+    return {**state, "days": dict(sorted(days.items())[-KEEP_DAYS:])}
+
+
+# -- /site: the deeper read ---------------------------------------------------
+
+_SECTIONS = (
+    ("By day", "toString(toDate(timestamp))", 31),
+    ("Top pages", "properties.$pathname", 10),
+    ("Came from", "ifNull(nullIf(domain(toString(properties.$referrer)), ''), '(direct)')", 8),
+    ("Countries", "ifNull(toString(properties.$geoip_country_code), '?')", 8),
+    ("Devices", "ifNull(toString(properties.$device_type), '?')", 5),
+)
+
+
+def engagement_hogql(days: int) -> str:
+    return (
+        "SELECT countIf(event = 'chess_new_game') AS games, "
+        "countIf(event = 'chess_action') AS moves, "
+        "avgIf(toFloat(properties.seconds), event = 'chess_engine_loaded') AS engine_s, "
+        "countIf(event = 'spacetime_source') AS sources, "
+        "countIf(event = 'spacetime_export') AS exports "
+        f"FROM events WHERE {_window(days)}"
+    )
+
+
+def fetch_report(days: int, client: httpx.Client | None = None) -> str:
+    days = max(1, min(int(days), MAX_REPORT_DAYS))
+    summary = summarize(
+        query(totals_hogql(days), client), query(breakdown_hogql(_REF, days, limit=20), client)
+    )
+    if not summary["people"] and not summary["resume"]:
+        return f"Site, last {days} days: no visitors."
+    lines = [f"Site, last {days} days", *_headline(summary)]
+    for title, expr, limit in _SECTIONS:
+        rows = query(breakdown_hogql(expr, days, limit), client)
+        if title == "By day":
+            rows.sort(key=lambda r: str(r.get("key")))
+        if rows:
+            lines.append(f"\n{title}")
+            lines += [f"  {r.get('key') or '?'}: {r.get('people')} ({r.get('n')})" for r in rows]
+    eng = (query(engagement_hogql(days), client) or [{}])[0]
+    if any(eng.get(k) for k in ("games", "moves", "sources", "exports")):
+        engine = eng.get("engine_s")
+        lines.append("\nEngagement")
+        lines.append(
+            f"  chess: {eng.get('games') or 0} games, {eng.get('moves') or 0} moves"
+            # avgIf is NaN when nothing loaded, and NaN != NaN.
+            + (f", engine loads in {engine:.1f} s" if engine == engine and engine else "")
+        )
+        lines.append(
+            f"  spacetime: {eng.get('sources') or 0} sources, {eng.get('exports') or 0} exports"
+        )
+    company = visits(query(visits_hogql(days), client))
+    if company:
+        lines.append("\nCompany refs")
+        lines += [f"{v.first_seen} {format_visit(v)[2:]}" for v in company]
+    lines.append("\n(people, with page views or events in brackets)")
+    return "\n".join(line for line in lines if line)

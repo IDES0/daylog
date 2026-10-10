@@ -68,9 +68,9 @@ The ledger is the foundation; the assistant is only as good as its grounding.
 - **`health.yaml`**: the phone's daily numbers, kept beside the journal as
   reference, joined by date.
 - **`site.yaml`**: summaries of the personal site's PostHog analytics —
-  daily counts by ref, company-ref visits (ref, date, pages, what they
-  tried, country) and hashes of person+ref so an alert never repeats. No
-  IPs, person ids or recordings; those stay in PostHog.
+  one entry per day, written with the brief: counts by ref and the
+  company-ref visits (ref, pages, what they tried, country). No IPs,
+  person ids or recordings; those stay in PostHog.
 - **`profile.md` / `profile.yaml`**: the user's principles, risk rules and
   preferences. Read by chat, planner, brief and review.
 - **`research/`, `plans/`, `reviews/`**: markdown written by the assistant
@@ -96,9 +96,9 @@ The ledger is the foundation; the assistant is only as good as its grounding.
   and may enrich existing places; they never create places or touch the
   journal. Prompts: `docs/research-routine-prompt.md`,
   `docs/research-weekly-prompt.md`.
-- **PostHog (read-only)**: the bot polls the site's analytics every ~15
-  minutes for company-ref visitors and adds a Site block to the brief,
-  with a read-only personal key. Alerts go only to the user.
+- **PostHog (read-only)**: the brief ends with a Site block for the last
+  24 hours, and `/site [days]` gives the deeper breakdown on demand.
+  Read-only personal key; no polling.
 - **Sessions in Claude Code**: one-off work (bulk imports, backfills, deep
   research, analysis of the export tables) is done here rather than through
   the bot's paid API.
@@ -118,7 +118,7 @@ The ledger is the foundation; the assistant is only as good as its grounding.
 | 2026-10-02 | "Never messages third parties" narrowed to "never without a Confirm on the exact text and recipient", so confirmed email can be added later |
 | 2026-10-02 | The CSV export is a session tool (`python -m daylog.export`), not a bot command |
 | 2026-10-10 | Activities are summarised by days done, with hours only where said (hours alone undercounted); journal gains `milestones` (certs, PBs, firsts), listed on the status page; `freedive` and `paraglide` join the activity vocabulary |
-| 2026-10-10 | Read-only PostHog analytics for the personal site: company-ref alerts, a Site block in the brief, summaries only in `site.yaml` |
+| 2026-10-10 | Read-only PostHog analytics for the personal site: a daily Site block in the brief (company refs included) and `/site` on demand; no 15-minute polling, since a few visits a day don't need it; summaries only in `site.yaml` |
 
 ## Not built
 

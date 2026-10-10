@@ -1,64 +1,66 @@
-"""Telegram side of the site analytics: the company-ref poll and the brief section.
+"""Telegram side of the site analytics: the brief's Site block and /site.
 
-Both are no-ops unless POSTHOG_PERSONAL_API_KEY is set. A PostHog failure
-is logged and skipped, never surfaced as a broken brief.
+Both do nothing unless POSTHOG_PERSONAL_API_KEY and POSTHOG_PROJECT_ID
+are set. A PostHog failure is logged and skipped in the brief, and
+reported plainly by /site.
 """
 
 from __future__ import annotations
 
 import asyncio
 import logging
-from datetime import UTC, date, datetime
+from datetime import date
 
+from telegram import Update
 from telegram.ext import ContextTypes
 
 from daylog import analytics
-from daylog.tg import allowed_user_id, vault
+from daylog.tg import chunks, is_authorized
 from daylog.vault import Vault
 
 logger = logging.getLogger(__name__)
 
-
-async def poll_job(context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Every ~15 min: alert once per person+ref for each new company-ref visitor."""
-    if not analytics.configured():
-        return
-    v = vault()
-    state = v.read_yaml(analytics.FILE, {}) or {}
-    now = datetime.now(UTC)
-    try:
-        rows = await asyncio.to_thread(
-            analytics.query, analytics.visits_hogql(analytics.poll_since(state, now))
-        )
-    except analytics.AnalyticsError as e:
-        logger.warning("site poll failed: %s", e)
-        return
-    fresh, new_state = analytics.new_visits(state, rows, now)
-    if not fresh:
-        return
-    for visit in fresh:
-        await context.bot.send_message(
-            chat_id=allowed_user_id(),
-            text=analytics.format_alert(visit),
-            disable_web_page_preview=True,
-        )
-    refs = ", ".join(sorted({visit.ref for visit in fresh}))
-    v.write_yaml(analytics.FILE, new_state, f"site: visit from {refs}")
+DEFAULT_REPORT_DAYS = 7
 
 
 def brief_section(v: Vault, today: date) -> str | None:
-    """The brief's "Site" block, recording the day's summary in the vault."""
+    """The brief's Site block; also records the day's summary in the vault."""
     if not analytics.configured():
         return None
     try:
-        summary = analytics.fetch_summary()
+        summary, company = analytics.fetch_brief()
     except analytics.AnalyticsError as e:
         logger.warning("site summary failed: %s", e)
         return None
     state = v.read_yaml(analytics.FILE, {}) or {}
     v.write_yaml(
         analytics.FILE,
-        analytics.record_day(state, today.isoformat(), summary),
+        analytics.record_day(state, today.isoformat(), summary, company),
         f"site: {today.isoformat()}",
     )
-    return analytics.format_section(summary)
+    return analytics.format_brief(summary, company)
+
+
+async def site_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """/site [days] — pages, sources, countries, engagement and company refs."""
+    if not is_authorized(update):
+        return
+    message = update.message
+    assert message is not None
+    if not analytics.configured():
+        await message.reply_text("Site analytics aren't set up (no PostHog key).")
+        return
+    args = context.args or []
+    try:
+        days = int(args[0]) if args else DEFAULT_REPORT_DAYS
+    except ValueError:
+        await message.reply_text("Usage: /site or /site 30")
+        return
+    try:
+        report = await asyncio.to_thread(analytics.fetch_report, days)
+    except analytics.AnalyticsError as e:
+        logger.warning("site report failed: %s", e)
+        await message.reply_text("Couldn't reach PostHog — check bot logs.")
+        return
+    for chunk in chunks(report):
+        await message.reply_text(chunk, disable_web_page_preview=True)

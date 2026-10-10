@@ -38,7 +38,6 @@ from telegram.ext import (
 )
 
 from daylog import (
-    analytics,
     brief,
     calendar_server,
     chat_flow,
@@ -1104,6 +1103,7 @@ def build_application() -> Application:  # type: ignore[type-arg]
     application.add_handler(CommandHandler("usage", research_flow.usage_command))
     application.add_handler(CommandHandler("surf", surf_command))
     application.add_handler(CommandHandler("fly", fly_command))
+    application.add_handler(CommandHandler("site", site_flow.site_command))
     application.add_handler(CommandHandler("want", wishlist_flow.want_command))
     application.add_handler(CommandHandler("wishlist", wishlist_flow.wishlist_command))
     application.add_handler(
@@ -1137,9 +1137,6 @@ def build_application() -> Application:  # type: ignore[type-arg]
     )
     application.job_queue.run_daily(
         daily.reconcile_job, time=dt_time(hour=daily.day_cutoff_hour(), minute=5, tzinfo=_tz())
-    )
-    application.job_queue.run_repeating(
-        site_flow.poll_job, interval=analytics.POLL_SECONDS, first=60
     )
     # PTB counts days from Sunday = 0.
     application.job_queue.run_daily(
