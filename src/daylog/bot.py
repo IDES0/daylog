@@ -6,6 +6,7 @@ doing anything else — this is the only auth layer, so it must run first.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 import tempfile
@@ -37,6 +38,7 @@ from telegram.ext import (
 )
 
 from daylog import (
+    analytics,
     brief,
     calendar_server,
     chat_flow,
@@ -50,6 +52,7 @@ from daylog import (
     rank_flow,
     rankings,
     research_flow,
+    site_flow,
     trail,
     transcribe,
     wishlist_flow,
@@ -493,6 +496,14 @@ async def _send_brief(context: ContextTypes.DEFAULT_TYPE, chat_id: int) -> None:
             chat_id=chat_id, text="Something went wrong building your brief — check bot logs."
         )
         return
+
+    try:
+        site = await asyncio.to_thread(site_flow.brief_section, vault, today)
+    except Exception:
+        logger.exception("site section failed")
+        site = None
+    if site:
+        text += "\n\n" + site
 
     for chunk in _chunks(text):
         await bot.send_message(chat_id=chat_id, text=chunk)
@@ -1126,6 +1137,9 @@ def build_application() -> Application:  # type: ignore[type-arg]
     )
     application.job_queue.run_daily(
         daily.reconcile_job, time=dt_time(hour=daily.day_cutoff_hour(), minute=5, tzinfo=_tz())
+    )
+    application.job_queue.run_repeating(
+        site_flow.poll_job, interval=analytics.POLL_SECONDS, first=60
     )
     # PTB counts days from Sunday = 0.
     application.job_queue.run_daily(
