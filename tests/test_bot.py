@@ -34,6 +34,20 @@ def test_fetch_marine_forecast_none_without_coordinates() -> None:
     assert bot._fetch_marine_forecast({"place": "x"}, _PLACES, ZoneInfo("UTC")) is None
 
 
+def test_fetch_marine_forecast_uses_the_place_when_the_stay_has_no_coordinates(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(marine, "fetch_forecast", lambda lat, lon, tz, days=5: f"{lat},{lon}")
+    places = [{**p, "lat": -8.72, "lon": 115.17} if p["id"] == "kuta-bali" else p for p in _PLACES]
+    current = {"place": "Kuta, Bali, ID", "place_id": "kuta-bali"}
+    result = bot._fetch_marine_forecast(current, places, ZoneInfo("Asia/Makassar"))
+    assert result == "Kuta, Bali, ID:\n-8.72,115.17\n\nAirport Rights:\n-8.757,115.16"
+
+    # No coordinates anywhere up the tree: the region's spots still get a forecast.
+    result = bot._fetch_marine_forecast(current, _PLACES, ZoneInfo("Asia/Makassar"))
+    assert result == "Airport Rights:\n-8.757,115.16"
+
+
 def test_fetch_wind_forecast_combines_current_and_curated_wind_spots(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

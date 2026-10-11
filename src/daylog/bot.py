@@ -367,18 +367,21 @@ def _relevant_spots(current: dict[str, Any] | None, places_data: Any) -> list[di
     standing) is the point — swell or wind can be building somewhere better
     a short trip away.
     """
-    if not current or current.get("lat") is None or current.get("lon") is None:
+    if not current:
         return []
-
-    spots = [
-        {
-            "name": current.get("place", "current location"),
-            "lat": current["lat"],
-            "lon": current["lon"],
-        }
-    ]
     index = PlaceIndex(list(places_data or []))
-    for spot in index.forecast_spots(index.current_place(current)):
+    here = index.current_place(current)
+    # A stay linked by place_id usually carries no coordinates of its own;
+    # the place node (or its nearest located ancestor) has them.
+    lat, lon = current.get("lat"), current.get("lon")
+    if (lat is None or lon is None) and here is not None:
+        located = index.with_coordinates([here])
+        if located:
+            lat, lon = located[0]["lat"], located[0]["lon"]
+    spots = []
+    if lat is not None and lon is not None:
+        spots.append({"name": current.get("place", "current location"), "lat": lat, "lon": lon})
+    for spot in index.forecast_spots(here):
         spots.append(
             {"name": spot.get("name", "nearby spot"), "lat": spot["lat"], "lon": spot["lon"]}
         )
