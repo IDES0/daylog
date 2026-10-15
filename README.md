@@ -184,7 +184,11 @@ until its variable is set, and 404s everything else:
   - **Installable**: a manifest, icons and a service worker (it caches
     nothing; it only shows an offline note), so Safari's Share → Add to Home
     Screen or Chrome's Install opens it as an app. Sign in inside the
-    installed app, since iOS keeps its cookies apart from Safari's.
+    installed app, since iOS keeps its cookies apart from Safari's. The
+    worker leaves form posts alone, and the password line answers with a
+    small page that sets the cookie and moves on to `/` rather than a
+    redirect: an installed iPhone app dropped the cookie from the redirect,
+    so the right password just showed the guest view again.
 - **Health inlet** at `POST /health/<HEALTH_INGEST_SECRET>`: one small JSON
   object a day from an iOS Shortcut (`{"date": "2026-10-02", "steps": 8423}`),
   merged into `health.yaml`. Numbers may carry units ("1.9 mi"); the reply

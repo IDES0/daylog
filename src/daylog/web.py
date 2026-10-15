@@ -143,13 +143,25 @@ def manifest() -> bytes:
     ).encode("utf-8")
 
 
+# What the password line and sign-out answer with: a plain page that carries
+# the cookie and moves on to /. Not a redirect: an iPhone home-screen app
+# dropped the cookie from a 303, so the right password just showed the guest
+# view again. Every outcome gets the same page, so it says nothing about
+# whether the password was right. replace() keeps the POST out of history.
+LANDING = (
+    b'<!doctype html><meta charset="utf-8">'
+    b'<meta http-equiv="refresh" content="0;url=/">'
+    b'<script>location.replace("/")</script>'
+)
+
 # Nothing is cached: both pages carry live (and one private) data. The worker
 # only exists so an installed app shows a plain note instead of the browser's
-# error page when there's no connection.
+# error page when there's no connection. It leaves form posts alone (the
+# password line, sign-out), so their cookies go straight to the browser.
 SERVICE_WORKER = b"""self.addEventListener("install", () => self.skipWaiting());
 self.addEventListener("activate", e => e.waitUntil(self.clients.claim()));
 self.addEventListener("fetch", e => {
-  if (e.request.mode !== "navigate") return;
+  if (e.request.mode !== "navigate" || e.request.method !== "GET") return;
   e.respondWith(fetch(e.request).catch(() => new Response(
     "<!doctype html><meta name=viewport content='width=device-width'>" +
     "<body style='font:16px system-ui;padding:24px;background:#fbfaf7;color:#1b1d21'>" +

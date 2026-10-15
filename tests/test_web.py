@@ -160,16 +160,19 @@ def _request(
 
 
 def test_wrong_password_lands_on_the_guest_view(server: int) -> None:
-    response, _ = _request(server, "POST", "/login", "password=nope")
-    assert response.status == 303 and response.getheader("Location") == "/"
+    response, body = _request(server, "POST", "/login", "password=nope")
+    assert response.status == 200 and body == web.LANDING.decode()
     assert response.getheader("Set-Cookie") is None
     _, page = _request(server, "GET", "/")
     assert 'name="password"' in page and 'action="/logout"' not in page
 
 
 def test_right_password_shows_the_private_view_at_the_same_address(server: int) -> None:
-    response, _ = _request(server, "POST", "/login", "password=right+horse")
-    assert response.status == 303 and response.getheader("Location") == "/"
+    # The same page as a wrong password, but carrying the cookie: a page
+    # rather than a redirect, which an iPhone home-screen app dropped it from.
+    response, body = _request(server, "POST", "/login", "password=right+horse")
+    assert response.status == 200 and body == web.LANDING.decode()
+    assert 'location.replace("/")' in body
     cookie = (response.getheader("Set-Cookie") or "").split(";")[0]
     assert cookie.startswith(web.SESSION_COOKIE + "=")
 
@@ -184,6 +187,12 @@ def test_only_the_root_and_app_files_are_served(server: int) -> None:
         assert _request(server, "GET", path)[0].status == 200, path
     for path in ("/me", "/status/alex"):
         assert _request(server, "GET", path)[0].status == 404, path
+    assert _request(server, "GET", "/sw.js")[0].getheader("Cache-Control") == "no-cache"
+
+
+def test_the_service_worker_leaves_form_posts_alone() -> None:
+    worker = web.SERVICE_WORKER.decode()
+    assert 'e.request.method !== "GET"' in worker
 
 
 def test_site_off_serves_nothing_at_the_root(vault: Vault, monkeypatch: pytest.MonkeyPatch) -> None:
