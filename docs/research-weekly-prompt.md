@@ -49,6 +49,15 @@ meeting, a short experience that deepens a focus sport. Two good
 suggestions, each with why it fits them, when, cost and a source. Not a
 list of attractions — resist collecting; favour depth and people.
 
+## Job D — events ahead (next ~4 weeks)
+Same as the daily routine's Job 5, wider and further out: the bigger
+things in the next ~4 weeks where they are, where the itinerary takes
+them, and anywhere reachable that's really special or serves a goal
+(festivals, contests, fly-ins, course start dates, conferences). Anything
+that needs booking or travel planning now goes first. Add a `## Events
+ahead` section to the weekly file: at most ~10 bullets, dated, with where,
+why it fits, cost, link, and what they'd need to do by when.
+
 ## Job C — next move check
 If a leg, a hard date or a decision falls in the next ~4 weeks, check the
 plan still holds: seasons, events, prices, visa, transport. Update the
@@ -58,9 +67,9 @@ it is pending in `research/proposals/`, write one exactly as the daily
 routine's Job 4 describes (analysis, proposal file, optional plan draft).
 
 ## Output
-Write `research/weekly/<today>.md` (≤ ~900 words): what changed in each
-focus guide (one line each, linked), the two discovery suggestions, the
-next-move check, and sources. The weekly review and the brief read it.
+Write `research/weekly/<today>.md` (≤ ~1,000 words): what changed in each
+focus guide (one line each, linked), the two discovery suggestions, events
+ahead, the next-move check, and sources. The weekly review and the brief read it.
 
 ## Rules
 Same as the daily routine: read-only for `journal/`, `goals.yaml`,

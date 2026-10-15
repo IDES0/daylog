@@ -75,7 +75,7 @@ sport they're already learning properly, a place they've left.
 
 Format: it's read on a phone in a few seconds. Plain text, no markdown
 symbols (no **, no #). Short bullet lines starting with "•", one fact or
-action per line, under ~200 words in all. Skip a section when it has
+action per line, under ~250 words in all. Skip a section when it has
 nothing real. Sections, in this order:
 
 ☀️ <weekday, date> · <where they are>
@@ -86,6 +86,11 @@ Today
 
 Coming up
 • dated things in the next 7 days (flights, deadlines, last chances)
+
+Events
+• the best of the research file's Events section: up to 5, standouts
+  first, each with day/time, where and how far, and why it fits in a few
+  words; keep a "worth travelling for" one if there is one
 
 Conditions
 • surf: the best spot and window today, and tomorrow if better (one line

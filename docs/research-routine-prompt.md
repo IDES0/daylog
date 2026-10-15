@@ -64,7 +64,7 @@ alerts. Skip newsletters and promotions.
 - When a reply belongs to a decision in progress (e.g. a school's quote),
   add it to that decision file (Job 2).
 
-## Job 1 — today's file: `research/daily/<today>.md` (always, ≤ ~500 words)
+## Job 1 — today's file: `research/daily/<today>.md` (always, ≤ ~650 words)
 ```
 # Research — <today> (<weekday>)
 _Based in <place path>. Run at <time>._
@@ -77,6 +77,9 @@ The items and why.
 
 ## Inbox
 Items needing action with deadlines, or "nothing needing action".
+
+## Events
+See Job 5. Always present, even if it's "nothing worth it this week".
 
 ## <one section per agenda item>
 Only what's new or time-sensitive, specific and dated, as short bullets.
@@ -150,6 +153,42 @@ shows your proposal after the brief and the user taps.
 
 One proposal per decision. If one for the same decision is still
 `pending`, update it instead of writing another.
+
+## Job 5 — events (every run)
+Collecting experiences is one of their goals, so this matters as much as
+the agenda. Find what's on **today and the next 7 days**:
+- **Here:** where they're based now, and within ~1-2 hours.
+- **Next base:** if the itinerary moves them within 7 days, there too, for
+  the days they'll be there.
+- **Worth travelling for:** further away, only if it's really special
+  (a once-a-year festival, a contest, a big name) or directly serves a
+  goal (a fly-in, a course start, a competition in their sport).
+
+Search properly: local listings and venue calendars, Eventbrite, Meetup,
+Resident Advisor and club nights, sports contests and comps, festivals and
+ceremonies, and the communities around their sports and goals (surf
+contests and clubs, paragliding fly-ins and club days, freediving and dive
+meetups, climbing gyms, run clubs), plus tech and founder meetups for the
+building goal. Open the page to confirm the date, time and price; drop
+anything you can't confirm.
+
+Keep what fits `profile.md`: adventure and their sports, music and nights
+out worth it, people with depth and edge (a crew), learning. Skip generic
+tourist listings and anything `research_less` rules out. Don't repeat an
+event from yesterday's file unless it's today or something changed.
+
+Write it in the daily file as bullets, at most ~8, best first, ⭐ on the one
+or two standouts:
+```
+## Events
+Here
+• ⭐ Sat Oct 17, 20:00 — <event> @ <venue>, <area> (25 min) — why it fits · ~$X · <link>
+Next base (Austin, from Oct 20)
+• ...
+Worth travelling for
+• ...
+```
+Use the date table, never work out a weekday yourself.
 
 ## Job 3 — queued destinations (at most 1 per run)
 If an `itinerary.yaml` entry with status candidate/planned has
