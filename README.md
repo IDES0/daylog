@@ -125,10 +125,26 @@ until its variable is set, and 404s everything else:
   the day's summary. Read-only: editing an event in the calendar app changes
   nothing in the vault. Refresh is the calendar app's own polling interval.
   It carries journal summaries, so treat the URL like a password.
-- **Status page** at `/status/<STATUS_PAGE_SLUG>` (or under the feed secret
-  if no slug is set): one static page with the current place, the next dated
-  legs, active goals, the last 7 days and where you've been. No scripts or
-  forms. A short slug is guessable, so anyone who finds it can read the page.
+- **Status site** at `/status/<STATUS_PAGE_SLUG>`, and at `/` too when a slug
+  is set (meant for its own domain, e.g. `status.johnalexborkowski.com`;
+  nothing on the personal site links to it). Without a slug it lives only
+  under the feed secret, never at `/`. The guest page: the current place, a
+  map of where the itinerary goes next (styled like the site's travel map;
+  dated legs joined in order, undated candidates as ideas, pins only for
+  entries with a `place_id` that has coordinates), the next dated legs,
+  active goals, milestones, the last 7 days and where you've been. A short
+  slug is guessable, so anyone who finds it can read this page.
+- **Private page** at `/me`, when `STATUS_PASSWORD` is set: the guest page
+  shows one password line at the bottom. The right password sets a signed
+  30-day cookie and opens `/me` (adds the journal summaries, goal slips, the
+  ideas list with notes, phone numbers by day); anything else lands back on
+  the guest page without saying why. After 10 misses in 15 minutes every
+  login fails until the window passes. Changing the password signs everyone
+  out. Still read-only: Telegram changes things.
+- **Installable**: a manifest, icons and a service worker (it caches nothing;
+  it only shows an offline note), so Safari's Share → Add to Home Screen or
+  Chrome's Install opens it as an app. Sign in inside the installed app,
+  since iOS keeps its cookies apart from Safari's.
 - **Health inlet** at `POST /health/<HEALTH_INGEST_SECRET>`: one small JSON
   object a day from an iOS Shortcut (`{"date": "2026-10-02", "steps": 8423}`),
   merged into `health.yaml`. Numbers may carry units ("1.9 mi"); the reply
@@ -325,7 +341,8 @@ Requires a local clone of the private vault repo at the path set by
 | `MONTHLY_BUDGET_USD` | Optional API work (research, planning, chat web search) pauses above this, default `40` |
 | `RESEARCH_RUN_BUDGET_USD` | Per research run cap, default `1.50` |
 | `CALENDAR_FEED_SECRET` | Optional. Enables the calendar feed at `/calendar/<secret>.ics`, and the status page at `/status/<secret>` unless `STATUS_PAGE_SLUG` is set |
-| `STATUS_PAGE_SLUG` | Optional. Serves the status page at `/status/<slug>` (e.g. `alex`) instead of under the feed secret. Short and typeable, so anyone who guesses it can read the page |
+| `STATUS_PAGE_SLUG` | Optional. Serves the status page at `/status/<slug>` (e.g. `alex`) and at `/`, instead of under the feed secret. Short and typeable, so anyone who guesses it can read the page |
+| `STATUS_PASSWORD` | Optional. Adds the password line and the private page at `/me`. Use a long passphrase; unset means no login at all |
 | `HEALTH_INGEST_SECRET` | Optional. Enables `POST /health/<secret>`: a JSON object of the day's numbers from the phone (`{"date": "2026-10-02", "steps": 8423, "sleep_h": 7.2}`), merged into `health.yaml` and joined by date into the export and the status page; unset disables it |
 | `POSTHOG_PERSONAL_API_KEY` | Optional. A read-only PostHog personal key (scopes `query:read` and friends). With `POSTHOG_PROJECT_ID`, enables a Site block at the end of the morning brief (last 24 h, including visitors who came through a company `?ref=` tag, i.e. not linkedin/github/test) and `/site [days]` for a deeper breakdown. Nothing polls. Never written to the vault or logs |
 | `POSTHOG_PROJECT_ID` | The PostHog project the site reports to |
@@ -359,9 +376,12 @@ Railway, Dockerfile-based build (`railway.json`):
   something that conflicted with it.
 - Git push to the vault goes over SSH on port 443 (`ssh.github.com`),
   since Railway blocks outbound port 22.
-- The web server (feed, status page, health inlet) needs a public
+- The web server (feed, status site, health inlet) needs a public
   domain generated for this service in the Railway dashboard — Railway
-  doesn't expose one by default just because a port is listening.
+  doesn't expose one by default just because a port is listening. For the
+  status site's own domain, add it as a custom domain on the service
+  (Settings → Networking) and point a CNAME for `status` at the target
+  Railway gives; Railway issues the certificate.
 
 ## Status
 

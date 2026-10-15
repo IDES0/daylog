@@ -24,16 +24,20 @@ The ledger is the foundation; the assistant is only as good as its grounding.
 
 - **No database.** The vault is plain markdown and YAML in a private git
   repo. `vault.py` is the only module that touches the filesystem or git.
-- **Telegram is the interface.** No interactive web frontend. The web
-  surface is three things: the read-only calendar feed (secret path), a
-  one-page read-only status view (a short path the user chose), and one
-  inlet for the phone's daily health numbers (secret path).
+- **Telegram is the interface for changing things.** The web surface is
+  read-only apart from signing in: the calendar feed (secret path), the
+  status site (a guest page at its own domain and the short path the user
+  chose, and a private page behind one password line), and one inlet for
+  the phone's daily health numbers (secret path). The status site installs
+  as a home-screen app. Anything that writes from the web needs its own
+  decision below.
 - **The bot never contacts anyone on its own.** It may draft a message, and
   send it only after the user taps Confirm on the exact text and recipient.
   (Sending isn't built; today it only drafts.) The research routines stay
   read-only for email.
-- **Every handler checks the Telegram user id first.** There is no other
-  auth layer.
+- **Every handler checks the Telegram user id first.** On the web, the
+  private page needs the session cookie the password line sets; nothing on
+  the web can change the vault except the health inlet.
 - **Hard dates never move silently.** A hard goal or itinerary date changes
   only after a Confirm in Telegram. Soft dates move freely and record every
   move in `slip_history`; a goal that has slipped four times is the signal.
@@ -120,6 +124,7 @@ The ledger is the foundation; the assistant is only as good as its grounding.
 | 2026-10-10 | Activities are summarised by days done, with hours only where said (hours alone undercounted); journal gains `milestones` (certs, PBs, firsts), listed on the status page; `freedive` and `paraglide` join the activity vocabulary |
 | 2026-10-10 | Read-only PostHog analytics for the personal site: a daily Site block in the brief (company refs included) and `/site` on demand; no 15-minute polling, since a few visits a day don't need it; summaries only in `site.yaml` |
 | 2026-10-15 | A stated decision (job, flight home, injury) is traced through the itinerary, goals and plan in one pass: impact item by item, workarounds for each affected goal, what it opens up. Edits go through one confirm card; the analysis is saved under `research/decisions/`. Prompted by accepting NASCO, which changed seven itinerary entries and two goals that no voice note touched |
+| 2026-10-15 | The status page becomes a small status site on its own domain (`status.johnalexborkowski.com`, not linked from the personal site): a nicer guest page with a map of where the itinerary goes next (the travel page's style, future instead of past), one password line whose wrong answer just shows the guest page and whose right one opens a private page, and a PWA manifest so it installs as an app. Still read-only. Direction, not yet decided: the web app may take over from Telegram over time; each step that writes from the web gets its own entry here |
 
 ## Not built
 

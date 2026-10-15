@@ -39,7 +39,7 @@ def test_goal_rows_show_a_bar_only_with_a_target() -> None:
     assert (rows[2]["value"], rows[2]["when"]) == ("", "by Feb 15")
 
 
-def test_render_is_one_escaped_page_without_scripts(vault: Vault) -> None:
+def test_render_is_one_escaped_page(vault: Vault) -> None:
     vault.write_yaml(
         "goals.yaml",
         [{"id": "s", "title": "Surf <rights>", "status": "active", "progress": 2, "target": 4}],
@@ -63,7 +63,8 @@ def test_render_is_one_escaped_page_without_scripts(vault: Vault) -> None:
     assert "width:50%" in html
     assert "1 of 7" in html and "1 day · 2 h" in html and "~600 kcal" in html
     assert "23 m &lt;depth&gt; PB" in html
-    assert "<script" not in html and "<form" not in html
+    # No password configured: no password line, and nothing private.
+    assert "<form" not in html and "Journal" not in html
 
 
 def test_stay_rows_are_newest_first_with_what_was_done(vault: Vault) -> None:

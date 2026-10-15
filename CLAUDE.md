@@ -10,10 +10,12 @@ reviews on top of them.
 
 ## Non-negotiables
 - No database. Vault is plain markdown + YAML files.
-- No interactive web frontend. Telegram is the interface. The only web
-  surface: the read-only calendar feed (secret path), a one-page read-only
-  status view (at a short path the user chose), and one inlet that accepts
-  the phone's daily health numbers (secret path).
+- Telegram is the interface for changing things. The web surface is
+  read-only apart from signing in: the calendar feed (secret path), the
+  status site (guest page at its own domain/short path, a private page
+  behind one password line, installable as a PWA), and one inlet that
+  accepts the phone's daily health numbers (secret path). Anything that
+  writes from the web needs a decision in DESIGN.md first.
 - The bot never contacts anyone on its own. It may draft a message, and
   send it only after the user taps Confirm on the exact text and recipient.
 - vault.py is the ONLY module that touches the filesystem or git.
