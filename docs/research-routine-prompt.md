@@ -11,9 +11,9 @@ job is today and the next few days.
 ## Read first
 - `profile.md` — their operating principles and risk rules. They decide
   emphasis: anchor sport over collecting, play over duty, their own rules.
-- `profile.yaml` — `focus` (their explicit steer: what matters right now —
-  this wins over anything you infer), `research_more` / `research_less`
-  (their feedback on what's useful), `surf_comfort_face_m`, `fly_rules`.
+- `profile.yaml` — `focus` (optional pins: topics they've forced onto the
+  agenda; usually empty), `research_more` / `research_less` (their feedback
+  on what's useful), `surf_comfort_face_m`, `fly_rules`.
 - `location.yaml` (the entry with empty `to:` is now; `place_id` points into
   `places/`), `itinerary.yaml` (planned legs, hard dates, candidates),
   `goals.yaml` (active goals, target windows), the last 5 `journal/` days
@@ -38,17 +38,28 @@ Don't suggest what they've already done or moved past: a tandem or
 beginner version of a sport they're learning properly, a place they've
 left. `profile.yaml` `research_less` lists what they've said isn't useful.
 
-## Step 1 — the agenda
-Write 3-5 agenda items, each with one line on why it's on today's list,
-drawn from, in this order:
-1. `focus` items.
-2. Hard dates in the next ~14 days (visa exits, flights, commitments).
-3. Decisions in progress — journal `open_questions`, open files in
-   `research/decisions/`, wishlist entries being weighed.
-4. Inbox items that need action (Job 0).
-5. Active goals whose target window is near.
+## Step 1 — today's focus and agenda
+Work out what matters to them right now from what they've been saying, not
+from a fixed list. Read the last 5 journal days (transcripts as well as
+frontmatter) and pick 3-5 agenda items, in this order:
+1. Anything they asked to have looked into: "research …", "look into …",
+   "I should figure out …", "I need to find …". Their own request beats
+   everything else.
+2. Pinned `focus` items in `profile.yaml`, if any.
+3. Hard dates in the next ~14 days (flights, start dates, commitments).
+4. Decisions in progress: journal `decisions` and `open_questions`, open
+   files in `research/decisions/`, wishlist entries being weighed.
+5. What they keep coming back to: the sports, people, plans and worries
+   that show up across several days, weighted by their goals and
+   `profile.md` (what they rank first gets the best attention).
+6. Inbox items that need action (Job 0).
 Skip what `research_less` says; favour what `research_more` says. Don't
-invent a topic just to fill the list — three good items beat five thin ones.
+invent a topic just to fill the list; three good items beat five thin ones.
+Topics change as their life does: when they move, change plans or stop
+mentioning something, the agenda follows. Start the daily file with one
+line per item saying where it came from (e.g. "journal Oct 14: wants a
+US P2 school").
+
 
 ## Job 0 — inbox (read-only Gmail)
 You have read-only Gmail tools. Look at the last ~2 days, plus anything
@@ -69,8 +80,8 @@ alerts. Skip newsletters and promotions.
 # Research — <today> (<weekday>)
 _Based in <place path>. Run at <time>._
 
-## Agenda
-The items and why.
+## Focus today
+Each item, and where it came from (journal date, pin, hard date, inbox).
 
 ## Act on today
 1-4 lines: what's worth doing or deciding today or this week, and why.

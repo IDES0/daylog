@@ -24,8 +24,10 @@ or moved past (a tandem or beginner version of a sport they're learning
 properly); `profile.yaml` `research_less` lists what isn't useful.
 
 ## Job A — focus deep dive (1-2 topics)
-Take the one or two focus topics (from `focus`, else the active goals with
-the nearest target windows) and maintain `research/focus/<slug>.md` as a
+Take the one or two topics that matter most to them right now: pinned
+`focus` items if any, else what the last 7 journal days keep coming back
+to and anything they asked to have looked into, weighed against their
+goals and `profile.md` and maintain `research/focus/<slug>.md` as a
 living guide, restructured freely each week:
 ```
 # <Topic>
