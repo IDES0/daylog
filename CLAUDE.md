@@ -12,8 +12,8 @@ reviews on top of them.
 - No database. Vault is plain markdown + YAML files.
 - Telegram is the interface for changing things. The web surface is
   read-only apart from signing in: the calendar feed (secret path), the
-  status site (guest page at its own domain/short path, a private page
-  behind one password line, installable as a PWA), and one inlet that
+  status site (one address on its own domain: a guest view, and a private
+  view behind one password line; installable as a PWA), and one inlet that
   accepts the phone's daily health numbers (secret path). Anything that
   writes from the web needs a decision in DESIGN.md first.
 - The bot never contacts anyone on its own. It may draft a message, and

@@ -2,9 +2,9 @@
 
 Telegram is the only interface that changes anything you'd call content
 (CLAUDE.md). This serves the calendar feed at an unguessable path (a .ics
-file for a calendar app to poll), the status site (see dashboard.py: a guest
-page at / and /status/<slug>, a private page at /me behind one password
-line, see web.py, plus the files that make it installable as an app), and
+file for a calendar app to poll), the status site at / (see dashboard.py: the
+guest view, or the private view once the password line has set a session,
+see web.py, plus the files that make it installable as an app), and
 accepts one thing: the phone's daily health numbers (see health.py), under
 its own secret. The password line and sign-out are the only forms.
 """
@@ -70,16 +70,12 @@ def _store_health(body: bytes) -> str:
 
 def _make_handler(
     feed_path: str | None,
-    status_path: str | None,
     health_path: str | None,
+    site: bool = False,
     password: str | None = None,
-    at_root: bool = False,
 ) -> type[BaseHTTPRequestHandler]:
     # One guard per server, so failed attempts are counted across requests.
-    guard = web.LoginGuard(password) if password and status_path else None
-    # Where "back to the guest page" goes: the bare domain only when the page
-    # is meant to be found (a chosen slug), never when it hides under a secret.
-    home = "/" if at_root else (status_path or "/")
+    guard = web.LoginGuard(password) if password and site else None
 
     class Handler(BaseHTTPRequestHandler):
         def log_message(self, format: str, *args: Any) -> None:
@@ -115,23 +111,16 @@ def _make_handler(
             build: Any
             if feed_path and path == feed_path:
                 build, content_type = _build_feed_bytes, "text/calendar; charset=utf-8"
-            elif status_path and (path == status_path or (at_root and path == "/")):
-                if self._signed_in():
-                    self._redirect("/me")
-                    return
-                build = lambda: _build_status_bytes(login=guard is not None)  # noqa: E731
+            elif site and path == "/":
+                # One address: the private view when signed in, else the guest one.
+                private = self._signed_in()
+                build = lambda: _build_status_bytes(private, guard is not None)  # noqa: E731
                 content_type = "text/html; charset=utf-8"
-            elif status_path and path == "/me":
-                if not self._signed_in():
-                    self._redirect(home)
-                    return
-                build = lambda: _build_status_bytes(private=True)  # noqa: E731
-                content_type = "text/html; charset=utf-8"
-            elif status_path and path in _SHELL:
+            elif site and path in _SHELL:
                 kind, body = _SHELL[path]
                 self._send(200, kind, body, cache="public, max-age=86400")
                 return
-            elif status_path and path in _ICONS:
+            elif site and path in _ICONS:
                 body = web.icon_png(_ICONS[path])
                 self._send(200, "image/png", body, cache="public, max-age=86400")
                 return
@@ -164,24 +153,24 @@ def _make_handler(
             path = urlsplit(self.path).path
             if health_path and path == health_path:
                 self._store_health()
-            elif status_path and path == "/login":
+            elif site and path == "/login":
                 self._login()
-            elif status_path and path == "/logout":
-                self._redirect(home, web.clear_cookie())
+            elif site and path == "/logout":
+                self._redirect("/", web.clear_cookie())
             else:
                 self._not_found()
 
         def _login(self) -> None:
-            # Right password: a session and the private page. Anything else
-            # (wrong, too many tries, no password configured): the guest page,
-            # with nothing to say which it was.
+            # Right password: a session, so / shows the private view. Anything
+            # else (wrong, too many tries, no password configured): back to the
+            # guest view, with nothing to say which it was.
             body = self._body(web.MAX_LOGIN_BODY)
             if guard and password and body and guard.attempt(web.password_from(body)):
                 logger.info("status login")
-                self._redirect("/me", web.set_cookie(web.make_session(password)))
+                self._redirect("/", web.set_cookie(web.make_session(password)))
                 return
             logger.warning("status login refused")
-            self._redirect(home)
+            self._redirect("/")
 
         def _store_health(self) -> None:
             body = self._body(health.MAX_BODY_BYTES)
@@ -203,39 +192,39 @@ def _make_handler(
 def start() -> None:
     """Start the server in a background thread, if configured.
 
-    Opt-in per feature: CALENDAR_FEED_SECRET enables the feed and the status
-    page (STATUS_PAGE_SLUG moves the page to /status/<slug> and also serves
-    it at /), STATUS_PASSWORD adds the password line and the private page,
+    Opt-in per feature: CALENDAR_FEED_SECRET enables the feed,
+    STATUS_PASSWORD enables the status site at / with its password line
+    (STATUS_SITE=1 serves the guest view alone, without a password),
     HEALTH_INGEST_SECRET enables the health inlet. With none set this does
     nothing, and an unset secret never falls back to a guessable or open path.
     """
     view_secret = os.environ.get("CALENDAR_FEED_SECRET")
     health_secret = os.environ.get("HEALTH_INGEST_SECRET")
-    # The status page lives at a path of the user's choosing when
-    # STATUS_PAGE_SLUG is set (short and typeable, so weaker than the
-    # secret); otherwise it shares the feed's secret.
-    chosen_slug = os.environ.get("STATUS_PAGE_SLUG", "").strip("/ ")
-    status_slug = chosen_slug or view_secret
     password = os.environ.get("STATUS_PASSWORD") or None
-    if not view_secret and not health_secret and not status_slug:
-        logger.info("no CALENDAR_FEED_SECRET or HEALTH_INGEST_SECRET — web server not started")
+    site = bool(password) or os.environ.get("STATUS_SITE", "").strip().lower() in (
+        "1",
+        "true",
+        "on",
+    )
+    if not view_secret and not health_secret and not site:
+        logger.info("no web feature configured — web server not started")
         return
 
     handler = _make_handler(
         f"/calendar/{view_secret}.ics" if view_secret else None,
-        f"/status/{status_slug}" if status_slug else None,
         f"/health/{health_secret}" if health_secret else None,
+        site,
         password,
-        at_root=bool(chosen_slug),
     )
     port = int(os.environ.get("PORT", "8080"))
     server = ThreadingHTTPServer(("0.0.0.0", port), handler)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
     logger.info(
-        "web server on port %d: views %s, private page %s, health inlet %s",
+        "web server on port %d: feed %s, status site %s, private view %s, health inlet %s",
         port,
         "on" if view_secret else "off",
-        "on" if password and status_slug else "off",
+        "on" if site else "off",
+        "on" if password else "off",
         "on" if health_secret else "off",
     )

@@ -8,7 +8,7 @@ from daylog.vault import Vault
 TODAY = date(2026, 10, 2)
 
 
-def test_upcoming_keeps_open_dated_legs_in_order() -> None:
+def test_upcoming_keeps_legs_still_ahead_in_order() -> None:
     itinerary = [
         {"place": "Later", "status": "planned", "target_window": ["2026-11-08", "2026-11-27"]},
         {"place": "Exit", "status": "planned", "deadline": "2026-10-06"},
@@ -17,8 +17,8 @@ def test_upcoming_keeps_open_dated_legs_in_order() -> None:
         {"place": "Done", "status": "done", "deadline": "2026-10-10"},
         {"place": "Undated", "status": "candidate"},
     ]
+    # "Now" is under way (where you are, not where you're headed).
     assert dashboard.upcoming(itinerary, TODAY) == [
-        ("Now", "Sep 28 – Oct 5"),
         ("Exit", "by Oct 6"),
         ("Later", "Nov 8 – Nov 27"),
     ]

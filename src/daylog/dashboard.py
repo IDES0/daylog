@@ -14,6 +14,7 @@ lists render without it.
 from __future__ import annotations
 
 import json
+import re
 from datetime import date, timedelta
 from html import escape
 from typing import Any
@@ -33,13 +34,13 @@ NOT_DOING = ("travel", "errand", "meal")
 # Matches johnalexborkowski.com/travel.html, so the two maps read as a pair.
 _CSS = """
 :root { --bg:#fbfaf7; --surface:#fff; --text:#1b1d21; --muted:#5d6470; --faint:#8a909a;
-  --line:#e6e3dc; --accent:#1f4f8a; --land:#e9e6df; --planned:#9dbbe0; --idea:#dbe5f1;
+  --line:#e6e3dc; --accent:#1f4f8a; --land:#e9e6df; --planned:#9dbbe0;
   --dot:#1f4f8a; --here:#c2410c; --bar:#1f4f8a;
   --serif:"Newsreader",Georgia,serif; --sans:"Inter",system-ui,-apple-system,sans-serif;
   --mono:"JetBrains Mono",ui-monospace,Menlo,monospace; }
 @media (prefers-color-scheme: dark) {
   :root { --bg:#111317; --surface:#171a1f; --text:#e7e9ec; --muted:#a3a9b3; --faint:#737a85;
-    --line:#262a31; --accent:#7fb0ec; --land:#22262d; --planned:#2f5583; --idea:#263a52;
+    --line:#262a31; --accent:#7fb0ec; --land:#22262d; --planned:#2f5583;
     --dot:#a9cdf7; --here:#fb923c; --bar:#7fb0ec; }
 }
 * { box-sizing:border-box; }
@@ -74,10 +75,9 @@ li { padding:10px 0; border-top:1px solid var(--line); }
   background:var(--surface); overflow:hidden; }
 #map { display:block; width:100%; height:auto; cursor:grab; touch-action:none; }
 .country { fill:var(--land); stroke:var(--surface); stroke-width:.5; }
-.country.planned { fill:var(--planned); } .country.idea { fill:var(--idea); }
+.country.planned { fill:var(--planned); }
 .route { fill:none; stroke:var(--dot); stroke-width:1.4; stroke-dasharray:4 3; opacity:.8; }
 .pin { fill:var(--dot); stroke:var(--surface); stroke-width:1.2; cursor:pointer; }
-.pin.idea { fill:var(--surface); stroke:var(--dot); }
 .pin.here { fill:var(--here); }
 .tip { position:absolute; pointer-events:none; opacity:0; background:var(--text);
   color:var(--bg); font-size:13px; line-height:1.35; padding:7px 10px; border-radius:7px;
@@ -107,7 +107,7 @@ _TOPOJSON = "https://cdn.jsdelivr.net/npm/topojson-client@3.1.0/dist/topojson-cl
 _WORLD = "https://cdn.jsdelivr.net/npm/world-atlas@2.0.2/countries-110m.json"
 
 # Draws DATA (see future_map) the way travel.html draws the past: countries
-# shaded, pins, and a dashed route from here through the dated legs in order.
+# shaded, pins, and a dashed route from here through the legs ahead in order.
 _MAP_JS = """
 const DATA = JSON.parse(document.getElementById("mapdata").textContent);
 const NAT = { "United States": "United States of America", "USA": "United States of America" };
@@ -118,11 +118,9 @@ const g = svg.append("g");
 const projection = d3.geoNaturalEarth1().scale(190).translate([W / 2, H / 2 + 20]);
 const path = d3.geoPath(projection);
 const tip = document.getElementById("tip"), card = document.getElementById("mapCard");
-const planned = new Set(DATA.stops.filter(s => s.planned && s.country).map(s => nat(s.country)));
-const ideas = new Set(DATA.stops.filter(s => !s.planned && s.country).map(s => nat(s.country)));
+const ahead = new Set(DATA.stops.filter(s => s.country).map(s => nat(s.country)));
 const here = DATA.here && DATA.here.lat != null ? [{ ...DATA.here, here: true }] : [];
-const pins = DATA.stops.filter(s => s.lat != null);
-const route = [...here, ...pins.filter(s => s.planned)];
+let pins = [];
 
 const zoom = d3.zoom().scaleExtent([1, 24]).translateExtent([[0, 0], [W, H]])
   .on("zoom", e => {
@@ -137,20 +135,22 @@ svg.call(zoom);
 
 // Centre the world where the points sit tightest, so a trip across the
 // Pacific stays in one piece instead of wrapping off both edges.
-const lons = [...here, ...pins].map(p => p.lon);
-let centre = 0, best = Infinity;
-for (let c = -180; c < 180; c += 10) {
-  const span = d3.extent(lons, l => ((l - c + 540) % 360) - 180);
-  if (lons.length && span[1] - span[0] < best) { best = span[1] - span[0]; centre = c; }
+function centre(points) {
+  const lons = points.map(p => p.lon);
+  let best = Infinity, at = 0;
+  for (let c = -180; c < 180; c += 10) {
+    const span = d3.extent(lons, l => ((l - c + 540) % 360) - 180);
+    if (lons.length && span[1] - span[0] < best) { best = span[1] - span[0]; at = c; }
+  }
+  projection.rotate([-at, 0]);
 }
-projection.rotate([-centre, 0]);
 
 function showTip(evt, p) {
   const r = card.getBoundingClientRect();
   tip.innerHTML = "";
   tip.append(p.name);
   const small = document.createElement("small");
-  small.textContent = p.here ? "Now" : (p.when || "Someday");
+  small.textContent = p.here ? "Now" : p.when;
   tip.append(small);
   tip.style.left = (evt.clientX - r.left) + "px";
   tip.style.top = (evt.clientY - r.top) + "px";
@@ -169,16 +169,25 @@ function fit(points) {
 
 d3.json("WORLD_URL").then(world => {
   const countries = topojson.feature(world, world.objects.countries).features;
+  const byName = new Map(countries.map(f => [f.properties.name, f]));
+  // A stop known only by its country goes at the country's middle.
+  pins = DATA.stops.map(s => {
+    if (s.lat != null) return s;
+    const f = s.country && byName.get(nat(s.country));
+    if (!f) return null;
+    const [lon, lat] = d3.geoCentroid(f);
+    return { ...s, lon, lat };
+  }).filter(Boolean);
+  centre([...here, ...pins]);
   g.append("g").selectAll("path").data(countries).join("path")
-    .attr("class", d => "country" + (planned.has(d.properties.name) ? " planned"
-      : ideas.has(d.properties.name) ? " idea" : ""))
+    .attr("class", d => "country" + (ahead.has(d.properties.name) ? " planned" : ""))
     .attr("d", path);
-  g.append("g").selectAll("path").data(d3.pairs(route)).join("path").attr("class", "route")
+  g.append("g").selectAll("path").data(d3.pairs([...here, ...pins])).join("path")
+    .attr("class", "route")
     .attr("d", ([a, b]) =>
       path({ type: "LineString", coordinates: [[a.lon, a.lat], [b.lon, b.lat]] }));
-  g.append("g").selectAll("circle").data([...pins.filter(p => !p.planned),
-      ...pins.filter(p => p.planned), ...here]).join("circle")
-    .attr("class", p => "pin" + (p.here ? " here" : p.planned ? "" : " idea"))
+  g.append("g").selectAll("circle").data([...pins, ...here]).join("circle")
+    .attr("class", p => "pin" + (p.here ? " here" : ""))
     .attr("cx", p => projection([p.lon, p.lat])[0])
     .attr("cy", p => projection([p.lon, p.lat])[1]).attr("r", 5)
     .on("pointerenter", showTip).on("pointerleave", hideTip)
@@ -238,18 +247,29 @@ def _when(entry: Any) -> tuple[date | None, str]:
     return None, ""
 
 
+def _ahead(entry: Any, today: date) -> tuple[date, str] | None:
+    """(start, label) for an open itinerary leg still ahead: a window that
+    hasn't begun, or a deadline that hasn't passed. Undated entries are the
+    wishlist, and a leg already under way is where you are, not where you're
+    headed; neither counts."""
+    if not isinstance(entry, dict) or entry.get("status") not in OPEN:
+        return None
+    start, label = _when(entry)
+    if start is None:
+        return None
+    if entry.get("deadline"):
+        return (start, label) if start >= today else None
+    return (start, label) if start > today else None
+
+
 def upcoming(itinerary: Any, today: date, limit: int = 8) -> list[tuple[str, str]]:
-    """(place, when) for open, dated legs that haven't ended, earliest first."""
+    """(place, when) for the legs still ahead, earliest first."""
     rows = []
     for e in itinerary or []:
-        if not isinstance(e, dict) or e.get("status") not in OPEN:
+        ahead = _ahead(e, today)
+        if ahead is None:
             continue
-        start, label = _when(e)
-        window = e.get("target_window")
-        end = _as_date(window[1]) if isinstance(window, list) and len(window) == 2 else start
-        if start is None or (end or start) < today:
-            continue
-        rows.append((start, str(e.get("place", e.get("id", "?"))), label))
+        rows.append((ahead[0], str(e.get("place", e.get("id", "?"))), ahead[1]))
     rows.sort(key=lambda r: r[0])
     return [(place, label) for _, place, label in rows[:limit]]
 
@@ -308,8 +328,33 @@ def stay_rows(
     return rows[:MAX_STAYS]
 
 
+def _named_place(index: PlaceIndex, text: str) -> str | None:
+    """A place id for an itinerary entry without one, where the name can't mean
+    two places: the one place whose name (or alias) is the whole text
+    ("Austin"), else the one country named as a word in it ("Flight to
+    Japan"). Anything looser needs a place_id."""
+    wanted = text.strip().lower()
+    exact = {
+        node["id"]
+        for node in index.nodes
+        if node.get("id")
+        and any(str(name).strip().lower() == wanted for name in index.names_of(node))
+    }
+    if len(exact) == 1:
+        return str(exact.pop())
+    found = {
+        node["id"]
+        for node in index.nodes
+        if node.get("kind") == "country"
+        for name in index.names_of(node)
+        if name and re.search(rf"\b{re.escape(str(name))}\b", text, re.IGNORECASE)
+    }
+    return found.pop() if len(found) == 1 else None
+
+
 def _pin(index: PlaceIndex, place_id: Any) -> dict[str, Any]:
-    """Coordinates (own or nearest ancestor's) and country name for a place id."""
+    """Coordinates (own or nearest ancestor's) and country name for a place id.
+    A country without coordinates is drawn at its middle by the map."""
     node = index.get(str(place_id)) if place_id else None
     if node is None:
         return {"lat": None, "lon": None, "country": None}
@@ -325,35 +370,26 @@ def _pin(index: PlaceIndex, place_id: Any) -> dict[str, Any]:
 def future_map(
     itinerary: Any, index: PlaceIndex, location_data: Any, today: date
 ) -> dict[str, Any]:
-    """Where the map starts and where it goes: the current stay, then every open
-    itinerary entry. Dated legs that haven't ended are `planned` and joined by
-    the route in date order; undated ones are ideas. Only an entry's place_id
-    places it on the map, never its name (a guess is how Kuta moved islands)."""
+    """Where the map starts and where it goes: the current stay, then each leg
+    still ahead (see _ahead), in date order. A leg is placed by its place_id;
+    without one, only by an unambiguous name (see _named_place), never by a
+    best guess (a guess is how Kuta moved islands)."""
     current = brief.current_location(location_data or [])
     here = None
     if current:
         node = index.current_place(current)
         here = {"name": str(current.get("place", "")), **_pin(index, node and node["id"])}
 
-    dated: list[tuple[date, dict[str, Any]]] = []
-    undated: list[tuple[date, dict[str, Any]]] = []
+    stops: list[tuple[date, dict[str, Any]]] = []
     for e in itinerary or []:
-        if not isinstance(e, dict) or e.get("status") not in OPEN:
+        ahead = _ahead(e, today)
+        if ahead is None:
             continue
-        start, label = _when(e)
-        window = e.get("target_window")
-        end = _as_date(window[1]) if isinstance(window, list) and len(window) == 2 else start
-        if start is not None and (end or start) < today:
-            continue
-        stop = {
-            "name": str(e.get("place", e.get("id", "?"))),
-            "when": label,
-            "planned": start is not None,
-            **_pin(index, e.get("place_id")),
-        }
-        (dated if start is not None else undated).append((start or today, stop))
-    dated.sort(key=lambda r: r[0])
-    return {"here": here, "stops": [s for _, s in dated + undated]}
+        name = str(e.get("place", e.get("id", "?")))
+        place_id = e.get("place_id") or _named_place(index, name)
+        stops.append((ahead[0], {"name": name, "when": ahead[1], **_pin(index, place_id)}))
+    stops.sort(key=lambda r: r[0])
+    return {"here": here, "stops": [s for _, s in stops]}
 
 
 def journal_rows(
@@ -407,8 +443,7 @@ def _map_section(data: dict[str, Any]) -> str:
     return (
         "<h2>Where I'm headed</h2>"
         '<div class="legend"><span><i style="background:var(--here)"></i>Now</span>'
-        '<span><i style="background:var(--dot)"></i>Planned</span>'
-        '<span><i style="border:1.5px solid var(--dot)"></i>Ideas</span></div>'
+        '<span><i style="background:var(--dot)"></i>Planned</span></div>'
         '<div class="map-card" id="mapCard">'
         '<svg id="map" role="img" aria-label="World map of where the itinerary goes next"></svg>'
         '<div class="tip" id="tip"></div><div class="map-tools">'
@@ -514,14 +549,12 @@ def render(vault: Vault, today: date, *, private: bool = False, login: bool = Fa
     week.append(_item("Meals mentioned", str(meals)))
 
     countries = {s["country"] for s in headed["stops"] if s["country"]}
-    planned_n = sum(1 for s in headed["stops"] if s["planned"])
     header = (
         f'<header><div class="eyebrow">{"Private · " if private else ""}'
         f"{escape(today.strftime('%A'))}, {escape(_short(today))}</div>"
         f"<h1>{escape(place or 'Location unknown')}</h1>"
         f'<p class="lede">{escape(here)}</p><div class="stats">'
-        + _stat(planned_n, "Legs planned")
-        + _stat(len(headed["stops"]) - planned_n, "Ideas")
+        + _stat(len(headed["stops"]), "Legs ahead")
         + _stat(len(countries), "Countries ahead")
         + "</div></header>"
     )
@@ -532,13 +565,6 @@ def render(vault: Vault, today: date, *, private: bool = False, login: bool = Fa
         journal = [_item(d, "", _sub(s)) for d, s in journal_rows(entries)]
         body += _section("Journal", journal, "Nothing logged.")
     body += _section("Goals", goals, "No active goals.")
-    if private:
-        ideas = [
-            _item(str(e.get("place", e.get("id", "?"))), "", _sub(str(e.get("notes") or "")))
-            for e in itinerary or []
-            if isinstance(e, dict) and e.get("status") == "candidate"
-        ]
-        body += _section("Ideas", ideas, "No candidates on the list.")
     body += _section("Milestones", wins, "None logged yet.")
     body += _section(f"Last {RECENT_DAYS} days", week, "Nothing logged.")
     if private and by_day:
