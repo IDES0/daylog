@@ -248,12 +248,12 @@ class Vault:
         path = self.path / name
         return path.read_text(encoding="utf-8") if path.exists() else None
 
-    def list_docs(self, folder: str) -> list[str]:
-        """Relative paths of markdown files under `folder`, newest name last."""
+    def list_docs(self, folder: str, pattern: str = "*.md") -> list[str]:
+        """Relative paths of files under `folder` (markdown by default), newest name last."""
         base = self.path / folder
         if not base.exists():
             return []
-        return sorted(str(p.relative_to(self.path)) for p in base.glob("*.md"))
+        return sorted(str(p.relative_to(self.path)) for p in base.glob(pattern))
 
     def write_text(self, name: str, text: str, commit_message: str) -> Path:
         path = self.path / name

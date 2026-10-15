@@ -6,7 +6,7 @@ from typing import Any
 
 import pytest
 
-from daylog import extract, reconcile, ripple, ripple_flow
+from daylog import extract, proposals, reconcile, ripple, ripple_flow
 from daylog.vault import Vault
 
 from .test_planner import FakeMessages, _usage
@@ -111,7 +111,7 @@ def test_run_forces_the_record_tool_when_the_model_stalls() -> None:
     assert fake.calls[1]["tool_choice"] == {"type": "tool", "name": "record_ripple"}
 
 
-def test_analyze_saves_the_decision_and_filters_changes(
+def test_analyze_saves_the_analysis_and_a_pending_proposal(
     vault: Vault, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     _seed(vault)
@@ -122,27 +122,75 @@ def test_analyze_saves_the_decision_and_filters_changes(
         return ripple.parse(RAW)
 
     monkeypatch.setattr(ripple, "run", fake_run)
-    result, path = ripple_flow.analyze(vault, datetime(2026, 10, 15, 9), "took the job")
+    path = ripple_flow.analyze(vault, datetime(2026, 10, 15, 9), "took the job")
 
     assert seen["context"].startswith("The decision, in their words:\ntook the job")
     assert (
         "- nepal-course: Nepal course (soft, planned, 2026-10-24 – 2026-11-07)" in seen["context"]
     )
-    assert [c["summary"] for c in result.changes] == ["Drop Nepal", "Paragliding on hold"]
-    assert path == "research/decisions/2026-10-15-accepted-a-six-month-job-in.md"
-    assert "# Decision: Accepted" in (vault.read_text(path) or "")
+    assert path == "research/proposals/2026-10-15-accepted-a-six-month-job-in.yaml"
+    data = vault.read_yaml(path, {})
+    assert data["status"] == "pending" and data["by"] == "bot"
+    assert [c["summary"] for c in data["changes"]] == ["Drop Nepal", "Paragliding on hold"]
+    assert "# Decision: Accepted" in (vault.read_text(data["analysis"]) or "")
+    assert ripple_flow.pending(vault) == [path]
 
 
-def test_apply_all_goes_through_the_confirmed_edit_path(vault: Vault) -> None:
+def _proposal(vault: Vault, **extra: Any) -> str:
+    path = "research/proposals/2026-10-16-austin.yaml"
+    vault.write_yaml(
+        path,
+        {
+            "decision": "Took the Austin job",
+            "summary": ["Nepal course: blocked"],
+            "changes": RAW["changes"],
+            "status": "pending",
+            **extra,
+        },
+        "proposal",
+    )
+    return path
+
+
+def test_applying_a_proposal_edits_adopts_the_plan_and_records_it(vault: Vault) -> None:
     _seed(vault)
-    changes = ripple.valid_changes(RAW["changes"], {"nepal-course"}, {"paragliding"})
-    changes.append({"edit": "goal", "summary": "No id, no title"})
+    vault.write_text("research/proposals/2026-10-16-austin-plan.md", "# New plan\n", "draft")
+    path = _proposal(vault, plan_draft="research/proposals/2026-10-16-austin-plan.md")
 
-    done, failed = ripple_flow.apply_all(vault, changes, TODAY)
+    outcome = ripple_flow._apply_proposal(vault, path)
 
-    assert len(done) == 2 and len(failed) == 1
+    assert outcome.startswith("Applied 3:")
     assert vault.read_itinerary()[0]["status"] == "dropped"
     assert vault.read_goals()[0]["notes"] == "On hold until a US course."
+    plans = vault.list_docs("plans")
+    assert len(plans) == 1 and vault.read_text(plans[0]) == "# New plan\n"
+    assert vault.read_yaml(path, {})["status"] == "applied"
+    assert ripple_flow.pending(vault) == []
+
+
+def test_card_lists_only_changes_to_real_entries(vault: Vault) -> None:
+    _seed(vault)
+    data = vault.read_yaml(_proposal(vault), {})
+    changes = proposals.changes_for(data, {"nepal-course", "japan"}, {"paragliding"})
+    text = proposals.card_text(data, changes)
+    assert text.startswith("⚡ Took the Austin job\n• Nepal course: blocked")
+    assert "1. Drop Nepal\n2. Paragliding on hold" in text
+    assert "Drop ghost" not in text and "Ghost goal" not in text
+
+
+def test_answered_proposals_are_not_pending() -> None:
+    assert proposals.is_pending({"status": "pending"})
+    assert proposals.is_pending({})
+    assert not proposals.is_pending({"status": "skipped"})
+    assert not proposals.is_pending(None)
+
+
+def test_apply_all_reports_what_failed(vault: Vault) -> None:
+    _seed(vault)
+    done, failed = ripple_flow.apply_all(
+        vault, [{"edit": "goal", "summary": "No id, no title"}], TODAY
+    )
+    assert done == [] and failed == ["No id, no title: a new goal needs a title"]
 
 
 def test_decisions_are_journaled_and_listed_so_they_trace_once() -> None:

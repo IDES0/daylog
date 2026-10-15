@@ -98,8 +98,11 @@ The ledger is the foundation; the assistant is only as good as its grounding.
 - **Cloud routines (Claude Code, on the user's plan)**: a daily research
   run before the brief and a weekly deep dive. They write under `research/`
   and may enrich existing places; they never create places or touch the
-  journal. Prompts: `docs/research-routine-prompt.md`,
-  `docs/research-weekly-prompt.md`.
+  journal. Changes to the itinerary, goals or plan they only propose, as
+  `research/proposals/*.yaml`; the bot shows each after the brief as one
+  card and the user's tap applies it. Their prompts live in the routine
+  config; `docs/research-routine-prompt.md` and
+  `docs/research-weekly-prompt.md` are the copies to edit and paste.
 - **PostHog (read-only)**: the brief ends with a Site block for the last
   24 hours, and `/site [days]` gives the deeper breakdown on demand.
   Read-only personal key; no polling.
@@ -123,7 +126,8 @@ The ledger is the foundation; the assistant is only as good as its grounding.
 | 2026-10-02 | The CSV export is a session tool (`python -m daylog.export`), not a bot command |
 | 2026-10-10 | Activities are summarised by days done, with hours only where said (hours alone undercounted); journal gains `milestones` (certs, PBs, firsts), listed on the status page; `freedive` and `paraglide` join the activity vocabulary |
 | 2026-10-10 | Read-only PostHog analytics for the personal site: a daily Site block in the brief (company refs included) and `/site` on demand; no 15-minute polling, since a few visits a day don't need it; summaries only in `site.yaml` |
-| 2026-10-15 | A stated decision (job, flight home, injury) is traced through the itinerary, goals and plan in one pass: impact item by item, workarounds for each affected goal, what it opens up. Edits go through one confirm card; the analysis is saved under `research/decisions/`. Prompted by accepting NASCO, which changed seven itinerary entries and two goals that no voice note touched |
+| 2026-10-15 | A stated decision (job, flight home, injury) is traced through the itinerary, goals and plan: what it fixes, what it blocks or moves, ways to keep pursuing each goal, what it opens up. The morning research routine does it (on the user's plan, not the API) and writes a proposal file plus an optional revised plan; the bot shows it after the brief as one card. `/ripple` does it on the spot with the API. Prompted by accepting NASCO, which made seven itinerary entries and two goals stale |
+| 2026-10-15 | The journal outranks the inbox and the routines' own files: a thing the user says is settled stays settled. The brief is a fixed, skimmable layout under ~200 words; forecasts come from the bot, not the routine |
 | 2026-10-15 | The status page becomes a small status site on its own domain (`status.johnalexborkowski.com`, not linked from the personal site): one address (no slug, no `/status/...` or `/me` paths): a nicer guest view with a map of where you're headed (the travel page's style, future instead of past: only legs still ahead, not the wishlist and not the leg you're on), one password line whose wrong answer just shows the guest view again and whose right one shows the private view at the same address, and a PWA manifest so it installs as an app. `STATUS_PAGE_SLUG` and the status page under the feed secret are gone. Still read-only. Direction, not yet decided: the web app may take over from Telegram over time; each step that writes from the web gets its own entry here |
 
 ## Not built

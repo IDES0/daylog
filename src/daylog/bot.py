@@ -512,6 +512,9 @@ async def _send_brief(context: ContextTypes.DEFAULT_TYPE, chat_id: int) -> None:
         await bot.send_message(chat_id=chat_id, text=chunk)
     chat_flow.remember(context, "The bot sent the morning brief", text)
     llm.flush(vault)
+    # Decisions the morning research traced (and anything else it proposed),
+    # one card each, until they're answered.
+    await ripple_flow.send_pending(context, chat_id)
 
 
 async def brief_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -838,8 +841,6 @@ async def _log_entry(transcript: str, message: Message, context: ContextTypes.DE
             entry_time.date(),
         )
         other_day_notes = facts.pop("other_day_notes", [])
-        # Kept in the journal (a log of the day's big calls); traced below.
-        decisions = [str(d) for d in facts.get("decisions") or [] if d]
 
         location_note = ""
         if location_change and location_change.get("place"):
@@ -959,10 +960,6 @@ async def _log_entry(transcript: str, message: Message, context: ContextTypes.DE
             await rank_flow.prompt_after_entry(message, context, facts)
         except Exception:
             logger.exception("ranking prompt failed")
-        # A big decision gets traced through the itinerary, goals and plan,
-        # after the "Logged" reply so the note itself isn't held up.
-        for decision in decisions:
-            context.application.create_task(ripple_flow.run_for(context, message.chat_id, decision))
         if _has_place_mentions(facts):
             context.application.create_task(
                 research_flow.resolve_days(context, message.chat_id, [entry_time.date()])

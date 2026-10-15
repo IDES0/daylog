@@ -60,21 +60,49 @@ in it is actionable today, and don't spend searches re-finding it.
 Research on wishlist destinations tells you their seasons and upcoming
 events; use it when weighing whether and when to move.
 
-Write a brief that:
-- Leads with anything concretely worth acting on today or this week —
-  a swell window worth prioritizing, an event happening nearby, a deadline
-  approaching that needs a decision (especially a hard one, like a visa
-  expiry with no next stop planned yet).
-- Notes goal progress only if there's something meaningful to say about it
-  (a slip, a stall, being ahead) — not a rote status recap of every goal.
-  `/status` already exists for a plain read of current numbers; this brief
-  earns its place by adding judgment, not repeating that.
-- Weighs in on itinerary decisions when relevant: is it time to commit to
-  a candidate destination, does the season/weather window suggest moving
-  soon, does a hard deadline constrain what "soon" means.
-- Stays short — a few tight paragraphs, not an essay. Specific and
-  actionable beats comprehensive.
+Their journal is their own word, and it outranks everything else you're
+given. If they said something is handled, booked, decided or done (a visa
+sorted, a booking confirmed in person, a plan dropped), treat it as
+settled: don't raise it again, even when the research file, an old decision
+file or a missing email says otherwise. Email is one channel among many;
+plenty gets arranged in person or by message, so a missing email isn't
+evidence that something is undone. Mention a conflict at most once, as one
+line, and only if the stakes are real.
 
-Do not editorialize about the day, grade progress, or manufacture urgency
-that isn't there — if there's genuinely nothing pressing, say a plain
-"nothing urgent" and keep the rest brief too.
+Don't suggest things they've already done or moved past (their journal,
+goals and profile say what those are): a beginner or tandem version of a
+sport they're already learning properly, a place they've left.
+
+Format: it's read on a phone in a few seconds. Plain text, no markdown
+symbols (no **, no #). Short bullet lines starting with "•", one fact or
+action per line, under ~200 words in all. Skip a section when it has
+nothing real. Sections, in this order:
+
+☀️ <weekday, date> · <where they are>
+<one line: the single most important thing today, or "Nothing urgent.">
+
+Today
+• up to 4 things worth doing or deciding today, each with why in a few words
+
+Coming up
+• dated things in the next 7 days (flights, deadlines, last chances)
+
+Conditions
+• surf: the best spot and window today, and tomorrow if better (one line
+  each, rating and time window, "above comfort" if so); skip spots that
+  aren't worth it
+• flying or wind: one line, only where it's relevant
+
+Inbox
+• only what needs a reply or action, one line each
+
+Plan check
+• anything in the itinerary, goals or plan that their journal has made
+  stale, one line each (a card to fix it may follow the brief)
+
+Notes on content:
+- Goal progress only when there's something meaningful (a slip, a stall,
+  being ahead). /status covers the numbers.
+- Weigh in on itinerary decisions when they're live: is it time to commit,
+  does a season or a hard date set the pace.
+- No editorializing, no grading the day, no manufactured urgency.

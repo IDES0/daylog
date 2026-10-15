@@ -15,6 +15,14 @@ decide emphasis), `profile.yaml` (`focus` wins over inference;
 `research/decisions/*.md`, `research/focus/*.md`, and this week's
 `research/daily/` files (don't repeat them).
 
+## Their word first
+The journal outranks the inbox, earlier research files and inference: if
+they said something is handled, booked, decided or done, it is. Close the
+matching decision file and don't raise it again. A missing email isn't
+evidence that something is undone. Don't suggest what they've already done
+or moved past (a tandem or beginner version of a sport they're learning
+properly); `profile.yaml` `research_less` lists what isn't useful.
+
 ## Job A — focus deep dive (1-2 topics)
 Take the one or two focus topics (from `focus`, else the active goals with
 the nearest target windows) and maintain `research/focus/<slug>.md` as a
@@ -45,7 +53,9 @@ list of attractions — resist collecting; favour depth and people.
 If a leg, a hard date or a decision falls in the next ~4 weeks, check the
 plan still holds: seasons, events, prices, visa, transport. Update the
 relevant `research/decisions/*.md`, and flag anything that should change the
-plan.
+plan. If the plan is out of date against the journal and no proposal for
+it is pending in `research/proposals/`, write one exactly as the daily
+routine's Job 4 describes (analysis, proposal file, optional plan draft).
 
 ## Output
 Write `research/weekly/<today>.md` (≤ ~900 words): what changed in each
