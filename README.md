@@ -194,7 +194,8 @@ src/daylog/
                    (TELEGRAM_ALLOWED_USER_ID), vault handle, tz, chunking.
   vault.py         The ONLY module that touches the filesystem or git.
                    Syncs with the remote at most once a minute.
-  transcribe.py    Voice (OGG) -> text via faster-whisper, lazy-loaded.
+  transcribe.py    Voice (OGG) -> text via faster-whisper, lazy-loaded and
+                   dropped after 5 idle minutes to keep RAM low.
   extract.py       Transcript -> structured facts (activities, meals, felt,
                    goal progress, itinerary changes, place links, ...) via
                    one forced tool call, grounded in the places tree.
