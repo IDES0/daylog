@@ -19,7 +19,7 @@ from datetime import date, timedelta
 from html import escape
 from typing import Any
 
-from daylog import brief, export, health, review, timeline, trail
+from daylog import brief, disciplines, export, health, review, timeline, trail
 from daylog.places import PlaceIndex
 from daylog.vault import JournalEntry, Vault
 
@@ -35,12 +35,14 @@ _CSS = """
 :root { --bg:#fbfaf7; --surface:#fff; --text:#1b1d21; --muted:#5d6470; --faint:#8a909a;
   --line:#e6e3dc; --accent:#1f4f8a; --land:#e9e6df; --planned:#9dbbe0;
   --dot:#1f4f8a; --here:#c2410c; --bar:#1f4f8a;
+  --root-1:#2a78d6; --root-2:#eb6834; --root-3:#1baf7a; --root-4:#eda100;
   --serif:"Newsreader",Georgia,serif; --sans:"Inter",system-ui,-apple-system,sans-serif;
   --mono:"JetBrains Mono",ui-monospace,Menlo,monospace; }
 @media (prefers-color-scheme: dark) {
   :root { --bg:#111317; --surface:#171a1f; --text:#e7e9ec; --muted:#a3a9b3; --faint:#737a85;
     --line:#262a31; --accent:#7fb0ec; --land:#22262d; --planned:#2f5583;
-    --dot:#a9cdf7; --here:#fb923c; --bar:#7fb0ec; }
+    --dot:#a9cdf7; --here:#fb923c; --bar:#7fb0ec;
+    --root-1:#3987e5; --root-2:#d95926; --root-3:#199e70; --root-4:#c98500; }
 }
 * { box-sizing:border-box; }
 body { margin:0; background:var(--bg); color:var(--text); font:16px/1.6 var(--sans);
@@ -85,6 +87,25 @@ li { padding:10px 0; border-top:1px solid var(--line); }
 .map-tools { position:absolute; right:10px; bottom:10px; display:flex; gap:6px; }
 .map-tools button { width:32px; height:32px; border-radius:8px; border:1px solid var(--line);
   background:var(--surface); color:var(--text); font:500 16px/1 var(--sans); cursor:pointer; }
+#disc { display:block; width:100%; height:auto; cursor:grab; touch-action:none; }
+.dlink { fill:none; stroke-width:1.5; opacity:.45; }
+.dlink.hub { stroke:var(--line); opacity:1; }
+.dalso { fill:none; stroke-width:1; stroke-dasharray:4 4; opacity:.4; }
+.dnode { cursor:pointer; }
+.dlabel { font:13px var(--sans); fill:var(--text); paint-order:stroke;
+  stroke:var(--surface); stroke-width:3px; stroke-linejoin:round; pointer-events:none; }
+.dlabel.locked { fill:var(--faint); }
+.dlabel.root { font:500 22px var(--serif); }
+.glyph { display:inline-block; width:12px; height:12px; border-radius:50%; margin-right:6px;
+  vertical-align:-1px; border:2px solid var(--muted); }
+.glyph.full { background:var(--muted); border-color:var(--muted); }
+.glyph.ready { border-style:dashed; }
+.glyph.locked { border:2px dashed var(--faint); }
+.glyph.line { width:18px; height:0; border-radius:0; border:0; border-top:2px dashed var(--muted);
+  vertical-align:3px; }
+details.list { margin-top:12px; font-size:14px; }
+details.list summary { cursor:pointer; color:var(--muted); font:13px var(--mono); }
+details.list li { padding:6px 0; }
 .cal-nav { display:flex; align-items:center; gap:12px; margin-bottom:10px;
   font:13px var(--mono); color:var(--muted); }
 .cal-nav a { color:var(--accent); text-decoration:none; font-size:18px; padding:0 6px; }
@@ -142,6 +163,120 @@ document.querySelectorAll(".cal-day[data-day]").forEach(b => b.addEventListener(
   dayDialog.showModal();
 }));
 dayDialog.addEventListener("click", e => { if (e.target === dayDialog) dayDialog.close(); });
+"""
+
+# Draws GD (see disciplines.graph_data) as a radial tree: you at the centre,
+# Water/Air/Earth/Body around you, each sport under its first parent, and a
+# dashed curve to any other parent. Size is all-time sessions; fill and
+# stroke are the state. Tap a node for its numbers, a root to zoom into it.
+_DISC_JS = """
+(() => {
+const GD = JSON.parse(document.getElementById("discdata").textContent);
+const S = 1000, R = 320, R0 = 90;
+const svg = d3.select("#disc").attr("viewBox", `${-S / 2} ${-S / 2} ${S} ${S}`);
+const g = svg.append("g");
+const tip = document.getElementById("disctip"), card = document.getElementById("discCard");
+const byId = new Map(GD.nodes.map(n => [n.id, n]));
+const rows = [{ id: "_", parent: null },
+  ...GD.nodes.map(n => ({ ...n, parent: n.parent || "_" }))];
+let tree;
+try { tree = d3.stratify().id(d => d.id).parentId(d => d.parent)(rows); }
+catch (e) { card.remove(); return; }
+// Every sport on the outer ring; groupings on inner rings by depth, the
+// roots on the first one.
+d3.cluster().size([2 * Math.PI, R])
+  .separation((a, b) => (a.parent === b.parent ? 1 : 1.6))(tree);
+const ring = (R - R0) / Math.max(1, tree.height - 1);
+tree.each(d => { d.y = d.depth === 0 ? 0 : d.height === 0 ? R : R0 + (d.depth - 1) * ring; });
+const at = new Map(); tree.each(d => at.set(d.id, d));
+const xy = d => [Math.sin(d.x) * d.y, -Math.cos(d.x) * d.y];
+const colour = id => `var(--root-${GD.slots[id] || 1})`;
+const radius = n => n.parent === null ? 11
+  : n.total ? Math.min(14, 4 + Math.sqrt(n.total) * 1.6) : 4.5;
+const filled = n => n.state === "active" || n.state === null;
+const dashed = n => n.state === "ready" || n.state === "locked";
+
+g.append("g").selectAll("path").data(tree.links()).join("path")
+  .attr("class", l => "dlink" + (l.source.id === "_" ? " hub" : ""))
+  .attr("stroke", l => colour(l.target.data.root))
+  .attr("d", d3.linkRadial().angle(d => d.x).radius(d => d.y));
+const extra = GD.nodes.flatMap(n => n.also.filter(p => at.has(p)).map(p => [n, p]));
+g.append("g").selectAll("path").data(extra).join("path").attr("class", "dalso")
+  .attr("stroke", ([, p]) => colour(byId.get(p).root))
+  .attr("d", ([n, p]) => {
+    const [x1, y1] = xy(at.get(n.id)), [x2, y2] = xy(at.get(p));
+    return `M${x1},${y1}Q${(x1 + x2) * .3},${(y1 + y2) * .3} ${x2},${y2}`;
+  });
+
+const nodes = tree.descendants().filter(d => d.id !== "_");
+g.append("circle").attr("r", 5).attr("fill", "var(--text)");
+g.append("g").selectAll("circle").data(nodes).join("circle").attr("class", "dnode")
+  .attr("cx", d => xy(d)[0]).attr("cy", d => xy(d)[1]).attr("r", d => radius(d.data))
+  .attr("fill", d => filled(d.data) ? colour(d.data.root) : "var(--surface)")
+  .attr("stroke", d => filled(d.data) ? "var(--surface)"
+    : d.data.state === "locked" ? "var(--faint)" : colour(d.data.root))
+  .attr("stroke-width", d => filled(d.data) ? 2 : 2.2)
+  .attr("stroke-dasharray", d => dashed(d.data) ? "3 2" : null)
+  .on("pointerenter", show).on("pointerleave", hide)
+  .on("click", (e, d) => { show(e, d); if (d.depth === 1) zoomTo(d); });
+
+g.append("g").selectAll("text").data(nodes).join("text")
+  .attr("class", d => "dlabel" + (d.depth === 1 ? " root" : "") +
+    (d.data.state === "locked" ? " locked" : ""))
+  .attr("dy", "0.32em")
+  .attr("transform", d => {
+    if (d.height > 0) {
+      // Groupings sit inside the ring: label them level, just above the dot.
+      const [x, y] = xy(d);
+      return `translate(${x},${y - radius(d.data) - (d.depth === 1 ? 14 : 9)})`;
+    }
+    const flip = d.x >= Math.PI;
+    return `rotate(${d.x * 180 / Math.PI - 90}) translate(${d.y},0)` + (flip ? " rotate(180)" : "");
+  })
+  .attr("x", d => d.height > 0 ? 0 : (d.x < Math.PI ? 1 : -1) * (radius(d.data) + 5))
+  .attr("text-anchor", d => d.height > 0 ? "middle" : d.x < Math.PI ? "start" : "end")
+  .text(d => d.data.name);
+
+const STATES = { active: "Pursuing", "not started": "Pursuing · nothing logged yet",
+  ready: "Want · prerequisites met", locked: "Want · locked" };
+function show(evt, d) {
+  const n = d.data, r = card.getBoundingClientRect();
+  tip.replaceChildren();
+  const line = (text, small) => {
+    const el = document.createElement(small ? "small" : "div");
+    el.textContent = text;
+    tip.append(el);
+  };
+  line(n.name);
+  const path = d.ancestors().slice(1, -1).reverse().map(a => a.data.name);
+  if (path.length) line(path.join(" › ") + (n.also.length ?
+    " · also " + n.also.map(p => byId.get(p).name).join(", ") : ""), true);
+  if (n.state) line(STATES[n.state], true);
+  const hours = n.recent_hours ? ` · ${n.recent_hours}h` : "";
+  line(`${n.recent} in ${GD.days} days${hours} · ${n.total} all-time` +
+    (n.last ? ` · last ${n.last}` : ""), true);
+  n.goals.forEach(t => line("Goal: " + t, true));
+  if (n.needs.length) line("Needs: " + n.needs.join(", "), true);
+  tip.style.left = Math.min(Math.max(evt.clientX - r.left, 90), r.width - 90) + "px";
+  tip.style.top = (evt.clientY - r.top) + "px";
+  tip.style.opacity = 1;
+}
+function hide() { tip.style.opacity = 0; }
+
+const zoom = d3.zoom().scaleExtent([1, 8]).on("zoom", e => g.attr("transform", e.transform));
+svg.call(zoom);
+function fit(points) {
+  const [x0, x1] = d3.extent(points, p => p[0]), [y0, y1] = d3.extent(points, p => p[1]);
+  const pad = 130, k = Math.min(8, S / Math.max(x1 - x0 + 2 * pad, y1 - y0 + 2 * pad));
+  svg.transition().duration(400).call(zoom.transform,
+    d3.zoomIdentity.scale(k).translate(-(x0 + x1) / 2, -(y0 + y1) / 2));
+}
+function zoomTo(d) { fit(d.descendants().map(xy)); }
+document.getElementById("discIn").onclick = () => svg.transition().call(zoom.scaleBy, 1.6);
+document.getElementById("discOut").onclick = () => svg.transition().call(zoom.scaleBy, 1 / 1.6);
+document.getElementById("discFit").onclick = () =>
+  svg.transition().call(zoom.transform, d3.zoomIdentity);
+})();
 """
 
 _FONTS = (
@@ -590,6 +725,89 @@ def _map_section(data: dict[str, Any]) -> str:
     )
 
 
+# Root id -> categorical slot (see --root-N in the CSS); other roots take
+# the slots left, in file order.
+_ROOT_SLOTS = {"water": 1, "body": 2, "earth": 3, "air": 4}
+
+_STATE_TEXT = {
+    "active": "",
+    "not started": "not started",
+    "ready": "ready",
+    "locked": "locked",
+    None: "",
+}
+
+
+def _discipline_list(nodes: list[dict[str, Any]], days: int) -> str:
+    """The graph as an indented list: the same facts without the drawing."""
+    children: dict[str | None, list[dict[str, Any]]] = {}
+    for n in nodes:
+        children.setdefault(n["parent"], []).append(n)
+    items: list[str] = []
+
+    def walk(parent: str | None, depth: int) -> None:
+        for n in children.get(parent, []):
+            bits = [f"{n['recent']} in {days}d", f"{n['total']} all-time"]
+            state = _STATE_TEXT.get(n["state"], "")
+            if n["state"] == "locked" and n["needs"]:
+                state = "locked: needs " + ", ".join(n["needs"])
+            extra = " · ".join(x for x in (state, *("goal: " + t for t in n["goals"])) if x)
+            items.append(
+                f'<li style="padding-left:{depth * 16}px"><div class="row">'
+                f"<span>{escape(n['name'])}</span><span>{escape(' · '.join(bits))}</span></div>"
+                f"{_sub(extra)}</li>"
+            )
+            walk(n["id"], depth + 1)
+
+    walk(None, 0)
+    return f"<ul>{''.join(items)}</ul>"
+
+
+def _disciplines_section(vault: Vault, today: date, load_d3: bool) -> str:
+    graph, recent, all_time = disciplines.snapshot(vault, today)
+    if not graph:
+        return ""
+    nodes = disciplines.graph_data(graph, vault.read_goals(), recent, all_time)
+    slots = dict(_ROOT_SLOTS)
+    spare = [n for n in range(1, 5) if n not in slots.values()]
+    for root in graph.roots():
+        if root not in slots and spare:
+            slots[root] = spare.pop(0)
+    days = disciplines.RECENT_DAYS
+    payload = json.dumps({"nodes": nodes, "slots": slots, "days": days}, ensure_ascii=False)
+    payload = payload.replace("</", "<\\/")
+    legend = "".join(
+        f'<span><i style="background:var(--root-{slots[r]})"></i>{escape(graph.name(r))}</span>'
+        for r in graph.roots()
+        if r in slots
+    )
+    states = (
+        '<span><i class="glyph full"></i>Pursuing</span>'
+        '<span><i class="glyph"></i>Not started</span>'
+        '<span><i class="glyph ready"></i>Want, ready</span>'
+        '<span><i class="glyph locked"></i>Locked</span>'
+        '<span><i class="glyph line"></i>Also counts under</span>'
+    )
+    scripts = f'<script src="{_D3}"></script>' if load_d3 else ""
+    return (
+        "<h2>Disciplines</h2>"
+        f'<div class="legend">{legend}</div><div class="legend">{states}</div>'
+        '<div class="map-card" id="discCard">'
+        '<svg id="disc" role="img" aria-label="The discipline graph: sports under Water, Air, '
+        'Earth and Body, sized by sessions"></svg>'
+        '<div class="tip" id="disctip"></div><div class="map-tools">'
+        '<button id="discIn" aria-label="Zoom in">+</button>'
+        '<button id="discOut" aria-label="Zoom out">−</button>'
+        '<button id="discFit" aria-label="Fit">⟲</button></div></div>'
+        '<p class="muted" style="margin-top:8px">Size is all-time sessions. Tap a sport for '
+        "its numbers, a root to zoom in.</p>"
+        '<details class="list"><summary>As a list</summary>'
+        f"{_discipline_list(nodes, days)}</details>"
+        f'<script type="application/json" id="discdata">{payload}</script>'
+        f"{scripts}<script>{_DISC_JS}</script>"
+    )
+
+
 def _head(title: str) -> str:
     return (
         '<!doctype html><html lang="en"><head><meta charset="utf-8">'
@@ -707,6 +925,8 @@ def render(
     if private:
         body += _calendar_section(vault, today, min(week_of or today, today))
     body += _section("Goals", goals, "No active goals.")
+    if private:
+        body += _disciplines_section(vault, today, load_d3=not headed["stops"])
     body += _section("Milestones", wins, "None logged yet.")
     body += _section(f"Last {RECENT_DAYS} days", week, "Nothing logged.")
     if private and by_day:

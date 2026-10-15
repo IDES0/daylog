@@ -172,7 +172,13 @@ until its variable is set, and 404s everything else:
     start (`at`, estimated at extraction from what was said and when the
     note was recorded; `~`), or straight after the one before when it has
     none (`≈`, dashed), sized by its hours (1 h when unsaid). Tapping a day
-    opens its full summary and the rough times. After 10 misses in 15 minutes every login
+    opens its full summary and the rough times. It also draws the
+    **discipline graph** (d3, radial): Water, Air, Earth and Body around the
+    centre, every sport on the outer ring under its first parent, a dashed
+    curve to any other parent; size is all-time sessions, fill and stroke
+    the state (pursuing, not started, ready, locked). Tapping a sport shows
+    its numbers, goals and what it still needs; tapping a root zooms into
+    it; "As a list" has the same facts as text. After 10 misses in 15 minutes every login
     fails until the window passes. Changing the password signs everyone
     out. Still read-only: Telegram changes things.
   - **Installable**: a manifest, icons and a service worker (it caches

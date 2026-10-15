@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from datetime import date, datetime
 
 from daylog import dashboard
@@ -98,3 +99,41 @@ def test_activity_rows_count_days_and_show_hours_only_when_said() -> None:
         ("freedive", "2 days · 4 h"),
         ("social", "2 days"),
     ]
+
+
+def test_disciplines_graph_is_on_the_private_view_only(vault: Vault) -> None:
+    vault.write_disciplines(
+        {
+            "water": {"name": "Water"},
+            "air": {"name": "Air"},
+            "foil": {"name": "Foiling", "parents": ["water"], "status": "active"},
+            "wing_foil": {"name": "Wing <foil>", "parents": ["foil", "air"], "status": "active"},
+            "speedwing": {
+                "name": "Speedwinging",
+                "parents": ["air"],
+                "status": "want",
+                "requires": [{"goal": "pg"}],
+            },
+        },
+        "disciplines",
+    )
+    vault.write_yaml("goals.yaml", [{"id": "pg", "title": "APPI 3", "status": "active"}], "goals")
+    vault.write_journal_entry(
+        datetime(2026, 10, 1, 9, 0), {"activities": [{"type": "wing_foil", "hours": 2}]}, "t", "s"
+    )
+
+    assert 'id="discdata"' not in dashboard.render(vault, TODAY)
+    html = dashboard.render(vault, TODAY, private=True)
+    assert "<h2>Disciplines</h2>" in html
+    assert "Wing &lt;foil&gt;" in html  # the list view escapes names
+    assert "locked: needs APPI 3" in html
+    payload = html.split('id="discdata">', 1)[1].split("</script>", 1)[0]
+    data = json.loads(payload)
+    wing = next(n for n in data["nodes"] if n["id"] == "wing_foil")
+    assert (wing["parent"], wing["also"], wing["root"]) == ("foil", ["air"], "water")
+    assert (wing["recent"], wing["total"], wing["state"]) == (1, 1, "active")
+    assert data["slots"] == {"water": 1, "body": 2, "earth": 3, "air": 4}
+
+
+def test_no_disciplines_file_means_no_section(vault: Vault) -> None:
+    assert "<h2>Disciplines</h2>" not in dashboard.render(vault, TODAY, private=True)

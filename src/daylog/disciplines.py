@@ -510,3 +510,43 @@ def summary(v: Vault, today: date) -> str:
     """The compact view the brief, the planner and chat are given."""
     graph, recent, all_time = snapshot(v, today)
     return describe(graph, v.read_goals(), recent, all_time, RECENT_DAYS)
+
+
+def primary_root(graph: Graph, node_id: str) -> str:
+    """The root reached by following each node's first parent."""
+    current, seen = node_id, set()
+    while graph.parents(current) and current not in seen:
+        seen.add(current)
+        current = graph.parents(current)[0]
+    return current
+
+
+def graph_data(
+    graph: Graph,
+    goals_data: Iterable[Any],
+    recent: Mapping[str, Totals],
+    all_time: Mapping[str, Totals],
+) -> list[dict[str, Any]]:
+    """Every node as plain data, for the status site's drawing of the graph."""
+    goals_list = list(goals_data or [])
+    nodes = []
+    for node_id in graph.nodes:
+        parents = graph.parents(node_id)
+        now, ever = recent.get(node_id), all_time.get(node_id)
+        nodes.append(
+            {
+                "id": node_id,
+                "name": graph.name(node_id),
+                "parent": parents[0] if parents else None,
+                "also": parents[1:],
+                "root": primary_root(graph, node_id),
+                "state": state(graph, node_id, goals_list, all_time),
+                "recent": now.sessions if now else 0,
+                "recent_hours": round(now.hours, 1) if now else 0,
+                "total": ever.sessions if ever else 0,
+                "last": ever.last.isoformat() if ever and ever.last else None,
+                "goals": [str(g.get("title")) for g in goals_for(goals_list, node_id)],
+                "needs": unmet(graph, node_id, goals_list, all_time),
+            }
+        )
+    return nodes
