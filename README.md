@@ -211,8 +211,9 @@ src/daylog/
   chat.py          The assistant: vault read tools, web search, proposal
                    tools. chat_flow.py: routing, menu, history.
   planner.py       2-3 dated route options; plan_flow.py applies a pick.
-  ripple.py        A decision traced through itinerary, goals and plan;
-                   ripple_flow.py: the card, /ripple, applying the edits.
+  ripple.py        A decision traced through itinerary, goals and plan (/ripple).
+  proposals.py     research/proposals/*.yaml: changes waiting for a tap;
+                   ripple_flow.py shows them after the brief and applies them.
   review.py        Weekly numbers (exact) + the weekly review.
   brief.py         Morning brief (uses routine research, plans, wishlist).
   goals.py         Goal resolution, slip tracking, confirmation logic.
@@ -259,6 +260,7 @@ daylog-vault/
   reviews/<week>.md        # weekly reviews
   usage.yaml               # API spend per month and kind
   health.yaml              # the phone's daily numbers (steps, distance, ...) by date
+  research/proposals/      # proposed itinerary/goal/plan changes, answered by a tap
   site.yaml                # site analytics: one summary per day, written with the brief
   profile.yaml             # durable preferences (surf comfort, fly rules)
   profile.md               # the user's operating principles — read by chat, planner, review, brief
@@ -351,7 +353,7 @@ speedwing:
 | `/usage` | API spend this month vs budget |
 | `/surf`, `/fly` | Rated surf windows per spot / paragliding flyability per launch — no LLM cost |
 | `/site [days]` | The personal site's analytics from PostHog (default 7 days): visitors by day, ref, page, source, country and device; chess/spacetime use; company-ref visitors with recording links — no LLM cost |
-| `/ripple <decision>` | Trace a decision (a job, a flight home, an injury) through the itinerary, goals and plan: what it fixes, what it blocks or moves, ways to keep pursuing each goal inside it, what it opens up. Saved to `research/decisions/`, then one card to apply the edits (all, one by one, or skip) and a button to redo the plan. A voice note that states such a decision runs this on its own |
+| `/ripple <decision>` | Trace a decision (a job, a flight home, an injury) through the itinerary, goals and plan now, with the bot's model, instead of waiting for the morning research run, which does the same for any `decisions` in the journal. Either way the result is a proposal: one card after the brief to apply every change and the revised plan, go one by one, or skip |
 | `/undo` | Revert one of the bot's recent changes |
 | `/status`, `/upcoming` | Goals and itinerary now; the same as a dated timeline |
 | `/disciplines [days]` | The sports graph: sessions and hours per discipline (default 30 days), what's not started, ready or locked, and goals under each — no LLM cost |
