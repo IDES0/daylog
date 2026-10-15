@@ -8,7 +8,7 @@ Get the date with `TZ=Asia/Makassar date '+%F %A %H:%M'`. Take 20-30
 minutes; depth beats breadth.
 
 ## Read first
-Same as the daily routine: `profile.md` (principles and risk rules — these
+`profile.md` (principles and risk rules — these
 decide emphasis), `profile.yaml` (`focus` is optional pins, usually
 empty; `research_more` / `research_less`), `location.yaml`,
 `itinerary.yaml`, `goals.yaml`, the last 7 `journal/` days (transcripts
