@@ -242,6 +242,15 @@ class Vault:
         self._push()
         return path
 
+    # -- disciplines -----------------------------------------------------------
+
+    def read_disciplines(self) -> Any:
+        """disciplines.yaml as its live ruamel mapping — see read_goals."""
+        return self.read_yaml("disciplines.yaml", {})
+
+    def write_disciplines(self, data: Any, commit_message: str) -> Path:
+        return self.write_yaml("disciplines.yaml", data, commit_message)
+
     # -- markdown docs (research, plans, reviews) ------------------------------
 
     def read_text(self, name: str) -> str | None:

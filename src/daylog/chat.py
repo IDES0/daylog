@@ -24,7 +24,7 @@ from typing import Any
 import anthropic
 from anthropic.types import MessageParam, ToolParam
 
-from daylog import brief, edits, goals, llm, rankings, trail
+from daylog import brief, disciplines, edits, goals, llm, rankings, trail
 from daylog.places import PlaceIndex
 from daylog.vault import Vault
 
@@ -509,6 +509,7 @@ def context_block(v: Vault, today: date, now: datetime) -> str:
         f"User is based in: {where}\n\n"
         f"Active goals:\n{chr(10).join(goal_lines) or '(none)'}\n\n"
         f"Current focus (their explicit steer):\n{focus_lines}\n\n"
+        f"Disciplines (their sports, computed):\n{disciplines.summary(v, today)}\n\n"
         f"Wishlist:\n{chr(10).join(wish_lines) or '(empty)'}\n\n"
         f"Last few days:\n{recent}"
         f"{principles_block}"

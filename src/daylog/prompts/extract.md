@@ -5,9 +5,9 @@ directly — either way, work with what's there rather than asking for
 clarification.
 
 The user's current location (per location.yaml), current goal list (id,
-title, type, metric), current itinerary (id, place, type, status, date),
+title, type, metric, discipline), current itinerary (id, place, type, status, date),
 anything already logged today (activities/skipped/open_questions,
-numbered), and the known places tree are included above the transcript in
+numbered), the known places tree and the disciplines graph are included above the transcript in
 the user message. Each list is the complete, authoritative one for that
 category — there is nothing outside it.
 
@@ -33,12 +33,17 @@ Guidelines:
   `hours` estimate. If no duration is stated or implied, omit `hours` for
   that activity rather than guessing.
   Eating is not an activity — meals go in `meals`.
-  `type` is a short lowercase label, from this list whenever one fits so
-  weeks can be compared: surf, dive, snorkel, foil, hike, run, gym, yoga,
-  swim, freedive, climb, cliff_jump, skate, paraglide, travel, job_search,
-  interview, work, study, call, social, party, sightseeing, errand, rest,
-  screen_time. `dive` is scuba; breath-hold diving is `freedive`, and a
-  course day for a sport is that sport, not `study`.
+  `type` for a sport is an id from Disciplines, copied exactly: the most
+  specific one the transcript supports. When they don't say which kind,
+  use the general one ("went foiling" is `foil`, not a guess at which
+  foil) — the bot narrows it from their history and where they are.
+  A sport with no id there gets a new short snake_case id plus
+  `new_discipline_parents` (ids it is a kind of); the user confirms it
+  before it joins the list. Anything that isn't a sport is a short
+  lowercase label, from this list whenever one fits so weeks can be
+  compared: travel, job_search, interview, work, build, study, call,
+  social, party, sightseeing, errand, rest, screen_time. A course day for
+  a sport is that sport, not `study`.
 - `location`: only if the transcript names or clearly implies a place.
   Omit it otherwise — don't infer from past entries you don't have.
 - `location_change`: only when the transcript explicitly says the user has
@@ -77,9 +82,10 @@ Guidelines:
   course passed, a personal best (deepest dive, longest hold, biggest
   wave), a first time doing something. Keep the number in `what` ("23 m
   depth PB", "Wave 1 freediving passed") and set `type` to the activity
-  label. Only what they say; a normal session is not a milestone.
+  label (the discipline id for a sport). Only what they say; a normal session is not a milestone.
 - `goal_progress`: only when an activity clearly maps to a goal in the
-  provided list. `goal_id` must be copied exactly from that list — never
+  provided list. A goal with a `discipline` takes activities logged under
+  that discipline or anything that is a kind of it. `goal_id` must be copied exactly from that list — never
   invent one, never use a goal's title as its id. `delta` is in that goal's
   `metric` unit (e.g. an `hours` goal gets hours spent on that activity, an
   `applications_sent` goal gets a count of applications mentioned). If

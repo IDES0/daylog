@@ -22,7 +22,8 @@ from dataclasses import dataclass
 from datetime import date
 from typing import Any
 
-from daylog import extract, goals
+from daylog import disciplines, extract, goals
+from daylog.places import PlaceIndex
 from daylog.vault import JournalEntry
 
 logger = logging.getLogger(__name__)
@@ -85,6 +86,10 @@ def rebuild(entry: JournalEntry, facts: dict[str, Any]) -> Reconciled:
     summary = str(facts.pop("summary", "")).strip()
     for key in _CAPTURE_ONLY:
         facts.pop(key, None)
+    # A new sport is offered once, when its note arrives; not again here.
+    for activity in facts.get("activities") or []:
+        if isinstance(activity, dict):
+            activity.pop("new_discipline_parents", None)
     frontmatter = {k: v for k, v in facts.items() if v not in (None, [], "")}
     if "location" not in frontmatter and entry.frontmatter.get("location"):
         frontmatter["location"] = entry.frontmatter["location"]
@@ -105,7 +110,11 @@ def reconcile_day(
     active_goals: list[dict[str, Any]],
     places: list[Any],
     location_entry: Any | None,
+    graph: disciplines.Graph | None = None,
+    history: list[tuple[str, str | None]] | None = None,
 ) -> Reconciled:
+    """Re-extract the whole day. With a discipline graph, a vague sport is
+    narrowed again, keeping whatever the user said or tapped that day."""
     facts = extract.extract(
         entry.transcript,
         active_goals,
@@ -114,8 +123,20 @@ def reconcile_day(
         current_location=location_entry.get("place") if location_entry else None,
         places=places,
         current_location_entry=location_entry,
+        disciplines=disciplines.outline(graph) if graph else None,
         reconcile=True,
     )
+    if graph:
+        index = PlaceIndex(places)
+        here = index.current_place(location_entry)
+        disciplines.resolve_vague(
+            graph,
+            facts.get("activities") or [],
+            index,
+            here["id"] if here else None,
+            history or [],
+            disciplines.stated(graph, entry.frontmatter),
+        )
     return rebuild(entry, facts)
 
 

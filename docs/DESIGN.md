@@ -43,7 +43,8 @@ The ledger is the foundation; the assistant is only as good as its grounding.
   move in `slip_history`; a goal that has slipped four times is the signal.
 - **Inferred facts are confirmed before they're written.** Research and
   chat propose; a confirm card applies. Notes on known places are written
-  without asking.
+  without asking, and so is the kind of a vague sport ("went foiling"),
+  marked `guessed` with one tap to change it.
 - **One source of truth per fact; everything else is derived.** The trail,
   visits, the "current" place, the export tables and the status page are
   computed on demand, never stored.
@@ -61,6 +62,13 @@ The ledger is the foundation; the assistant is only as good as its grounding.
   errors (below).
 - **`location.yaml` is the base-camp trail**: date-ranged stays, trips and
   transit. "Where am I" always comes from the open entry, never a flag.
+- **`disciplines.yaml` is the sports graph**: each sport names what it is
+  a kind of (`parents`, several allowed: wingfoil is Foiling and Air) and
+  what must come first (`requires`: a goal done, or a sport logged). Roots
+  are Water, Air, Earth, Body; snow sits under Earth → Mountain. Sessions
+  roll up every ancestor once and are never stored; the roots are never
+  summed. Each sport is `active` or `want`; not started, ready and locked
+  are derived. Goals can name a `discipline`.
 - **`itinerary.yaml` holds intentions only**: places the user wants to go
   and hard dates, each `candidate | planned | done | dropped`. It doubles as
   the wishlist, with research status per entry.
@@ -125,6 +133,7 @@ The ledger is the foundation; the assistant is only as good as its grounding.
 | 2026-10-10 | Read-only PostHog analytics for the personal site: a daily Site block in the brief (company refs included) and `/site` on demand; no 15-minute polling, since a few visits a day don't need it; summaries only in `site.yaml` |
 | 2026-10-15 | A stated decision (job, flight home, injury) is traced through the itinerary, goals and plan in one pass: impact item by item, workarounds for each affected goal, what it opens up. Edits go through one confirm card; the analysis is saved under `research/decisions/`. Prompted by accepting NASCO, which changed seven itinerary entries and two goals that no voice note touched |
 | 2026-10-15 | The status page becomes a small status site on its own domain (`status.johnalexborkowski.com`, not linked from the personal site): one address (no slug, no `/status/...` or `/me` paths): a nicer guest view with a map of where you're headed (the travel page's style, future instead of past: only legs still ahead, not the wishlist and not the leg you're on), one password line whose wrong answer just shows the guest view again and whose right one shows the private view at the same address, and a PWA manifest so it installs as an app. `STATUS_PAGE_SLUG` and the status page under the feed secret are gone. Still read-only. Direction, not yet decided: the web app may take over from Telegram over time; each step that writes from the web gets its own entry here |
+| 2026-10-15 | Sports become a discipline graph (`disciplines.yaml`), replacing the fixed sport vocabulary: a DAG under Water, Air, Earth (Mountain → Snow) and Body, with two kinds of link kept apart — "kind of" (sessions roll up) and "requires" (unlocks, nothing rolls up), so a speedwing session is never paragliding time. The user sets only `active` or `want`; not started, ready and locked are derived. Goals take a `discipline`; progress stays as extracted, not recomputed. A vague sport is narrowed in code, not by the model: the kind logged most at that spot, then in that region, then by place (Austin → wakefoil), then a default (tow foil), written with `guessed` and a one-tap fix — an exception to confirming inferred facts, like location changes, because it's low stakes and corrected faster than confirmed. A sport the graph lacks joins only after an Add tap. Cliff jumping is Air only and deep water solo is climbing only: the water just catches you |
 
 ## Not built
 

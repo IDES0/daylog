@@ -50,6 +50,11 @@ onshore wind can ruin a good swell (say so), and for wind-sport spots
 (foiling, kiting) wind direction and strength are the primary variable —
 weigh a wind spot's forecast against its `ideal_wind_direction`, not
 against the surf-focused framing you'd use for a swell.
+The Disciplines section groups their sports by state. At most one line
+from it, and only with news: something they committed to but haven't
+started that today's conditions or place make easy, or a wanted one whose
+prerequisites just became met. Locked ones are background — never nag
+about them.
 Treat each place's checklist as real must-dos, not background trivia — if
 something on it is upcoming, time-sensitive, or has never been mentioned
 before, surface it; don't silently repeat items with no news.

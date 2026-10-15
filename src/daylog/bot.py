@@ -42,6 +42,8 @@ from daylog import (
     calendar_server,
     chat_flow,
     daily,
+    discipline_flow,
+    disciplines,
     export,
     extract,
     goals,
@@ -492,6 +494,7 @@ async def _send_brief(context: ContextTypes.DEFAULT_TYPE, chat_id: int) -> None:
             morning_research=vault.read_text(f"research/daily/{today.isoformat()}.md"),
             current_plan=plan_flow.latest_plan(vault),
             principles=vault.read_principles(),
+            disciplines=disciplines.summary(vault, today),
         )
     except Exception:
         logger.exception("failed to generate brief")
@@ -811,6 +814,8 @@ async def _log_entry(transcript: str, message: Message, context: ContextTypes.DE
         existing_entry = vault.read_journal_entry(entry_time.date())
         location_data = vault.read_location()
         current = brief.current_location(location_data)
+        places_list = vault.read_places()
+        graph = disciplines.Graph(vault.read_disciplines())
         facts = extract.extract(
             transcript,
             _active_goals_summary(goals_data),
@@ -818,10 +823,21 @@ async def _log_entry(transcript: str, message: Message, context: ContextTypes.DE
             entry_time.date(),
             existing_frontmatter=existing_entry.frontmatter if existing_entry else None,
             current_location=current.get("place") if current else None,
-            places=vault.read_places(),
+            places=places_list,
             current_location_entry=current,
+            disciplines=disciplines.outline(graph) if graph else None,
         )
         summary = facts.pop("summary", "")
+        place_index = PlaceIndex(places_list)
+        here = place_index.current_place(current)
+        guesses, new_disciplines = discipline_flow.prepare(
+            vault,
+            graph,
+            facts,
+            entry_time.date(),
+            place_index,
+            here["id"] if here else None,
+        )
 
         # goal_progress stays in facts — it's part of the journal frontmatter
         # schema too (see docs/DESIGN.md) — but goal_slips, itinerary_changes,
@@ -950,10 +966,15 @@ async def _log_entry(transcript: str, message: Message, context: ContextTypes.DE
             if food_line:
                 food_note = f"\n\n{food_line} so far that day"
 
+        guess_note = discipline_flow.guess_note(graph, guesses)
         await message.reply_text(
             f"Logged {entry_time.date().isoformat()}:\n\n{summary}"
-            f"{goals_note}{itinerary_note}{location_note}{other_day_note}{food_note}",
+            f"{goals_note}{itinerary_note}{location_note}{other_day_note}{food_note}"
+            f"{chr(10) * 2 + guess_note if guess_note else ''}",
             reply_markup=chat_flow.MENU,
+        )
+        await discipline_flow.after_entry(
+            message, context, graph, entry_time.date(), guesses, new_disciplines
         )
         try:
             await rank_flow.prompt_after_entry(message, context, facts)
@@ -1024,6 +1045,7 @@ def _button_commands() -> dict[str, _Command]:
         chat_flow.BTN_BRIEF: brief_command,
         chat_flow.BTN_PLAN: plan_flow.plan_command,
         chat_flow.BTN_STATUS: status,
+        chat_flow.BTN_DISCIPLINES: discipline_flow.disciplines_command,
         chat_flow.BTN_UPCOMING: upcoming,
         chat_flow.BTN_TRAIL: trail_command,
         chat_flow.BTN_RANKINGS: rank_flow.rankings_command,
@@ -1114,6 +1136,7 @@ def build_application() -> Application:  # type: ignore[type-arg]
     application.add_handler(CommandHandler("surf", surf_command))
     application.add_handler(CommandHandler("fly", fly_command))
     application.add_handler(CommandHandler("site", site_flow.site_command))
+    application.add_handler(CommandHandler("disciplines", discipline_flow.disciplines_command))
     application.add_handler(CommandHandler("ripple", ripple_flow.ripple_command))
     application.add_handler(CallbackQueryHandler(ripple_flow.handle_callback, pattern=r"^ripple:"))
     application.add_handler(CommandHandler("want", wishlist_flow.want_command))
@@ -1142,6 +1165,9 @@ def build_application() -> Application:  # type: ignore[type-arg]
         CallbackQueryHandler(handle_correction_callback, pattern=r"^correction:")
     )
     application.add_handler(CallbackQueryHandler(handle_backdate_callback, pattern=r"^backdate:"))
+    application.add_handler(
+        CallbackQueryHandler(discipline_flow.handle_callback, pattern=r"^disc:")
+    )
 
     assert application.job_queue is not None
     application.job_queue.run_daily(
