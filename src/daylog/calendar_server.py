@@ -103,14 +103,16 @@ def _make_handler(
             self.end_headers()
             self.wfile.write(body)
 
-        def _redirect(self, to: str, cookie: str | None = None) -> None:
-            self.send_response(303)
-            self.send_header("Location", to)
+        def _land(self, cookie: str | None = None) -> None:
+            # A page, not a 303: see web.LANDING.
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
             self.send_header("Cache-Control", "no-store")
             if cookie:
                 self.send_header("Set-Cookie", cookie)
-            self.send_header("Content-Length", "0")
+            self.send_header("Content-Length", str(len(web.LANDING)))
             self.end_headers()
+            self.wfile.write(web.LANDING)
 
         def _not_found(self) -> None:
             self.send_response(404)
@@ -133,7 +135,10 @@ def _make_handler(
                 content_type = "text/html; charset=utf-8"
             elif site and path in _SHELL:
                 kind, body = _SHELL[path]
-                self._send(200, kind, body, cache="public, max-age=86400")
+                # The worker is always re-checked, so a fix to it reaches
+                # an installed app on its next open.
+                cache = "no-cache" if path == "/sw.js" else "public, max-age=86400"
+                self._send(200, kind, body, cache=cache)
                 return
             elif site and path in _ICONS:
                 body = web.icon_png(_ICONS[path])
@@ -171,7 +176,7 @@ def _make_handler(
             elif site and path == "/login":
                 self._login()
             elif site and path == "/logout":
-                self._redirect("/", web.clear_cookie())
+                self._land(web.clear_cookie())
             else:
                 self._not_found()
 
@@ -182,10 +187,10 @@ def _make_handler(
             body = self._body(web.MAX_LOGIN_BODY)
             if guard and password and body and guard.attempt(web.password_from(body)):
                 logger.info("status login")
-                self._redirect("/", web.set_cookie(web.make_session(password)))
+                self._land(web.set_cookie(web.make_session(password)))
                 return
             logger.warning("status login refused")
-            self._redirect("/")
+            self._land()
 
         def _store_health(self) -> None:
             body = self._body(health.MAX_BODY_BYTES)
