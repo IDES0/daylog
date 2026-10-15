@@ -19,7 +19,7 @@ from datetime import date, timedelta
 from html import escape
 from typing import Any
 
-from daylog import brief, export, health, review, trail
+from daylog import brief, export, health, review, timeline, trail
 from daylog.places import PlaceIndex
 from daylog.vault import JournalEntry, Vault
 
@@ -27,7 +27,6 @@ RECENT_DAYS = 7
 MAX_STAYS = 15
 OPEN = ("candidate", "planned")
 MAX_MILESTONES = 10
-MAX_SUMMARY_CHARS = 400
 # Logged, but not what a stay was about.
 NOT_DOING = ("travel", "errand", "meal")
 
@@ -86,6 +85,42 @@ li { padding:10px 0; border-top:1px solid var(--line); }
 .map-tools { position:absolute; right:10px; bottom:10px; display:flex; gap:6px; }
 .map-tools button { width:32px; height:32px; border-radius:8px; border:1px solid var(--line);
   background:var(--surface); color:var(--text); font:500 16px/1 var(--sans); cursor:pointer; }
+.cal-nav { display:flex; align-items:center; gap:12px; margin-bottom:10px;
+  font:13px var(--mono); color:var(--muted); }
+.cal-nav a { color:var(--accent); text-decoration:none; font-size:18px; padding:0 6px; }
+.cal { --hour:30px; display:grid; grid-template-columns:24px repeat(7,minmax(0,1fr)); gap:3px; }
+.cal-gutter { position:relative; margin-top:36px; height:calc(var(--span) * var(--hour)); }
+.cal-gutter span { position:absolute; right:2px; transform:translateY(-50%);
+  font:10px var(--mono); color:var(--faint); }
+.cal-day { display:flex; flex-direction:column; padding:0; border:0; background:none;
+  color:inherit; font:inherit; text-align:left; cursor:pointer; min-width:0; }
+.cal-day.empty { cursor:default; }
+.cal-head { height:36px; font:11px/1.2 var(--mono); color:var(--faint); text-align:center; }
+.cal-head b { display:block; font:500 16px/1.3 var(--serif); color:var(--text); }
+.cal-day.today .cal-head b { color:var(--here); }
+.cal-body { position:relative; display:block; height:calc(var(--span) * var(--hour));
+  background:var(--surface); border:1px solid var(--line); border-radius:8px; overflow:hidden; }
+.cal-day:not(.empty):hover .cal-body { border-color:var(--accent); }
+.blk { position:absolute; box-sizing:border-box; padding:2px 3px; border-radius:5px;
+  border:1px solid transparent; font:10px/1.2 var(--sans); overflow:hidden;
+  background:hsl(var(--h) 60% 86%); color:hsl(var(--h) 45% 24%); }
+.blk.guess { background:hsl(var(--h) 60% 93%); border:1px dashed hsl(var(--h) 40% 60%); }
+@media (prefers-color-scheme: dark) {
+  .blk { background:hsl(var(--h) 35% 30%); color:hsl(var(--h) 70% 88%); }
+  .blk.guess { background:hsl(var(--h) 30% 20%); border-color:hsl(var(--h) 35% 45%); }
+}
+.cal-key { margin-top:8px; font-size:12px; }
+dialog { max-width:min(560px,calc(100vw - 32px)); max-height:80vh; border:1px solid var(--line);
+  border-radius:14px; background:var(--surface); color:var(--text); padding:20px; }
+dialog::backdrop { background:rgb(0 0 0 / .45); }
+dialog h3 { font:500 22px/1.2 var(--serif); margin:0 0 10px; }
+dialog p { margin:0 0 10px; }
+dialog .note-time { font:12px var(--mono); color:var(--faint); margin:14px 0 4px; }
+dialog .times li { padding:4px 0; border-top:0; font:13px var(--mono); color:var(--muted); }
+dialog .times { margin-bottom:12px; }
+dialog form { margin:12px 0 0; text-align:right; }
+dialog button { border:1px solid var(--line); background:var(--bg); color:var(--text);
+  border-radius:8px; padding:6px 14px; font:14px var(--sans); cursor:pointer; }
 footer { margin-top:48px; padding:24px 0 calc(40px + env(safe-area-inset-bottom));
   border-top:1px solid var(--line); color:var(--faint); font-size:13px;
   display:flex; justify-content:space-between; align-items:center; gap:16px; flex-wrap:wrap; }
@@ -96,6 +131,17 @@ footer form { margin:0; }
 .key input::placeholder { color:var(--faint); }
 footer button { border:0; background:none; color:var(--faint); font:13px var(--sans);
   padding:0; cursor:pointer; text-decoration:underline; text-underline-offset:3px; }
+"""
+
+# Opens a day's summary (a <template> beside the calendar) in the dialog.
+_CAL_JS = """
+const dayDialog = document.getElementById("dayDialog");
+const dayBody = document.getElementById("dayBody");
+document.querySelectorAll(".cal-day[data-day]").forEach(b => b.addEventListener("click", () => {
+  dayBody.replaceChildren(document.getElementById("day-" + b.dataset.day).content.cloneNode(true));
+  dayDialog.showModal();
+}));
+dayDialog.addEventListener("click", e => { if (e.target === dayDialog) dayDialog.close(); });
 """
 
 _FONTS = (
@@ -392,19 +438,107 @@ def future_map(
     return {"here": here, "stops": [s for _, s in stops]}
 
 
-def journal_rows(
-    entries: dict[date, JournalEntry], limit: int = RECENT_DAYS
-) -> list[tuple[str, str]]:
-    """(date label, summary) for the newest logged days."""
-    rows = []
-    for d in sorted(entries, reverse=True)[:limit]:
-        # A day told in several notes has a "### 20:00" heading per note.
-        lines = entries[d].summary.splitlines()
-        text = " ".join(" ".join(ln for ln in lines if not ln.lstrip().startswith("#")).split())
-        if len(text) > MAX_SUMMARY_CHARS:
-            text = text[: MAX_SUMMARY_CHARS - 1].rstrip() + "…"
-        rows.append((f"{d.strftime('%a')} {_short(d)}", text))
-    return rows
+def _hue(kind: str) -> int:
+    """A stable colour per activity type."""
+    return sum((i + 1) * ord(c) for i, c in enumerate(kind)) * 47 % 360
+
+
+def _clock_text(hours: float) -> str:
+    h, m = divmod(round(hours * 60), 60)
+    return f"{h:02d}:{m:02d}"
+
+
+def _summary_html(summary: str) -> str:
+    """The day's summary as paragraphs, each note's "### 20:00" heading kept as a label."""
+    parts = []
+    for block in re.split(r"\n\s*\n", summary.strip()):
+        text = " ".join(block.split())
+        if not text:
+            continue
+        if text.startswith("#"):
+            parts.append(f'<p class="note-time">{escape(text.lstrip("# "))}</p>')
+        else:
+            parts.append(f"<p>{escape(text)}</p>")
+    return "".join(parts)
+
+
+def week_start(day: date) -> date:
+    return day - timedelta(days=day.weekday())
+
+
+def _calendar_section(vault: Vault, today: date, week_of: date) -> str:
+    """The week (Monday first) as columns on a clock: each activity a block at
+    its rough time, guessed ones dashed. Clicking a day opens its summary."""
+    monday = week_start(week_of)
+    days = [monday + timedelta(days=i) for i in range(7)]
+    entries = vault.read_journal_range(monday, days[-1])
+    blocks = {d: timeline.day_blocks(e.frontmatter) for d, e in entries.items()}
+    placed = [b for day_blocks in blocks.values() for b in day_blocks]
+    lo = min([7.0, *(b.start for b in placed)])
+    hi = max([22.0, *(b.end for b in placed)])
+    lo, hi = float(int(lo)), float(min(24, -int(-hi)))
+
+    gutter = "".join(
+        f'<span style="top:calc({h - lo} * var(--hour))">{h:02d}</span>'
+        for h in range(int(lo), int(hi), 3)
+    )
+    columns, notes = [], []
+    for d in days:
+        head = f'<span class="cal-head">{d.strftime("%a")}<b>{d.day}</b></span>'
+        cells = []
+        for b in blocks.get(d, []):
+            title = f"{'~' if not b.guessed else '≈'}{_clock_text(b.start)} {b.kind}"
+            cells.append(
+                f'<span class="blk{" guess" if b.guessed else ""}" title="{escape(title)}" '
+                f'style="--h:{_hue(b.kind)};top:calc({b.start - lo} * var(--hour));'
+                f"height:calc({b.end - b.start} * var(--hour) - 2px);"
+                f'left:{100 * b.lane / b.lanes:.2f}%;width:{100 / b.lanes:.2f}%">'
+                f"{escape(b.kind.replace('_', ' '))}</span>"
+            )
+        today_cls = " today" if d == today else ""
+        if d in entries:
+            columns.append(
+                f'<button class="cal-day{today_cls}" data-day="{d.isoformat()}" '
+                f'aria-label="{escape(d.strftime("%A"))} {escape(_short(d))}">{head}'
+                f'<span class="cal-body">{"".join(cells)}</span></button>'
+            )
+            times = "".join(
+                f"<li>{'≈' if b.guessed else '~'}{_clock_text(b.start)}–{_clock_text(b.end)} "
+                f"{escape(b.kind.replace('_', ' '))}"
+                f"{' · ' + escape(b.detail) if b.detail else ''}</li>"
+                for b in sorted(blocks[d], key=lambda b: b.start)
+            )
+            notes.append(
+                f'<template id="day-{d.isoformat()}"><h3>{escape(d.strftime("%A"))}, '
+                f"{escape(_short(d))}</h3>"
+                + (f'<ul class="times">{times}</ul>' if times else "")
+                + _summary_html(entries[d].summary)
+                + "</template>"
+            )
+        else:
+            columns.append(
+                f'<div class="cal-day empty{today_cls}">{head}<span class="cal-body"></span></div>'
+            )
+
+    prev = monday - timedelta(days=7)
+    nxt = monday + timedelta(days=7)
+    later = (
+        f'<a href="/?week={nxt.isoformat()}" aria-label="Next week">›</a>' if nxt <= today else ""
+    )
+    span = f"{_short(monday)} – {_short(days[-1])}"
+    return (
+        f'<h2>Week</h2><div class="cal-nav"><a href="/?week={prev.isoformat()}" '
+        f'aria-label="Previous week">‹</a><span>{escape(span)}</span>{later}</div>'
+        f'<div class="cal" style="--span:{hi - lo}"><div class="cal-gutter">{gutter}</div>'
+        + "".join(columns)
+        + "</div>"
+        '<p class="muted cal-key">Rough times: ~ estimated from what you said, '
+        "≈ guessed from the order. Tap a day for its summary.</p>"
+        + "".join(notes)
+        + '<dialog id="dayDialog"><div id="dayBody"></div>'
+        '<form method="dialog"><button>Close</button></form></dialog>'
+        f"<script>{_CAL_JS}</script>"
+    )
 
 
 def _item(left: str, right: str, extra: str = "") -> str:
@@ -476,9 +610,18 @@ def _head(title: str) -> str:
     )
 
 
-def render(vault: Vault, today: date, *, private: bool = False, login: bool = False) -> str:
-    """The page. `private` adds the journal and the rest; `login` shows the
-    password line on the guest view (only when a password is configured)."""
+def render(
+    vault: Vault,
+    today: date,
+    *,
+    private: bool = False,
+    login: bool = False,
+    week_of: date | None = None,
+) -> str:
+    """The page. `private` adds the week calendar and the rest, showing the
+    week of `week_of` (this week by default, never a future one); `login`
+    shows the password line on the guest view (only when a password is
+    configured)."""
     location = vault.read_location() or []
     itinerary = vault.read_itinerary()
     current = brief.current_location(location)
@@ -562,8 +705,7 @@ def render(vault: Vault, today: date, *, private: bool = False, login: bool = Fa
     body = header + _map_section(headed)
     body += _section("Next", legs, "Nothing dated on the itinerary.")
     if private:
-        journal = [_item(d, "", _sub(s)) for d, s in journal_rows(entries)]
-        body += _section("Journal", journal, "Nothing logged.")
+        body += _calendar_section(vault, today, min(week_of or today, today))
     body += _section("Goals", goals, "No active goals.")
     body += _section("Milestones", wins, "None logged yet.")
     body += _section(f"Last {RECENT_DAYS} days", week, "Nothing logged.")

@@ -829,6 +829,8 @@ async def _log_entry(transcript: str, message: Message, context: ContextTypes.DE
             places=places_list,
             current_location_entry=current,
             disciplines=disciplines.outline(graph) if graph else None,
+            # A backdated note was sent later than the day it's about.
+            recorded_at=None if pending_date else now.time(),
         )
         summary = facts.pop("summary", "")
         place_index = PlaceIndex(places_list)

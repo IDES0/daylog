@@ -32,6 +32,11 @@ Guidelines:
 - `activities`: one entry per distinct thing the user did, with a rough
   `hours` estimate. If no duration is stated or implied, omit `hours` for
   that activity rather than guessing.
+  `at` is a rough start time ("HH:MM", 24h) for a calendar view of the
+  day. Estimate it from what's said ("dawn patrol" ~06:00, "after lunch"
+  ~13:30, "tonight" ~20:00), the order things are told in, and the time
+  the note was recorded (anything told as done happened before it). A
+  ballpark is fine; omit `at` only when nothing hints at when it was.
   Eating is not an activity — meals go in `meals`.
   `type` for a sport is an id from Disciplines, copied exactly: the most
   specific one the transcript supports. When they don't say which kind,

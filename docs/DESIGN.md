@@ -77,6 +77,8 @@ The ledger is the foundation; the assistant is only as good as its grounding.
 - **`journal/YYYY-MM-DD.md`**: frontmatter (activities, meals, felt, goal
   progress, milestones, decisions, ...), the verbatim transcript, a summary. A day ends at the 4am
   cutoff; a day told in several notes is rebuilt once at day end.
+  Activities may carry `at`, a rough start ("HH:MM") the extraction
+  estimates for the week calendar; it's a ballpark, never a measurement.
 - **`health.yaml`**: the phone's daily numbers, kept beside the journal as
   reference, joined by date.
 - **`site.yaml`**: summaries of the personal site's PostHog analytics —
@@ -140,6 +142,7 @@ The ledger is the foundation; the assistant is only as good as its grounding.
 | 2026-10-15 | Events are researched every morning (today and the next 7 days, here, at the next base, and anything worth travelling for) and weekly (the next ~4 weeks); the brief carries the best five. Collecting experiences is one of the user's goals |
 | 2026-10-15 | The routines work out their focus each day from the journal (what the user asked to have looked into, what keeps coming up, decisions and open questions), not a fixed list; `profile.yaml` `focus` becomes optional pins. The fixed list had gone three weeks stale |
 | 2026-10-15 | Sports become a discipline graph (`disciplines.yaml`), replacing the fixed sport vocabulary: a DAG under Water, Air, Earth (Mountain → Snow) and Body, with two kinds of link kept apart — "kind of" (sessions roll up) and "requires" (unlocks, nothing rolls up), so a speedwing session is never paragliding time. The user sets only `active` or `want`; not started, ready and locked are derived. Goals take a `discipline`; progress stays as extracted, not recomputed. A vague sport is narrowed in code, not by the model: the kind logged most at that spot, then in that region, then by place (Austin → wakefoil), then a default (tow foil), written with `guessed` and a one-tap fix — an exception to confirming inferred facts, like location changes, because it's low stakes and corrected faster than confirmed. A sport the graph lacks joins only after an Add tap. Cliff jumping is Air only and deep water solo is climbing only: the water just catches you |
+| 2026-10-15 | The private view gets a week calendar of the journal: activities as blocks at rough times, a tap opens the day's summary (not the transcript). Extraction now estimates a rough start (`at`) per activity from what's said and when the note was recorded; untimed ones follow the one before. Direction, not built: measured times from a smartwatch or GPS (workouts with real start/end, e.g. posted through the health inlet) would replace estimates where they exist |
 
 ## Not built
 

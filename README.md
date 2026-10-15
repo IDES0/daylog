@@ -165,9 +165,14 @@ until its variable is set, and 404s everything else:
     no coordinates is pinned at its middle.
   - **Private view**, when `STATUS_PASSWORD` is set: the guest view ends with
     one password line. The right password sets a signed 30-day cookie and
-    the same address then shows the private view (adds the journal
-    summaries, goal slips and phone numbers by day); anything else just
-    shows the guest view again. After 10 misses in 15 minutes every login
+    the same address then shows the private view; anything else just
+    shows the guest view again. The private view adds goal slips, phone
+    numbers by day, and a **week calendar** (Monday first, ‹ › for other
+    weeks via `/?week=YYYY-MM-DD`): each activity is a block at its rough
+    start (`at`, estimated at extraction from what was said and when the
+    note was recorded; `~`), or straight after the one before when it has
+    none (`≈`, dashed), sized by its hours (1 h when unsaid). Tapping a day
+    opens its full summary and the rough times. After 10 misses in 15 minutes every login
     fails until the window passes. Changing the password signs everyone
     out. Still read-only: Telegram changes things.
   - **Installable**: a manifest, icons and a service worker (it caches

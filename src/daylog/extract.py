@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
-from datetime import date
+from datetime import date, time
 from pathlib import Path
 from typing import Any, cast
 
@@ -114,6 +114,14 @@ RECORD_JOURNAL_ENTRY_TOOL: ToolParam = {
                             ),
                         },
                         "hours": {"type": "number", "description": "Approximate hours spent."},
+                        "at": {
+                            "type": "string",
+                            "description": (
+                                "Rough start time, 24h 'HH:MM', estimated from what's said "
+                                "('dawn surf' ~06:00, 'after lunch' ~13:30) and when the "
+                                "note was recorded. Omit when nothing hints at it."
+                            ),
+                        },
                         "detail": {"type": "string", "description": "One-line specifics."},
                         "new_discipline_parents": {
                             "type": "array",
@@ -553,6 +561,7 @@ def extract(
     places: list[Any] | None = None,
     current_location_entry: Any | None = None,
     disciplines: str | None = None,
+    recorded_at: time | None = None,
     reconcile: bool = False,
     client: anthropic.Anthropic | None = None,
 ) -> dict[str, Any]:
@@ -575,6 +584,9 @@ def extract(
     focuses that list on the region the user is in. `disciplines` is the
     discipline graph's outline, so sports are logged under a real id.
 
+    `recorded_at` is when a note about today was sent (None when backdated),
+    so activities' rough `at` times can be placed before it.
+
     `reconcile` switches to whole-day mode (prompts/reconcile.md): the
     transcript is all of a day's notes, and the result replaces the day's
     record instead of adding to it.
@@ -590,8 +602,10 @@ def extract(
     tool_choice: ToolChoiceToolParam = {"type": "tool", "name": "record_journal_entry"}
     place_index = PlaceIndex(list(places or []))
     focus = place_index.current_place(current_location_entry)
+    recorded = f"Note recorded at: {recorded_at.strftime('%H:%M')}\n\n" if recorded_at else ""
     user_content = (
         f"Today's date: {today.isoformat()}\n\n"
+        f"{recorded}"
         f"Current location (per location.yaml): {current_location or '(not set)'}\n\n"
         f"Already logged today (for corrections only):\n"
         f"{_format_existing_entry(existing_frontmatter)}\n\n"

@@ -72,9 +72,30 @@ class _Client:
         self.calls = 0
         self.messages = self
 
-    def create(self, **_: Any) -> _Response:
+    def create(self, **kwargs: Any) -> _Response:
         self.calls += 1
+        self.sent = kwargs
         return _Response(self.payloads.pop(0))
+
+
+def test_activities_can_carry_a_rough_start_and_the_note_time_is_given(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from datetime import date, time
+
+    from daylog import extract, llm
+
+    schema = cast(dict[str, Any], RECORD_JOURNAL_ENTRY_TOOL["input_schema"])
+    assert "at" in schema["properties"]["activities"]["items"]["properties"]
+
+    monkeypatch.setattr(llm, "record", lambda *a, **k: None)
+    payload = {"activities": [{"type": "surf", "at": "06:00"}], "summary": "Surfed."}
+    client = _Client(payload, payload)
+    day = date(2026, 10, 3)
+    extract.extract("surfed", [], [], day, recorded_at=time(9, 5), client=client)  # type: ignore[arg-type]
+    assert "Note recorded at: 09:05" in client.sent["messages"][0]["content"]
+    extract.extract("surfed", [], [], day, client=client)  # type: ignore[arg-type]
+    assert "Note recorded at" not in client.sent["messages"][0]["content"]
 
 
 def test_extract_retries_once_after_a_malformed_tool_call(monkeypatch: pytest.MonkeyPatch) -> None:

@@ -194,3 +194,31 @@ def test_site_off_serves_nothing_at_the_root(vault: Vault, monkeypatch: pytest.M
         assert _request(port, "POST", "/login", "password=x")[0].status == 404
     finally:
         httpd.shutdown()
+
+
+def test_private_view_has_the_week_calendar_with_each_days_summary(vault: Vault) -> None:
+    vault.write_journal_entry(
+        datetime(2026, 10, 1, 9, 0),
+        {"activities": [{"type": "surf", "at": "06:00", "hours": 2}, {"type": "work"}]},
+        "t",
+        "Dawn surf <then> work.",
+    )
+    html = dashboard.render(vault, TODAY, private=True)
+
+    assert '<template id="day-2026-10-01">' in html and "Dawn surf &lt;then&gt; work." in html
+    assert 'class="blk"' in html and 'class="blk guess"' in html
+    assert '<dialog id="dayDialog">' in html
+    # Sep 28 – Oct 4: an earlier week to go back to, no later one yet.
+    assert 'href="/?week=2026-09-21"' in html and "Next week" not in html
+    assert "Sep 28 – Oct 4" in html
+    # The guest view has no calendar.
+    assert "dayDialog" not in dashboard.render(vault, TODAY)
+
+
+def test_week_query_picks_the_calendar_week_when_signed_in(server: int) -> None:
+    response, _ = _request(server, "POST", "/login", "password=right+horse")
+    cookie = (response.getheader("Set-Cookie") or "").split(";")[0]
+    _, page = _request(server, "GET", "/?week=2026-10-01", cookie=cookie)
+    assert '<template id="day-2026-10-01">' in page and "Private summary here" in page
+    _, bad = _request(server, "GET", "/?week=nope", cookie=cookie)
+    assert '<dialog id="dayDialog">' in bad

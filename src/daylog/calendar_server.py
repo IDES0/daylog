@@ -14,11 +14,11 @@ from __future__ import annotations
 import logging
 import os
 import threading
-from datetime import datetime
+from datetime import date, datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
-from urllib.parse import urlsplit
+from urllib.parse import parse_qs, urlsplit
 
 from daylog import calendar_feed, daily, dashboard, health, web
 from daylog.tg import tz
@@ -41,10 +41,23 @@ def _build_feed_bytes() -> bytes:
     return calendar_feed.build_feed(vault.read_goals(), vault.read_itinerary(), journal_entries)
 
 
-def _build_status_bytes(private: bool = False, login: bool = False) -> bytes:
+def _week_of(query: str) -> date | None:
+    """The `week` query value (any ISO date in that week), or None if absent or bad."""
+    value = (parse_qs(query).get("week") or [""])[0]
+    try:
+        return date.fromisoformat(value)
+    except ValueError:
+        return None
+
+
+def _build_status_bytes(
+    private: bool = False, login: bool = False, week_of: date | None = None
+) -> bytes:
     vault = _vault()
     today = daily.logical_day(datetime.now(tz()))
-    return dashboard.render(vault, today, private=private, login=login).encode("utf-8")
+    return dashboard.render(vault, today, private=private, login=login, week_of=week_of).encode(
+        "utf-8"
+    )
 
 
 # Unchanging files of the app shell: path -> (content type, body).
@@ -107,14 +120,16 @@ def _make_handler(
             return web.valid_session(web.session_from(self.headers.get("Cookie")), password)
 
         def do_GET(self) -> None:
-            path = urlsplit(self.path).path
+            url = urlsplit(self.path)
+            path = url.path
             build: Any
             if feed_path and path == feed_path:
                 build, content_type = _build_feed_bytes, "text/calendar; charset=utf-8"
             elif site and path == "/":
                 # One address: the private view when signed in, else the guest one.
                 private = self._signed_in()
-                build = lambda: _build_status_bytes(private, guard is not None)  # noqa: E731
+                week = _week_of(url.query) if private else None
+                build = lambda: _build_status_bytes(private, guard is not None, week)  # noqa: E731
                 content_type = "text/html; charset=utf-8"
             elif site and path in _SHELL:
                 kind, body = _SHELL[path]
