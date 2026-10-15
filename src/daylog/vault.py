@@ -29,6 +29,7 @@ _FRONTMATTER_KEY_ORDER = (
     "felt",
     "goal_progress",
     "milestones",
+    "decisions",
     "skipped",
     "mood",
     "open_questions",
@@ -44,7 +45,7 @@ _SYNC_INTERVAL_SECONDS = 60
 # second entry lands on a day that already has one. Anything not listed here
 # is treated as a scalar (new value wins) when merging.
 _LIST_FIELDS_EXTEND = ("activities", "meals", "felt", "goal_progress", "milestones")
-_LIST_FIELDS_DEDUPE = ("skipped", "open_questions")
+_LIST_FIELDS_DEDUPE = ("decisions", "skipped", "open_questions")
 
 
 class VaultError(RuntimeError):

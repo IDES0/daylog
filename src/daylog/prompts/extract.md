@@ -133,6 +133,12 @@ Guidelines:
   day happens to be yesterday. Resolve relative phrases ("yesterday",
   "Monday") into a real ISO `date` using today's actual date; `summary`
   should describe only that aside, not the whole message.
+- `decisions`: only a commitment or event the user states as done that
+  changes where they'll be or what they can do for weeks or more: "I
+  accepted the job, starting Oct 20 in Austin", "booked my flight home for
+  the 19th", "tore my shoulder, no surfing for six weeks". One sentence
+  each with the dates and terms they gave. Not small choices, not things
+  they're still weighing, and not one already in "Already logged today".
 - `skipped`: things the user says they meant to do but didn't.
 - `mood`: a single word, only if the transcript states or strongly implies
   one. Omit it otherwise.

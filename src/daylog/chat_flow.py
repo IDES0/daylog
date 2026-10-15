@@ -118,13 +118,13 @@ async def handle_chat(message: Message, context: ContextTypes.DEFAULT_TYPE, text
     for chunk in chunks(result.text):
         await message.reply_text(chunk, reply_markup=MENU)
     for proposal in result.proposals:
-        await _send_proposal(message, context, proposal)
+        await send_proposal(message, context, proposal)
     for job in result.research_jobs:
         context.application.create_task(_run_research_job(context, message.chat_id, job))
     llm.flush(v)
 
 
-async def _send_proposal(
+async def send_proposal(
     message: Message, context: ContextTypes.DEFAULT_TYPE, proposal: dict[str, Any]
 ) -> None:
     token = uuid.uuid4().hex[:10]

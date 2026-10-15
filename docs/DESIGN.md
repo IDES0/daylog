@@ -63,7 +63,7 @@ The ledger is the foundation; the assistant is only as good as its grounding.
 - **`goals.yaml`**: hard goals (a deadline) and soft goals (a target window),
   optional metric/target/progress, and `slip_history`.
 - **`journal/YYYY-MM-DD.md`**: frontmatter (activities, meals, felt, goal
-  progress, milestones, ...), the verbatim transcript, a summary. A day ends at the 4am
+  progress, milestones, decisions, ...), the verbatim transcript, a summary. A day ends at the 4am
   cutoff; a day told in several notes is rebuilt once at day end.
 - **`health.yaml`**: the phone's daily numbers, kept beside the journal as
   reference, joined by date.
@@ -119,6 +119,7 @@ The ledger is the foundation; the assistant is only as good as its grounding.
 | 2026-10-02 | The CSV export is a session tool (`python -m daylog.export`), not a bot command |
 | 2026-10-10 | Activities are summarised by days done, with hours only where said (hours alone undercounted); journal gains `milestones` (certs, PBs, firsts), listed on the status page; `freedive` and `paraglide` join the activity vocabulary |
 | 2026-10-10 | Read-only PostHog analytics for the personal site: a daily Site block in the brief (company refs included) and `/site` on demand; no 15-minute polling, since a few visits a day don't need it; summaries only in `site.yaml` |
+| 2026-10-15 | A stated decision (job, flight home, injury) is traced through the itinerary, goals and plan in one pass: impact item by item, workarounds for each affected goal, what it opens up. Edits go through one confirm card; the analysis is saved under `research/decisions/`. Prompted by accepting NASCO, which changed seven itinerary entries and two goals that no voice note touched |
 
 ## Not built
 

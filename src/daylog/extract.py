@@ -391,6 +391,17 @@ RECORD_JOURNAL_ENTRY_TOOL: ToolParam = {
                     "required": ["date", "summary"],
                 },
             },
+            "decisions": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": (
+                    "Commitments or events, stated as done, that change where the user "
+                    "will be or what they can do for weeks or more: a job accepted, a "
+                    "flight home booked, an injury that stops a sport. One sentence each, "
+                    "with the dates and terms they gave. Not small choices, and not "
+                    "something they're still weighing."
+                ),
+            },
             "skipped": {
                 "type": "array",
                 "items": {"type": "string"},
@@ -439,6 +450,7 @@ _ARRAY_FIELDS = (
     "itinerary_changes",
     "corrections",
     "other_day_notes",
+    "decisions",
     "skipped",
     "open_questions",
 )
@@ -506,6 +518,12 @@ def _format_existing_entry(frontmatter: dict[str, Any] | None) -> str:
         if items:
             numbered = "\n".join(f"  {i}: {item}" for i, item in enumerate(items))
             blocks.append(f"{field}:\n{numbered}")
+    # Not a correction target: listed so a decision told twice is traced once.
+    decisions = frontmatter.get("decisions")
+    if decisions:
+        blocks.append(
+            "decisions (already traced, don't repeat):\n" + "\n".join(f"  - {d}" for d in decisions)
+        )
     return "\n".join(blocks) if blocks else "(nothing logged yet today)"
 
 

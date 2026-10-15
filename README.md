@@ -166,6 +166,8 @@ src/daylog/
   chat.py          The assistant: vault read tools, web search, proposal
                    tools. chat_flow.py: routing, menu, history.
   planner.py       2-3 dated route options; plan_flow.py applies a pick.
+  ripple.py        A decision traced through itinerary, goals and plan;
+                   ripple_flow.py: the card, /ripple, applying the edits.
   review.py        Weekly numbers (exact) + the weekly review.
   brief.py         Morning brief (uses routine research, plans, wishlist).
   goals.py         Goal resolution, slip tracking, confirmation logic.
@@ -281,6 +283,7 @@ daylog-vault/
 | `/usage` | API spend this month vs budget |
 | `/surf`, `/fly` | Rated surf windows per spot / paragliding flyability per launch — no LLM cost |
 | `/site [days]` | The personal site's analytics from PostHog (default 7 days): visitors by day, ref, page, source, country and device; chess/spacetime use; company-ref visitors with recording links — no LLM cost |
+| `/ripple <decision>` | Trace a decision (a job, a flight home, an injury) through the itinerary, goals and plan: what it fixes, what it blocks or moves, ways to keep pursuing each goal inside it, what it opens up. Saved to `research/decisions/`, then one card to apply the edits (all, one by one, or skip) and a button to redo the plan. A voice note that states such a decision runs this on its own |
 | `/undo` | Revert one of the bot's recent changes |
 | `/status`, `/upcoming` | Goals and itinerary now; the same as a dated timeline |
 | `/brief`, `/backdate`, `/start` | The brief now; pick a day to log to; how to use the bot |
