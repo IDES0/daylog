@@ -111,3 +111,35 @@ def test_repair_parses_a_stringified_list_or_whole_payload() -> None:
     # not JSON, or JSON of the wrong shape: left for _validate_shape to reject
     assert _repair({"activities": "surfed 2h"})["activities"] == "surfed 2h"
     assert _repair({"activities": '{"weird": 1}'})["activities"] == '{"weird": 1}'
+
+
+def test_extract_sends_the_discipline_outline_and_goal_disciplines(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from datetime import date
+
+    from daylog import extract, llm
+
+    monkeypatch.setattr(llm, "record", lambda *a, **k: None)
+    seen: dict[str, Any] = {}
+
+    class _Capture(_Client):
+        def create(self, **kwargs: Any) -> _Response:
+            seen.update(kwargs)
+            return super().create(**kwargs)
+
+    goals = [{"id": "surf", "title": "Surfing", "type": "soft", "discipline": "surf"}]
+    client = _Capture({"activities": [{"type": "foil"}], "summary": "Foiled."})
+    extract.extract(
+        "foiled",
+        goals,
+        [],
+        date(2026, 10, 15),
+        disciplines="- foil: Foiling",
+        client=client,  # type: ignore[arg-type]
+    )
+    content = seen["messages"][0]["content"]
+    assert (
+        "Disciplines (id: name; indented under what it is a kind of):\n- foil: Foiling" in content
+    )
+    assert "discipline: surf" in content

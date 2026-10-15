@@ -17,7 +17,7 @@ from datetime import date, datetime, timedelta
 from telegram import Update
 from telegram.ext import ContextTypes
 
-from daylog import brief, goals, itinerary, llm, reconcile, review
+from daylog import brief, disciplines, goals, itinerary, llm, reconcile, review
 from daylog.tg import allowed_user_id, chunks, is_authorized, tz, vault
 from daylog.vault import Vault, VaultError
 
@@ -48,12 +48,15 @@ def run_reconcile(v: Vault, day: date, force: bool = False) -> str:
 
     location_data = v.read_location()
     goals_data = v.read_goals()
+    graph = disciplines.Graph(v.read_disciplines())
     result = reconcile.reconcile_day(
         entry,
         itinerary.active_summary(v.read_itinerary()),
         goals.active_summary(goals_data),
         v.read_places(),
         brief.current_location(location_data),
+        graph,
+        disciplines.history(graph, disciplines.all_days(v, day - timedelta(days=1))),
     )
     v.rewrite_journal_entry(
         day, result.frontmatter, f"journal: {day.isoformat()} (reconciled)", summary=result.summary
@@ -143,9 +146,14 @@ async def send_weekly_review(
     last = v.read_text(f"reviews/{review.week_label(start - timedelta(days=1))}.md")
     weekly_docs = v.list_docs("research/weekly")
     weekly_research = v.read_text(weekly_docs[-1]) if weekly_docs else None
+    stats = review.week_stats(entries)
+    graph = disciplines.Graph(v.read_disciplines())
+    if graph:
+        week = disciplines.totals(graph, {d: e.frontmatter for d, e in entries.items()})
+        stats["by_discipline"] = disciplines.numbers(graph, week)
     review_input = review.build_input(
         entries,
-        review.week_stats(entries),
+        stats,
         goal_lines or "(none)",
         last,
         llm.format_usage(v),

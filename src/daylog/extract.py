@@ -108,10 +108,21 @@ RECORD_JOURNAL_ENTRY_TOOL: ToolParam = {
                     "properties": {
                         "type": {
                             "type": "string",
-                            "description": "Short activity label, e.g. 'surf'.",
+                            "description": (
+                                "A sport's discipline id from Disciplines, else a short "
+                                "activity label, e.g. 'travel'."
+                            ),
                         },
                         "hours": {"type": "number", "description": "Approximate hours spent."},
                         "detail": {"type": "string", "description": "One-line specifics."},
+                        "new_discipline_parents": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "description": (
+                                "Only for a sport with no Disciplines id: the ids it is a "
+                                "kind of, e.g. ['mountain'] for sandboarding."
+                            ),
+                        },
                         **_PLACE_LINK_PROPERTIES,
                     },
                     "required": ["type"],
@@ -474,7 +485,11 @@ def _format_goals(goals: list[dict[str, Any]]) -> str:
     lines = []
     for goal in goals:
         metric = f", metric: {goal['metric']}" if goal.get("metric") else ""
-        lines.append(f'- id: {goal["id"]}, title: "{goal["title"]}", type: {goal["type"]}{metric}')
+        discipline = f", discipline: {goal['discipline']}" if goal.get("discipline") else ""
+        lines.append(
+            f'- id: {goal["id"]}, title: "{goal["title"]}", type: {goal["type"]}'
+            f"{metric}{discipline}"
+        )
     return "\n".join(lines)
 
 
@@ -537,6 +552,7 @@ def extract(
     current_location: str | None = None,
     places: list[Any] | None = None,
     current_location_entry: Any | None = None,
+    disciplines: str | None = None,
     reconcile: bool = False,
     client: anthropic.Anthropic | None = None,
 ) -> dict[str, Any]:
@@ -556,7 +572,8 @@ def extract(
     a real id — and a garbled transcription of an obscure real spot has
     something concrete to match against instead of defaulting to a famous
     but wrong one. `current_location_entry` (the open location.yaml entry)
-    focuses that list on the region the user is in.
+    focuses that list on the region the user is in. `disciplines` is the
+    discipline graph's outline, so sports are logged under a real id.
 
     `reconcile` switches to whole-day mode (prompts/reconcile.md): the
     transcript is all of a day's notes, and the result replaces the day's
@@ -582,6 +599,8 @@ def extract(
         f"Current itinerary:\n{_format_itinerary(itinerary)}\n\n"
         f"Known places (id: name (kind) aka aliases; indented under their parent):\n"
         f"{outline(place_index, focus)}\n\n"
+        f"Disciplines (id: name; indented under what it is a kind of):\n"
+        f"{disciplines or '(none set)'}\n\n"
         f"Transcript:\n{transcript}"
     )
     messages: list[MessageParam] = [{"role": "user", "content": user_content}]

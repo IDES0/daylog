@@ -74,6 +74,32 @@ progress or slipped dates are extracted automatically:
 - **Hard** goals (a real deadline) never move silently — the bot asks for
   inline Confirm/Cancel in Telegram before writing a moved date.
 
+### Disciplines
+`disciplines.yaml` holds your sports as a graph rather than a flat list.
+Each sport names what it is a kind of (`parents`, possibly more than one:
+wingfoiling is Foiling and Air) and what has to come first (`requires`: a
+goal done, or a sport logged at least once). The roots are Water, Air,
+Earth (with Mountain → Snow under it) and Body.
+- **Logging**: extraction is given the graph and logs a sport under its id.
+  Old labels still count through each node's `aliases`.
+- **Vague sports**: "went foiling" is narrowed in code to the kind you log
+  most at that spot, then in that region, then by place (`resolve.by_place`,
+  e.g. Austin → wakefoil), then a default (tow foil). The reply says which
+  and why, with buttons to change it; a reconcile keeps what you said or
+  tapped.
+- **New sports**: one the graph doesn't know gets an Add card (pursuing,
+  want, or no); nothing joins the graph without the tap.
+- **State**: you set `active` or `want`. The bot derives *not started*
+  (active, nothing logged), *ready* (wanted, prerequisites met) and
+  *locked* (wanted, still needs something).
+- **Totals**: sessions and hours roll up every ancestor once, computed on
+  demand. A kitefoil session counts toward Water and Air; the roots are
+  never added together.
+- **Where it shows**: `/disciplines` (or 🌀 Disciplines under ⋯ More) shows
+  the tree. The brief and the planner get a compact summary, and the
+  weekly review gets per-discipline numbers. A goal with a `discipline`
+  shows under it.
+
 ### Itinerary / "flexible calendar"
 `itinerary.yaml` mirrors the same hard/soft/slip pattern for travel:
 candidate destinations, soft target windows, and hard dates/deadlines
@@ -191,6 +217,9 @@ src/daylog/
   review.py        Weekly numbers (exact) + the weekly review.
   brief.py         Morning brief (uses routine research, plans, wishlist).
   goals.py         Goal resolution, slip tracking, confirmation logic.
+  disciplines.py   The sports graph: roll-ups, prerequisites, states, the
+                   vague-sport resolver. discipline_flow.py: fix-it and Add
+                   cards, /disciplines.
   itinerary.py     The same hard/soft/slip pattern for travel.
   dateparse.py     Date phrases ("yesterday", "3 days ago") for backdating.
   calendar_feed.py The .ics feed; calendar_server.py serves it, the status
@@ -223,6 +252,7 @@ daylog-vault/
   location.yaml            # where the user was based: stays, trips, transit
   itinerary.yaml           # the wishlist: intentions + hard dates
   goals.yaml               # hard/soft goals, slip_history
+  disciplines.yaml         # the sports graph: parents, requires, status, aliases
   rankings.yaml            # ordered lists per category and tier
   research/<place>.md      # destination research files
   research/daily/<date>.md # the morning research routine's output
@@ -251,12 +281,31 @@ daylog-vault/
   title: APPI solo pilot rating
   type: soft
   target_window: [2026-10-01, 2026-12-31]
+  discipline: paraglide   # optional: the goal shows under it in /disciplines
   status: active
   slip_history:
     - from: 2026-09-30
       to: 2026-12-31
       on: 2026-08-21
       reason: "prioritising applications"
+```
+
+```yaml
+# disciplines.yaml — a node counts toward every ancestor
+water: {name: Water}
+air: {name: Air}
+foil:
+  name: Foiling
+  parents: [water]
+  status: active                # active | want
+  aliases: [foiling]
+  resolve: {by_place: {some-town: wake_foil}, default: tow_foil}
+wing_foil: {name: Wingfoil, parents: [foil, air], status: active}
+speedwing:
+  name: Speedwinging
+  parents: [air]
+  status: want
+  requires: [goal: paragliding] # met when that goal is done
 ```
 
 ```yaml
@@ -307,6 +356,7 @@ daylog-vault/
 | `/ripple <decision>` | Trace a decision (a job, a flight home, an injury) through the itinerary, goals and plan now, with the bot's model, instead of waiting for the morning research run, which does the same for any `decisions` in the journal. Either way the result is a proposal: one card after the brief to apply every change and the revised plan, go one by one, or skip |
 | `/undo` | Revert one of the bot's recent changes |
 | `/status`, `/upcoming` | Goals and itinerary now; the same as a dated timeline |
+| `/disciplines [days]` | The sports graph: sessions and hours per discipline (default 30 days), what's not started, ready or locked, and goals under each — no LLM cost |
 | `/brief`, `/backdate`, `/start` | The brief now; pick a day to log to; how to use the bot |
 
 Scheduled: morning brief (`BRIEF_HOUR`), reconcile (`DAY_CUTOFF_HOUR`),

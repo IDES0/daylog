@@ -148,6 +148,7 @@ def generate_brief(
     morning_research: str | None = None,
     current_plan: str | None = None,
     principles: str | None = None,
+    disciplines: str | None = None,
     client: anthropic.Anthropic | None = None,
 ) -> str:
     client = client or anthropic.Anthropic()
@@ -198,6 +199,8 @@ def generate_brief(
             "\n\nThe user's latest travel plan (a line marked Chosen is what they picked):\n"
             f"{current_plan[:3000]}"
         )
+    if disciplines:
+        user_content += f"\n\nDisciplines (their sports as a graph, computed):\n{disciplines}"
     if morning_research:
         user_content += (
             "\n\nThis morning's deep research (from the scheduled research routine — "

@@ -54,6 +54,7 @@ BTN_WISHLIST = "⭐ Wishlist"
 BTN_REVIEW = "📊 Review"
 BTN_UNDO = "↩️ Undo"
 BTN_USAGE = "💸 Usage"
+BTN_DISCIPLINES = "🌀 Disciplines"
 BTN_BACK = "⬅ Back"
 
 _PLACEHOLDER = "Ask anything — voice notes log today"
@@ -72,7 +73,7 @@ MORE_MENU = ReplyKeyboardMarkup(
     [
         [BTN_STATUS, BTN_UPCOMING, BTN_TRAIL],
         [BTN_RANKINGS, BTN_WISHLIST, BTN_REVIEW],
-        [BTN_UNDO, BTN_USAGE],
+        [BTN_DISCIPLINES, BTN_UNDO, BTN_USAGE],
         [BTN_BACK],
     ],
     resize_keyboard=True,

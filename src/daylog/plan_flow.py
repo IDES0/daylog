@@ -16,7 +16,17 @@ from typing import Any
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import ContextTypes
 
-from daylog import brief, chat_flow, goals, itinerary, llm, planner, trail, wishlist_flow
+from daylog import (
+    brief,
+    chat_flow,
+    disciplines,
+    goals,
+    itinerary,
+    llm,
+    planner,
+    trail,
+    wishlist_flow,
+)
 from daylog.places import PlaceIndex
 from daylog.tg import allowed_user_id, chunks, is_authorized, tz, vault
 from daylog.vault import Vault, VaultError
@@ -82,6 +92,7 @@ def build_context(v: Vault, now: datetime) -> str:
         f"Their own operating principles (weigh plans against these):\n"
         f"{v.read_principles().strip() or '(none written)'}\n\n"
         f"Goals:\n{chr(10).join(goal_lines) or '(none)'}\n\n"
+        f"Disciplines:\n{disciplines.summary(v, today)}\n\n"
         f"Hard deadlines:\n{chr(10).join(hard) or '(none recorded)'}\n\n"
         f"Last 30 days:\n{trail_text}\n\n"
         f"Recent journal:\n{recent}\n\n"

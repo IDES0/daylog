@@ -175,6 +175,7 @@ def active_summary(goals_data: Any) -> list[dict[str, Any]]:
             "title": g.get("title", g["id"]),
             "type": g.get("type", "soft"),
             "metric": g.get("metric"),
+            "discipline": g.get("discipline"),
         }
         for g in goals_data
         if g.get("status", "active") == "active"
