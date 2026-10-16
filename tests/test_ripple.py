@@ -157,7 +157,7 @@ def test_applying_a_proposal_edits_adopts_the_plan_and_records_it(vault: Vault) 
     vault.write_text("research/proposals/2026-10-16-austin-plan.md", "# New plan\n", "draft")
     path = _proposal(vault, plan_draft="research/proposals/2026-10-16-austin-plan.md")
 
-    outcome = ripple_flow._apply_proposal(vault, path)
+    outcome = ripple_flow.apply_proposal(vault, path)
 
     assert outcome.startswith("Applied 3:")
     assert vault.read_itinerary()[0]["status"] == "dropped"

@@ -763,16 +763,22 @@ def _discipline_list(nodes: list[dict[str, Any]], days: int) -> str:
     return f"<ul>{''.join(items)}</ul>"
 
 
-def _disciplines_section(vault: Vault, today: date, load_d3: bool) -> str:
-    graph, recent, all_time = disciplines.snapshot(vault, today)
-    if not graph:
-        return ""
-    nodes = disciplines.graph_data(graph, vault.read_goals(), recent, all_time)
+def discipline_slots(graph: disciplines.Graph) -> dict[str, int]:
+    """Root id -> colour slot 1-4: the fixed ones, then the slots left in file order."""
     slots = dict(_ROOT_SLOTS)
     spare = [n for n in range(1, 5) if n not in slots.values()]
     for root in graph.roots():
         if root not in slots and spare:
             slots[root] = spare.pop(0)
+    return slots
+
+
+def _disciplines_section(vault: Vault, today: date, load_d3: bool) -> str:
+    graph, recent, all_time = disciplines.snapshot(vault, today)
+    if not graph:
+        return ""
+    nodes = disciplines.graph_data(graph, vault.read_goals(), recent, all_time)
+    slots = discipline_slots(graph)
     days = disciplines.RECENT_DAYS
     payload = json.dumps({"nodes": nodes, "slots": slots, "days": days}, ensure_ascii=False)
     payload = payload.replace("</", "<\\/")

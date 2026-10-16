@@ -1,16 +1,18 @@
-"""Minimal HTTP server: the calendar feed, the status site, one data inlet.
+"""Minimal HTTP server: the calendar feed, the status site and web app, one data inlet.
 
-Telegram is the only interface that changes anything you'd call content
-(CLAUDE.md). This serves the calendar feed at an unguessable path (a .ics
-file for a calendar app to poll), the status site at / (see dashboard.py: the
-guest view, or the private view once the password line has set a session,
-see web.py, plus the files that make it installable as an app), and
-accepts one thing: the phone's daily health numbers (see health.py), under
-its own secret. The password line and sign-out are the only forms.
+This serves the calendar feed at an unguessable path (a .ics file for a
+calendar app to poll), the status site at / (see dashboard.py: the guest
+view; once the password line has set a session, see web.py, the web app's
+shell from webapp/static, falling back to the private view), the files that
+make it installable as an app, the web app's JSON API under /api/ (see
+webapp/api.py: session first, then the CSRF header on anything but GET),
+and the phone's daily health numbers (see health.py), under its own secret.
+Request bodies are never logged.
 """
 
 from __future__ import annotations
 
+import json
 import logging
 import os
 import threading
@@ -23,6 +25,7 @@ from urllib.parse import parse_qs, urlsplit
 from daylog import calendar_feed, daily, dashboard, health, web
 from daylog.tg import tz
 from daylog.vault import Vault
+from daylog.webapp import api as webapi
 
 logger = logging.getLogger(__name__)
 
@@ -86,11 +89,16 @@ def _make_handler(
     health_path: str | None,
     site: bool = False,
     password: str | None = None,
+    app: webapi.Api | None = None,
 ) -> type[BaseHTTPRequestHandler]:
     # One guard per server, so failed attempts are counted across requests.
     guard = web.LoginGuard(password) if password and site else None
+    # One API per server too: it holds the open cards and the web chat.
+    api = (app or webapi.Api()) if site else None
 
     class Handler(BaseHTTPRequestHandler):
+        web_api = api
+
         def log_message(self, format: str, *args: Any) -> None:
             logger.info("calendar server: " + format, *args)
 
@@ -127,11 +135,28 @@ def _make_handler(
             build: Any
             if feed_path and path == feed_path:
                 build, content_type = _build_feed_bytes, "text/calendar; charset=utf-8"
+            elif api and path.startswith("/api/"):
+                self._api("GET")
+                return
+            elif site and path == "/" and self._signed_in():
+                # Signed in: the web app's shell, or the private view without one.
+                shell = webapi.static_file("index.html")
+                if shell is not None:
+                    self._send(200, webapi.STATIC_FILES["index.html"], shell)
+                    return
+                week = _week_of(url.query)
+                build = lambda: _build_status_bytes(True, guard is not None, week)  # noqa: E731
+                content_type = "text/html; charset=utf-8"
+            elif site and path in ("/app.js", "/app.css"):
+                asset = webapi.static_file(path[1:])
+                if asset is None:
+                    self._not_found()
+                    return
+                self._send(200, webapi.STATIC_FILES[path[1:]], asset, cache="no-cache")
+                return
             elif site and path == "/":
-                # One address: the private view when signed in, else the guest one.
-                private = self._signed_in()
-                week = _week_of(url.query) if private else None
-                build = lambda: _build_status_bytes(private, guard is not None, week)  # noqa: E731
+                # One address: the guest view when signed out.
+                build = lambda: _build_status_bytes(False, guard is not None)  # noqa: E731
                 content_type = "text/html; charset=utf-8"
             elif site and path in _SHELL:
                 kind, body = _SHELL[path]
@@ -177,8 +202,48 @@ def _make_handler(
                 self._login()
             elif site and path == "/logout":
                 self._land(web.clear_cookie())
+            elif api and path.startswith("/api/"):
+                self._api("POST")
             else:
                 self._not_found()
+
+        def _json(self, code: int, payload: dict[str, Any]) -> None:
+            body = json.dumps(payload, ensure_ascii=False, default=str).encode("utf-8")
+            self.send_response(code)
+            self.send_header("Content-Type", "application/json; charset=utf-8")
+            self.send_header("Cache-Control", "no-store")
+            self.send_header("X-Robots-Tag", "noindex")
+            self.send_header("X-Content-Type-Options", "nosniff")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def _api(self, method: str) -> None:
+            # No CORS headers, ever: another site's page can't read or send these.
+            assert api is not None
+            url = urlsplit(self.path)
+            req = webapi.Request(
+                method=method,
+                path=url.path,
+                query=parse_qs(url.query),
+                headers={k.lower(): v for k, v in self.headers.items()},
+                signed_in=self._signed_in(),
+            )
+            refused = api.precheck(req)
+            if refused is not None:
+                self._json(*refused)
+                return
+            if method == "POST":
+                try:
+                    length = int(self.headers.get("Content-Length") or 0)
+                except ValueError:
+                    self._json(400, {"error": "bad_length"})
+                    return
+                if length < 0 or length > webapi.body_limit(url.path):
+                    self._json(413, {"error": "too_large", "message": "The body is too large."})
+                    return
+                req.body = self.rfile.read(length) if length else b""
+            self._json(*api.handle(req))
 
         def _login(self) -> None:
             # Right password: a session, so / shows the private view. Anything

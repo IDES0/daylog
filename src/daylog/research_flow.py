@@ -18,6 +18,7 @@ import contextlib
 import logging
 import re
 import uuid
+from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 from typing import Any
 
@@ -173,21 +174,34 @@ def _add_trip_stops(v: Vault, day: date, place_ids: list[str]) -> None:
 # -- cards --------------------------------------------------------------------------
 
 
+def new_batch(findings: research.Findings, days: list[date]) -> dict[str, Any]:
+    """The proposals of one research run, shared by its cards (see add_proposals)."""
+    return {
+        "proposals": findings.new_places,
+        "days": [d.isoformat() for d in days],
+        "created": {},
+    }
+
+
 def _new_batch(
     context: ContextTypes.DEFAULT_TYPE, findings: research.Findings, days: list[date]
 ) -> str:
     batch_id = uuid.uuid4().hex[:10]
     # bot_data, not user_data: batches are created from background jobs with
     # no user context, and this is a single-user bot anyway.
-    context.bot_data.setdefault(_BATCH_KEY, {})[batch_id] = {
-        "proposals": findings.new_places,
-        "days": [d.isoformat() for d in days],
-        "created": {},
-    }
+    context.bot_data.setdefault(_BATCH_KEY, {})[batch_id] = new_batch(findings, days)
     return batch_id
 
 
-def _card_text(index: PlaceIndex, batch: dict[str, Any], i: int) -> str:
+def bulk_lines(index: PlaceIndex, findings: research.Findings) -> list[str]:
+    by_ref = {str(q.get("ref")): str(q["name"]) for q in findings.new_places}
+    return [
+        f"{i + 1}. {research.summarize_proposal(index, p, by_ref)}"
+        for i, p in enumerate(findings.new_places)
+    ]
+
+
+def card_text(index: PlaceIndex, batch: dict[str, Any], i: int) -> str:
     p = batch["proposals"][i]
     by_ref = {str(q.get("ref")): str(q["name"]) for q in batch["proposals"]}
     line = research.summarize_proposal(index, p, by_ref)
@@ -229,11 +243,7 @@ async def send_cards(
     batch_id = _new_batch(context, findings, days)
     store = context.bot_data[_BATCH_KEY][batch_id]
     if bulk and len(findings.new_places) > 3:
-        by_ref = {str(q.get("ref")): str(q["name"]) for q in findings.new_places}
-        lines = [
-            f"{i + 1}. {research.summarize_proposal(index, p, by_ref)}"
-            for i, p in enumerate(findings.new_places)
-        ]
+        lines = bulk_lines(index, findings)
         keyboard = InlineKeyboardMarkup(
             [
                 [
@@ -250,7 +260,7 @@ async def send_cards(
     for i in range(len(findings.new_places)):
         await context.bot.send_message(
             chat_id=chat_id,
-            text=_card_text(index, store, i),
+            text=card_text(index, store, i),
             reply_markup=_card_keyboard(batch_id, i),
         )
 
@@ -280,7 +290,7 @@ async def handle_place_callback(update: Update, context: ContextTypes.DEFAULT_TY
         for j in range(len(batch["proposals"])):
             await context.bot.send_message(
                 chat_id=allowed_user_id(),
-                text=_card_text(index, batch, j),
+                text=card_text(index, batch, j),
                 reply_markup=_card_keyboard(batch_id, j),
             )
         return
@@ -323,26 +333,35 @@ async def resolve_days(
 ) -> None:
     """Resolve every unlinked place mention in `days`. Quiet: no message if nothing to do."""
     v = vault()
+    headline, findings = await asyncio.to_thread(lookup_mentions, v, days, quiet)
+    if findings is None:
+        if headline:
+            await context.bot.send_message(chat_id=chat_id, text=headline)
+        return
+    await send_cards(context, chat_id, findings, days, headline or "")
+
+
+def lookup_mentions(
+    v: Vault, days: list[date], quiet: bool = True
+) -> tuple[str | None, research.Findings | None]:
+    """Resolve the unlinked place mentions in `days`: link the known ones and
+    return (headline, findings) whose new places become Add cards. Findings is
+    None when there's nothing to show (the headline, if any, says why)."""
     mentions: list[research.Mention] = []
     for day in days:
         entry = v.read_journal_entry(day)
         if entry is not None:
             mentions += research.unresolved_mentions(day, entry.frontmatter)
     if not mentions:
-        if not quiet:
-            await context.bot.send_message(chat_id=chat_id, text="Every place is already linked.")
-        return
+        return (None if quiet else "Every place is already linked."), None
     if not llm.can_spend(v, RUN_ESTIMATE_USD):
-        await context.bot.send_message(
-            chat_id=chat_id,
-            text=f"Skipping place research — monthly budget (${llm.monthly_budget():.0f}) reached.",
+        return (
+            f"Skipping place research — monthly budget (${llm.monthly_budget():.0f}) reached.",
+            None,
         )
-        return
     index = PlaceIndex(v.read_places())
     focus, where = _where(v, index)
-    findings = await asyncio.to_thread(
-        research.run, research.resolve_job(mentions, where), index, focus, max_searches=6
-    )
+    findings = research.run(research.resolve_job(mentions, where), index, focus, max_searches=6)
     linked = apply_matches(v, findings.matches, days)
     llm.flush(v)
     headline = f"Looked up {len(mentions)} place name(s) from your journal."
@@ -351,20 +370,52 @@ async def resolve_days(
     if findings.unresolved:
         headline += "\nCouldn't place: " + ", ".join(u["mention"] for u in findings.unresolved)
     if findings.new_places or linked or not quiet:
-        await send_cards(context, chat_id, findings, days, headline)
+        return headline, findings
+    return None, None
 
 
 async def arrive(context: ContextTypes.DEFAULT_TYPE, chat_id: int, force: bool = False) -> None:
     """Research the region the user is in, if it's thinly known (or `force`)."""
     v = vault()
+    job = plan_arrive(v, force)
+    if job is None:
+        return
+    await context.bot.send_message(
+        chat_id=chat_id, text=f"Researching what's around {job.where}..."
+    )
+    findings = await asyncio.to_thread(run_job, v, job)
+    await send_cards(
+        context,
+        chat_id,
+        findings,
+        [],
+        f"Around {job.where}: {len(findings.new_places)} places found.",
+        bulk=True,
+    )
+
+
+@dataclass
+class Job:
+    """A research run worked out but not started: what it's about and its prompt."""
+
+    where: str
+    job: str
+    index: PlaceIndex
+    focus: Any | None
+    max_searches: int
+
+
+def plan_arrive(v: Vault, force: bool = False) -> Job | None:
+    """The 'arrive' run for the region the user is in, or None when it's already
+    well known (unless `force`) or the budget is spent."""
     index = PlaceIndex(v.read_places())
     focus, where = _where(v, index)
     region = index.region_of(focus["id"]) if focus else None
     known = index.descendants(region["id"], SPOT_KINDS) if region else []
     if len(known) >= ARRIVE_THRESHOLD and not force:
-        return
+        return None
     if not llm.can_spend(v, RUN_ESTIMATE_USD):
-        return
+        return None
     activities = list((region or {}).get("activities") or [])
     profile = v.read_profile() or {}
     activities += (
@@ -375,17 +426,13 @@ async def arrive(context: ContextTypes.DEFAULT_TYPE, chat_id: int, force: bool =
         activities,
         [str(k.get("name")) for k in known],
     )
-    await context.bot.send_message(chat_id=chat_id, text=f"Researching what's around {where}...")
-    findings = await asyncio.to_thread(research.run, job, index, focus, max_searches=10)
+    return Job(where, job, index, focus, 10)
+
+
+def run_job(v: Vault, job: Job) -> research.Findings:
+    findings = research.run(job.job, job.index, job.focus, max_searches=job.max_searches)
     llm.flush(v)
-    await send_cards(
-        context,
-        chat_id,
-        findings,
-        [],
-        f"Around {where}: {len(findings.new_places)} places found.",
-        bulk=True,
-    )
+    return findings
 
 
 async def trip_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -395,24 +442,47 @@ async def trip_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     message = update.message
     assert message is not None
     v = vault()
+    job = plan_trip(v, datetime.now(tz()).date())
+    if isinstance(job, str):
+        await message.reply_text(job)
+        return
+    await message.reply_text(job.started)
+    headline, findings = await asyncio.to_thread(run_trip, v, job)
+    await send_cards(context, message.chat_id, findings, job.days, headline)
+
+
+@dataclass
+class TripJob:
+    place: str
+    started: str
+    days: list[date]
+    job: str
+
+
+def plan_trip(v: Vault, today: date) -> TripJob | str:
+    """The reconstruction of the most recent trip, or a message saying why not."""
     trips = [s for s in trail.stays(v.read_location()) if s.mode == "trip"]
     if not trips:
-        await message.reply_text("No trip in your location history (mode: trip) yet.")
-        return
+        return "No trip in your location history (mode: trip) yet."
     trip = trips[-1]
-    end = trip.end or datetime.now(tz()).date()
+    end = trip.end or today
     entries = v.read_journal_range(trip.start, end)
     days = [(d, e.summary) for d, e in sorted(entries.items())]
     if not llm.can_spend(v, RUN_ESTIMATE_USD):
-        await message.reply_text("Monthly research budget reached.")
-        return
-    await message.reply_text(f"Reconstructing {trip.place} ({trip.start} → {end})...")
-    index = PlaceIndex(v.read_places())
-    findings = await asyncio.to_thread(
-        research.run, research.trip_job(trip.place, days), index, None, max_searches=8
+        return "Monthly research budget reached."
+    return TripJob(
+        trip.place,
+        f"Reconstructing {trip.place} ({trip.start} → {end})...",
+        [d for d, _ in days],
+        research.trip_job(trip.place, days),
     )
-    trip_days = [d for d, _ in days]
-    linked = apply_matches(v, findings.matches, trip_days)
+
+
+def run_trip(v: Vault, job: TripJob) -> tuple[str, research.Findings]:
+    """Run it: link known stops on their days; returns (headline, findings)."""
+    index = PlaceIndex(v.read_places())
+    findings = research.run(job.job, index, None, max_searches=8)
+    linked = apply_matches(v, findings.matches, job.days)
     stops: dict[date, list[str]] = {}
     for m in findings.matches:
         with contextlib.suppress(ValueError, KeyError):
@@ -420,10 +490,10 @@ async def trip_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     for day, ids in stops.items():
         _add_trip_stops(v, day, ids)
     llm.flush(v)
-    headline = f"{trip.place}: proposed stops."
+    headline = f"{job.place}: proposed stops."
     if linked:
         headline += "\nAlready known: " + "; ".join(linked)
-    await send_cards(context, message.chat_id, findings, trip_days, headline)
+    return headline, findings
 
 
 async def backfill_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -467,14 +537,27 @@ def dossier_path(place_id: str) -> str:
     return f"research/{place_id}.md"
 
 
-async def write_dossier(v: Vault, place_id: str | None, place_name: str) -> tuple[str, str]:
-    """Research and save a dossier. Returns (vault path, markdown)."""
+def dossier_now(v: Vault, place_id: str | None, place_name: str) -> tuple[str, str]:
+    """Research and save a dossier (blocking). Returns (vault path, markdown)."""
     index = PlaceIndex(v.read_places())
-    text, _cost = await asyncio.to_thread(research.dossier, place_name, dossier_context(v, index))
+    text, _cost = research.dossier(place_name, dossier_context(v, index))
     path = dossier_path(place_id or research_slug(place_name))
     v.write_text(path, text + "\n", f"research: {place_name}")
     llm.flush(v)
     return path, text
+
+
+async def write_dossier(v: Vault, place_id: str | None, place_name: str) -> tuple[str, str]:
+    """Research and save a dossier off the event loop. Returns (vault path, markdown)."""
+    return await asyncio.to_thread(dossier_now, v, place_id, place_name)
+
+
+def place_target(v: Vault, query: str) -> tuple[str | None, str]:
+    """(place id or None, the name to research) for what the user typed."""
+    index = PlaceIndex(v.read_places())
+    matches = index.resolve(query)
+    place_id = matches[0] if matches else None
+    return place_id, (index.path_name(place_id) if place_id else query)
 
 
 def research_slug(name: str) -> str:
@@ -497,10 +580,7 @@ async def research_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -
             "Monthly research budget reached — the morning routine still runs."
         )
         return
-    index = PlaceIndex(v.read_places())
-    matches = index.resolve(query)
-    place_id = matches[0] if matches else None
-    name = index.path_name(place_id) if place_id else query
+    place_id, name = place_target(v, query)
     await message.reply_text(f"Researching {name} — this takes a minute or two...")
     try:
         path, text = await write_dossier(v, place_id, name)

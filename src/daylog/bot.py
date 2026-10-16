@@ -12,12 +12,10 @@ import os
 import tempfile
 import uuid
 from collections.abc import Callable, Coroutine
-from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 from datetime import time as dt_time
 from pathlib import Path
 from typing import Any
-from zoneinfo import ZoneInfo
 
 from dotenv import load_dotenv
 from telegram import (
@@ -38,32 +36,33 @@ from telegram.ext import (
 )
 
 from daylog import (
-    brief,
     calendar_server,
     chat_flow,
     daily,
     discipline_flow,
-    disciplines,
-    export,
-    extract,
     goals,
     itinerary,
+    journal_service,
     llm,
     plan_flow,
     rank_flow,
-    rankings,
     research_flow,
     ripple_flow,
+    services,
     site_flow,
-    trail,
     transcribe,
     wishlist_flow,
 )
 from daylog.dateparse import parse_date_phrase
-from daylog.goals import active_summary as _active_goals_summary
-from daylog.itinerary import active_summary as _active_itinerary_summary
+from daylog.journal_service import PendingCorrection, ResolvedOtherDayNote
+from daylog.journal_service import resolve_corrections as _resolve_corrections
+from daylog.journal_service import resolve_other_day_notes as _resolve_other_day_notes
 from daylog.places import PlaceIndex
-from daylog.sources import fly, marine, surf, wind
+from daylog.services import conditions_reports
+from daylog.services import fetch_marine_forecast as _fetch_marine_forecast
+from daylog.services import fetch_wind_forecast as _fetch_wind_forecast
+from daylog.services import format_status as _format_status
+from daylog.services import upcoming_items as _upcoming_items
 from daylog.tg import allowed_user_id as _allowed_user_id
 from daylog.tg import chunks as _chunks
 from daylog.tg import is_authorized as _is_authorized
@@ -73,148 +72,24 @@ from daylog.vault import CorrectionConflictError, VaultError
 
 logger = logging.getLogger(__name__)
 
+# Moved to journal_service / services (shared with the web app); the old
+# names stay importable from here.
+__all__ = [
+    "PendingCorrection",
+    "ResolvedOtherDayNote",
+    "_fetch_marine_forecast",
+    "_fetch_wind_forecast",
+    "_format_status",
+    "_resolve_corrections",
+    "_resolve_other_day_notes",
+    "_upcoming_items",
+    "conditions_reports",
+]
+
 _PENDING_DATE_KEY = "pending_entry_date"
 _PENDING_SLIP_KEY = "pending_goal_slips"
 _PENDING_ITIN_KEY = "pending_itinerary_changes"
 _PENDING_CORRECTION_KEY = "pending_corrections"
-
-
-def _goals_commit_message(
-    applied_progress: list[goals.AppliedProgress], applied_slips: list[goals.AppliedSlip]
-) -> str:
-    parts = [f"{p.goal_id} +{p.delta:g}" for p in applied_progress]
-    parts += [f"slip {s.goal_id}" for s in applied_slips]
-    return "goals: " + ", ".join(parts)
-
-
-def _goals_reply_note(
-    applied_progress: list[goals.AppliedProgress], applied_slips: list[goals.AppliedSlip]
-) -> str:
-    lines = [f"{p.title}: +{p.delta:g} (total {p.new_progress:g})" for p in applied_progress]
-    lines += [f"{s.title}: moved to {s.new_date}" for s in applied_slips]
-    return "\n".join(lines)
-
-
-def _itinerary_commit_message(applied: list[itinerary.AppliedChange]) -> str:
-    return "itinerary: " + ", ".join(a.place for a in applied)
-
-
-def _itinerary_reply_note(applied: list[itinerary.AppliedChange]) -> str:
-    return "\n".join(a.summary for a in applied)
-
-
-def _format_goal_line(g: Any) -> str:
-    bits = []
-    if g.get("metric"):
-        bits.append(f"{g.get('progress', 0):g} {g['metric']}")
-    if g.get("type") == "hard" and g.get("deadline"):
-        bits.append(f"deadline {g['deadline']}")
-    elif g.get("target_window"):
-        window = g["target_window"]
-        if window and window[-1]:
-            bits.append(f"target {window[-1]}")
-
-    status = g.get("status", "active")
-    status_tag = f" [{status}]" if status != "active" else ""
-    line = f"- {g.get('title', g['id'])} ({g.get('type', 'soft')}){status_tag}"
-    return f"{line}: {', '.join(bits)}" if bits else line
-
-
-def _format_itinerary_line(e: Any) -> str:
-    status = e.get("status", "candidate")
-    line = f"- {e.get('place', e['id'])} [{status}] ({e.get('type', 'soft')})"
-    entry_date = itinerary.current_date(e)
-    if entry_date:
-        label = "deadline" if e.get("type") == "hard" else "target"
-        line += f": {label} {entry_date}"
-    return line
-
-
-@dataclass
-class PendingCorrection:
-    entry_date: date
-    field: str
-    index: int
-    item: Any
-    description: str
-    reason: str | None
-
-
-def _describe_correction_item(field: str, item: Any) -> str:
-    if field == "activities":
-        hours = f", {item['hours']:g}h" if item.get("hours") is not None else ""
-        detail = f" — {item['detail']}" if item.get("detail") else ""
-        return f"{item.get('type', '?')}{hours}{detail}"
-    return str(item)
-
-
-def _resolve_corrections(
-    existing_frontmatter: dict[str, Any] | None,
-    corrections: list[dict[str, Any]],
-    entry_date: date,
-) -> list[PendingCorrection]:
-    """Validate extracted correction references against what's actually on
-    the entry, dropping anything stale or out of range rather than trusting
-    the model's index blindly.
-    """
-    resolved = []
-    for c in corrections:
-        field = c.get("field")
-        index = c.get("index")
-        if field not in ("activities", "skipped", "open_questions") or index is None:
-            continue
-        items = (existing_frontmatter or {}).get(field) or []
-        if not (0 <= index < len(items)):
-            continue
-        item = items[index]
-        resolved.append(
-            PendingCorrection(
-                entry_date=entry_date,
-                field=field,
-                index=index,
-                item=item,
-                description=_describe_correction_item(field, item),
-                reason=c.get("reason"),
-            )
-        )
-    return resolved
-
-
-@dataclass
-class ResolvedOtherDayNote:
-    date: date
-    facts: dict[str, Any]
-    summary: str
-
-
-def _resolve_other_day_notes(notes: list[dict[str, Any]]) -> list[ResolvedOtherDayNote]:
-    """Validate/parse raw other_day_notes extraction output, dropping anything malformed
-    (missing date/summary, or a date string that isn't real) rather than trusting it blindly.
-    """
-    resolved = []
-    for note in notes:
-        date_str = note.get("date")
-        summary = note.get("summary")
-        if not date_str or not summary:
-            continue
-        try:
-            note_date = date.fromisoformat(date_str)
-        except ValueError:
-            continue
-        facts = {key: note[key] for key in ("activities", "skipped", "mood") if note.get(key)}
-        resolved.append(ResolvedOtherDayNote(date=note_date, facts=facts, summary=summary))
-    return resolved
-
-
-def _format_status(goals_data: Any, itinerary_data: Any) -> str:
-    goal_lines = [_format_goal_line(g) for g in goals_data if g.get("status") != "dropped"]
-    itin_lines = [_format_itinerary_line(e) for e in itinerary_data if e.get("status") != "dropped"]
-    return (
-        "Goals:\n"
-        + ("\n".join(goal_lines) if goal_lines else "(none)")
-        + "\n\nItinerary:\n"
-        + ("\n".join(itin_lines) if itin_lines else "(none)")
-    )
 
 
 async def status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -224,38 +99,6 @@ async def status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     assert message is not None
     vault = _vault()
     await message.reply_text(_format_status(vault.read_goals(), vault.read_itinerary()))
-
-
-def _upcoming_items(goals_data: Any, itinerary_data: Any, today: date) -> list[str]:
-    """One line per active goal/itinerary item with a resolvable date, earliest first.
-
-    Deliberately doesn't hide past-due dates — an active item whose date
-    has already passed is exactly the "you forgot about this" signal worth
-    surfacing at the top, not filtering out.
-    """
-    dated: list[tuple[date, str]] = []
-    for g in goals_data:
-        if g.get("status") in ("done", "dropped"):
-            continue
-        d_str = goals.current_target_date(g)
-        if not d_str:
-            continue
-        d = date.fromisoformat(d_str)
-        kind = "deadline" if g.get("type") == "hard" else "target"
-        overdue = " (overdue)" if d < today else ""
-        dated.append((d, f"{d.isoformat()}: {g.get('title', g['id'])} — {kind}{overdue}"))
-    for e in itinerary_data:
-        if e.get("status") in ("done", "dropped"):
-            continue
-        d_str = itinerary.current_date(e)
-        if not d_str:
-            continue
-        d = date.fromisoformat(d_str)
-        kind = "deadline" if e.get("type") == "hard" else e.get("status", "candidate")
-        overdue = " (overdue)" if d < today else ""
-        dated.append((d, f"{d.isoformat()}: {e.get('place', e['id'])} — {kind}{overdue}"))
-    dated.sort(key=lambda item: item[0])
-    return [label for _, label in dated]
 
 
 async def upcoming(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -269,15 +112,6 @@ async def upcoming(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     await message.reply_text("\n".join(lines) if lines else "Nothing dated yet.")
 
 
-def _trail_range(args: list[str], today: date, location_data: Any) -> tuple[date, date]:
-    """/trail -> last 30 days; /trail 60 -> last 60; /trail all -> since the first stay."""
-    if args and args[0].lower() == "all":
-        starts = [s.start for s in trail.stays(location_data)]
-        return (min(starts) if starts else today - timedelta(days=30)), today
-    days = int(args[0]) if args and args[0].isdigit() else 30
-    return today - timedelta(days=days - 1), today
-
-
 async def trail_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not _is_authorized(update):
         return
@@ -285,42 +119,9 @@ async def trail_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     assert message is not None
     vault = _vault()
     today = datetime.now(_tz()).date()
-    location_data = vault.read_location()
-    start, end = _trail_range(list(context.args or []), today, location_data)
-    entries = vault.read_journal_range(start, end)
-    days = trail.build(
-        location_data,
-        {d: e.frontmatter for d, e in entries.items()},
-        {d: e.summary for d, e in entries.items()},
-        start,
-        end,
-    )
-    text = trail.format_trail(days, PlaceIndex(vault.read_places()))
+    text = services.trail_text(vault, list(context.args or []), today)
     for chunk in _chunks(text):
         await message.reply_text(chunk)
-
-
-def _format_place_card(
-    index: PlaceIndex, node: Any, visited: list[date], rank_line: str | None
-) -> str:
-    lines = [f"{node.get('name')} — {node.get('kind')}", index.path_name(node["id"])]
-    if node.get("description"):
-        lines += ["", str(node["description"]).strip()]
-    facts = node.get("facts") or {}
-    if facts:
-        lines += [""] + [f"{k}: {v}" for k, v in facts.items() if v]
-    if node.get("notes"):
-        lines += ["", str(node["notes"]).strip()]
-    if rank_line:
-        lines += ["", rank_line]
-    if visited:
-        lines += ["", "Visited: " + ", ".join(d.isoformat() for d in visited)]
-    for note in node.get("my_notes") or []:
-        lines.append(f"- {note.get('date')}: {note.get('text')}")
-    children = index.descendants(node["id"])
-    if children:
-        lines += ["", "Inside: " + ", ".join(str(c.get("name")) for c in children[:30])]
-    return "\n".join(lines)
 
 
 async def place_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -334,24 +135,12 @@ async def place_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         return
     vault = _vault()
     index = PlaceIndex(vault.read_places())
-    matches = index.resolve(query)
-    if not matches:
-        needle = query.lower()
-        matches = [i for i, n in index.by_id.items() if needle in str(n.get("name", "")).lower()]
+    matches = services.find_places(index, query)
     if not matches:
         await message.reply_text(f"No place matching '{query}' yet.")
         return
-    today = datetime.now(_tz()).date()
-    entries = vault.read_journal_range(date(2000, 1, 1), today)
-    visited = trail.visits({d: e.frontmatter for d, e in entries.items()}, index)
     node = index.by_id[matches[0]]
-    category = rankings.category_for(node.get("kind"))
-    rank_line = (
-        rankings.describe(vault.read_yaml(rank_flow.RANKINGS_FILE, {}), category, node["id"])
-        if category
-        else None
-    )
-    card = _format_place_card(index, node, visited.get(node["id"], []), rank_line)
+    card = services.place_card_text(vault, index, node, datetime.now(_tz()).date())
     if len(matches) > 1:
         others = ", ".join(index.path_name(m) for m in matches[1:5])
         card += f"\n\nAlso matching: {others}"
@@ -363,87 +152,13 @@ def _brief_hour() -> int:
     return int(os.environ.get("BRIEF_HOUR", "7"))
 
 
-def _relevant_spots(current: dict[str, Any] | None, places_data: Any) -> list[dict[str, Any]]:
-    """Current location plus every surf/wind spot with coordinates in its region.
-
-    Comparing multiple nearby spots (not just where the user happens to be
-    standing) is the point — swell or wind can be building somewhere better
-    a short trip away.
-    """
-    if not current:
-        return []
-    index = PlaceIndex(list(places_data or []))
-    here = index.current_place(current)
-    # A stay linked by place_id usually carries no coordinates of its own;
-    # the place node (or its nearest located ancestor) has them.
-    lat, lon = current.get("lat"), current.get("lon")
-    if (lat is None or lon is None) and here is not None:
-        located = index.with_coordinates([here])
-        if located:
-            lat, lon = located[0]["lat"], located[0]["lon"]
-    spots = []
-    if lat is not None and lon is not None:
-        spots.append({"name": current.get("place", "current location"), "lat": lat, "lon": lon})
-    for spot in index.forecast_spots(here):
-        spots.append(
-            {"name": spot.get("name", "nearby spot"), "lat": spot["lat"], "lon": spot["lon"]}
-        )
-    return spots
-
-
-def _fetch_conditions(
-    current: dict[str, Any] | None,
-    places_data: Any,
-    tz: ZoneInfo,
-    fetch_fn: Callable[[float, float, str], str | None],
-) -> str | None:
-    blocks = []
-    for spot in _relevant_spots(current, places_data):
-        forecast = fetch_fn(spot["lat"], spot["lon"], str(tz))
-        if forecast:
-            blocks.append(f"{spot['name']}:\n{forecast}")
-    return "\n\n".join(blocks) if blocks else None
-
-
-def _fetch_marine_forecast(
-    current: dict[str, Any] | None, places_data: Any, tz: ZoneInfo
-) -> str | None:
-    return _fetch_conditions(current, places_data, tz, marine.fetch_forecast)
-
-
-def _fetch_wind_forecast(
-    current: dict[str, Any] | None, places_data: Any, tz: ZoneInfo
-) -> str | None:
-    return _fetch_conditions(current, places_data, tz, wind.fetch_forecast)
-
-
-def conditions_reports(
-    vault: Any, current: dict[str, Any] | None, places_data: Any
-) -> tuple[str | None, str | None]:
-    """(rated surf report, flyability report) for the current region — free, no LLM."""
-    index = PlaceIndex(list(places_data or []))
-    here = index.current_place(current)
-    profile = vault.read_profile() or {}
-    comfort = profile.get("surf_comfort_face_m") if isinstance(profile, dict) else None
-    rules = profile.get("fly_rules") if isinstance(profile, dict) else None
-    tz = str(_tz())
-    surf_spots = index.with_coordinates(index.region_nodes(here, ("surf_spot",)))
-    fly_sites = index.with_coordinates(index.region_nodes(here, ("fly_site",)))
-    rated_surf = surf.report(surf_spots, tz, comfort_face=comfort)
-    rated_fly = fly.report(fly_sites, tz, rules)
-    return rated_surf, rated_fly
-
-
 async def surf_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """/surf — rated conditions for every profiled spot around you (no API cost)."""
     if not _is_authorized(update):
         return
     message = update.message
     assert message is not None
-    vault = _vault()
-    current = brief.current_location(vault.read_location())
-    rated, _ = conditions_reports(vault, current, vault.read_places())
-    for chunk in _chunks(rated or "No surf spots with a profile around here yet."):
+    for chunk in _chunks(services.surf_text(_vault())):
         await message.reply_text(chunk)
 
 
@@ -453,10 +168,7 @@ async def fly_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         return
     message = update.message
     assert message is not None
-    vault = _vault()
-    current = brief.current_location(vault.read_location())
-    _, rated = conditions_reports(vault, current, vault.read_places())
-    for chunk in _chunks(rated or "No launch sites with a profile around here yet."):
+    for chunk in _chunks(services.fly_text(_vault())):
         await message.reply_text(chunk)
 
 
@@ -466,50 +178,13 @@ async def _send_brief(context: ContextTypes.DEFAULT_TYPE, chat_id: int) -> None:
     try:
         vault = _vault()
         today = datetime.now(_tz()).date()
-        location_data = vault.read_location()
-        places_data = vault.read_places()
-
-        current = brief.current_location(location_data)
-        rated_surf, rated_fly = conditions_reports(vault, current, places_data)
-        # Spots with a surf profile get per-spot ratings; the plain daily
-        # numbers are the fallback for regions nobody has profiled yet.
-        marine_forecast = rated_surf or _fetch_marine_forecast(current, places_data, _tz())
-        wind_forecast = _fetch_wind_forecast(current, places_data, _tz())
-
-        text = brief.generate_brief(
-            today=today,
-            goals_data=vault.read_goals(),
-            itinerary_data=vault.read_itinerary(),
-            places_data=places_data,
-            location_data=location_data,
-            profile_data=vault.read_profile(),
-            recent_journal=brief.recent_journal_summaries(vault, today),
-            marine_forecast=marine_forecast,
-            wind_forecast=wind_forecast,
-            fly_forecast=rated_fly,
-            dossier_digests={
-                name: wishlist_flow.dossier_digest(text)
-                for name, text in wishlist_flow.dossiers_for(vault, vault.read_itinerary()).items()
-            },
-            morning_research=vault.read_text(f"research/daily/{today.isoformat()}.md"),
-            current_plan=plan_flow.latest_plan(vault),
-            principles=vault.read_principles(),
-            disciplines=disciplines.summary(vault, today),
-        )
+        text = await asyncio.to_thread(services.build_brief, vault, today)
     except Exception:
         logger.exception("failed to generate brief")
         await bot.send_message(
             chat_id=chat_id, text="Something went wrong building your brief — check bot logs."
         )
         return
-
-    try:
-        site = await asyncio.to_thread(site_flow.brief_section, vault, today)
-    except Exception:
-        logger.exception("site section failed")
-        site = None
-    if site:
-        text += "\n\n" + site
 
     for chunk in _chunks(text):
         await bot.send_message(chat_id=chat_id, text=chunk)
@@ -612,8 +287,6 @@ async def _ask_hard_slip_confirmation(
     confirm_id = uuid.uuid4().hex
     context.user_data.setdefault(_PENDING_SLIP_KEY, {})[confirm_id] = slip
 
-    old = slip.old_date or "unset"
-    reason = f" ({slip.reason})" if slip.reason else ""
     keyboard = InlineKeyboardMarkup(
         [
             [
@@ -623,7 +296,7 @@ async def _ask_hard_slip_confirmation(
         ]
     )
     await message.reply_text(
-        f"'{slip.title}' is a hard deadline — move it from {old} to {slip.new_date}?{reason}",
+        journal_service.slip_question(slip),
         reply_markup=keyboard,
     )
 
@@ -648,11 +321,8 @@ async def handle_goal_slip_callback(update: Update, context: ContextTypes.DEFAUL
         await query.edit_message_text(f"Cancelled — '{slip.title}' deadline unchanged.")
         return
 
-    vault = _vault()
-    goals_data = vault.read_goals()
-    goals.apply_confirmed_slip(goals_data, slip, on=datetime.now(_tz()).date())
     try:
-        vault.write_goals(goals_data, f"goals: slip {slip.goal_id}")
+        journal_service.confirm_slip(_vault(), slip, datetime.now(_tz()).date())
     except VaultError:
         logger.exception("goals commit failed confirming slip for %s", slip.goal_id)
         await query.edit_message_text(
@@ -670,9 +340,6 @@ async def _ask_hard_itinerary_confirmation(
     confirm_id = uuid.uuid4().hex
     context.user_data.setdefault(_PENDING_ITIN_KEY, {})[confirm_id] = change
 
-    old = change.old_date or "unset"
-    new_note = " (new entry)" if change.is_new else ""
-    reason = f" ({change.reason})" if change.reason else ""
     keyboard = InlineKeyboardMarkup(
         [
             [
@@ -682,8 +349,7 @@ async def _ask_hard_itinerary_confirmation(
         ]
     )
     await message.reply_text(
-        f"'{change.place}'{new_note} is a hard date — set it from {old} to "
-        f"{change.new_date}?{reason}",
+        journal_service.change_question(change),
         reply_markup=keyboard,
     )
 
@@ -708,11 +374,8 @@ async def handle_itinerary_callback(update: Update, context: ContextTypes.DEFAUL
         await query.edit_message_text(f"Cancelled — '{change.place}' left unchanged.")
         return
 
-    vault = _vault()
-    itinerary_data = vault.read_itinerary()
-    itinerary.apply_confirmed_change(itinerary_data, change, on=datetime.now(_tz()).date())
     try:
-        vault.write_itinerary(itinerary_data, f"itinerary: {change.place}")
+        journal_service.confirm_change(_vault(), change, datetime.now(_tz()).date())
     except VaultError:
         logger.exception("itinerary commit failed confirming change for %s", change.id)
         await query.edit_message_text(
@@ -730,7 +393,6 @@ async def _ask_correction_confirmation(
     confirm_id = uuid.uuid4().hex
     context.user_data.setdefault(_PENDING_CORRECTION_KEY, {})[confirm_id] = correction
 
-    reason = f" ({correction.reason})" if correction.reason else ""
     keyboard = InlineKeyboardMarkup(
         [
             [
@@ -740,8 +402,7 @@ async def _ask_correction_confirmation(
         ]
     )
     await message.reply_text(
-        f"Remove from {correction.entry_date.isoformat()}'s {correction.field}: "
-        f"'{correction.description}'?{reason}",
+        journal_service.correction_question(correction),
         reply_markup=keyboard,
     )
 
@@ -766,15 +427,8 @@ async def handle_correction_callback(update: Update, context: ContextTypes.DEFAU
         await query.edit_message_text(f"Cancelled — '{correction.description}' left unchanged.")
         return
 
-    vault = _vault()
     try:
-        vault.remove_journal_item(
-            correction.entry_date,
-            correction.field,
-            correction.index,
-            correction.item,
-            f"journal: {correction.entry_date.isoformat()} (correction)",
-        )
+        journal_service.confirm_correction(_vault(), correction)
     except CorrectionConflictError:
         await query.edit_message_text(
             f"'{correction.description}' no longer matches today's entry — it may have "
@@ -795,11 +449,11 @@ async def handle_correction_callback(update: Update, context: ContextTypes.DEFAU
 
 
 async def _log_entry(transcript: str, message: Message, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Shared pipeline: transcript text -> extract -> apply goals -> vault write -> reply.
+    """Shared pipeline: transcript text -> journal_service.log -> replies and buttons.
 
     Used by both the voice and text handlers once each has produced a
     transcript string — voice via faster-whisper, text directly from the
-    Telegram message.
+    Telegram message. The web app calls the same journal_service.log.
     """
     try:
         await message.reply_text("Extracting...")
@@ -809,183 +463,46 @@ async def _log_entry(transcript: str, message: Message, context: ContextTypes.DE
         # Before the day cutoff (4am by default) a note still belongs to the
         # day that's ending — see daily.logical_day.
         day = pending_date or daily.logical_day(now)
-        entry_time = datetime.combine(day, now.time())
 
         vault = _vault()
-        goals_data = vault.read_goals()
-        itinerary_data = vault.read_itinerary()
-        existing_entry = vault.read_journal_entry(entry_time.date())
-        location_data = vault.read_location()
-        current = brief.current_location(location_data)
-        places_list = vault.read_places()
-        graph = disciplines.Graph(vault.read_disciplines())
-        facts = extract.extract(
-            transcript,
-            _active_goals_summary(goals_data),
-            _active_itinerary_summary(itinerary_data),
-            entry_time.date(),
-            existing_frontmatter=existing_entry.frontmatter if existing_entry else None,
-            current_location=current.get("place") if current else None,
-            places=places_list,
-            current_location_entry=current,
-            disciplines=disciplines.outline(graph) if graph else None,
-            # A backdated note was sent later than the day it's about.
-            recorded_at=None if pending_date else now.time(),
-        )
-        summary = facts.pop("summary", "")
-        place_index = PlaceIndex(places_list)
-        here = place_index.current_place(current)
-        guesses, new_disciplines = discipline_flow.prepare(
-            vault,
-            graph,
-            facts,
-            entry_time.date(),
-            place_index,
-            here["id"] if here else None,
-        )
+        result = journal_service.log(vault, transcript, day, now, backdated=bool(pending_date))
+        if result.location_changed:
+            context.application.create_task(research_flow.arrive(context, message.chat_id))
 
-        # goal_progress stays in facts — it's part of the journal frontmatter
-        # schema too (see docs/DESIGN.md) — but goal_slips, itinerary_changes,
-        # corrections, and location_change are bookkeeping for other
-        # files/edits, not facts about the day, so none of them belong in
-        # the journal file.
-        goal_progress = facts.get("goal_progress", [])
-        goal_slips = facts.pop("goal_slips", [])
-        itinerary_changes = facts.pop("itinerary_changes", [])
-        location_change = facts.pop("location_change", None)
-        corrections = _resolve_corrections(
-            existing_entry.frontmatter if existing_entry else None,
-            facts.pop("corrections", []),
-            entry_time.date(),
-        )
-        other_day_notes = facts.pop("other_day_notes", [])
-
-        location_note = ""
-        if location_change and location_change.get("place"):
-            try:
-                vault.write_location(
-                    location_change["place"],
-                    location_change.get("lat"),
-                    location_change.get("lon"),
-                    entry_time.date(),
-                    f"location: {location_change['place']}",
-                    place_id=location_change.get("place_id"),
-                    mode=location_change.get("mode"),
-                )
-                location_note = f"\n\n(Updated current location to {location_change['place']})"
-                context.application.create_task(research_flow.arrive(context, message.chat_id))
-            except VaultError:
-                logger.exception("location commit failed")
-                location_note = "\n\n(location update didn't save — check bot logs)"
-
-        other_day_note = ""
-        resolved_notes = _resolve_other_day_notes(other_day_notes)
-        if resolved_notes:
-            applied_other_days = []
-            for resolved in resolved_notes:
-                other_time = datetime.combine(resolved.date, entry_time.time())
-                # Not the raw transcript — the whole recording is mainly
-                # about entry_time.date(), and lives there in full. This
-                # is a clearly-labeled pointer, not a second verbatim copy.
-                stub = (
-                    f"(Mentioned in the {entry_time.date().isoformat()} entry) {resolved.summary}"
-                )
-                try:
-                    vault.write_journal_entry(other_time, resolved.facts, stub, resolved.summary)
-                    applied_other_days.append(
-                        f"Also logged under {resolved.date.isoformat()}: {resolved.summary}"
-                    )
-                except VaultError:
-                    logger.exception("other-day note commit failed for %s", resolved.date)
-                    applied_other_days.append(
-                        f"(couldn't save the {resolved.date.isoformat()} note — check bot logs)"
-                    )
-            if applied_other_days:
-                other_day_note = "\n\n" + "\n".join(applied_other_days)
-
-        goals_note = ""
-        if goal_progress or goal_slips:
-            applied_progress = goals.apply_progress(goals_data, goal_progress)
-            applied_slips, pending_slips = goals.apply_slips(
-                goals_data, goal_slips, on=entry_time.date()
-            )
-
-            if applied_progress or applied_slips:
-                try:
-                    vault.write_goals(
-                        goals_data, _goals_commit_message(applied_progress, applied_slips)
-                    )
-                    goals_note = "\n\n" + _goals_reply_note(applied_progress, applied_slips)
-                except VaultError:
-                    logger.exception("goals commit failed")
-                    goals_note = "\n\n(goal update didn't save — check bot logs)"
-
-            for slip in pending_slips:
-                await _ask_hard_slip_confirmation(message, context, slip)
-
-        itinerary_note = ""
-        if itinerary_changes:
-            applied_changes, pending_changes = itinerary.apply_itinerary_changes(
-                itinerary_data, itinerary_changes, on=entry_time.date()
-            )
-
-            if applied_changes:
-                try:
-                    vault.write_itinerary(
-                        itinerary_data, _itinerary_commit_message(applied_changes)
-                    )
-                    itinerary_note = "\n\n" + _itinerary_reply_note(applied_changes)
-                except VaultError:
-                    logger.exception("itinerary commit failed")
-                    itinerary_note = "\n\n(itinerary update didn't save — check bot logs)"
-
-            for change in pending_changes:
-                await _ask_hard_itinerary_confirmation(message, context, change)
-
-        for correction in corrections:
+        for slip in result.slips:
+            await _ask_hard_slip_confirmation(message, context, slip)
+        for change in result.changes:
+            await _ask_hard_itinerary_confirmation(message, context, change)
+        for correction in result.corrections:
             await _ask_correction_confirmation(message, context, correction)
 
-        try:
-            vault.write_journal_entry(entry_time, facts, transcript, summary)
-        except VaultError:
-            # write_journal_entry writes the file to disk before it commits,
-            # so a VaultError here means the entry is sitting on disk,
-            # untracked — not lost, just not committed. Say so precisely,
+        if not result.saved:
+            # The entry is on disk, just not committed. Say so precisely,
             # since "nothing was saved" would be wrong and send the user
             # looking for a bug that isn't there.
-            logger.exception("vault commit failed for %s", entry_time.date())
             await message.reply_text(
-                f"Transcribed {entry_time.date().isoformat()} and wrote it to the vault, but "
+                f"Transcribed {result.date.isoformat()} and wrote it to the vault, but "
                 "the git commit failed — it's on disk, just not committed yet. Check the "
                 "bot's logs (likely a git config issue) and it'll get picked up next time "
                 "you log."
             )
             return
 
-        food_note = ""
-        if facts.get("meals"):
-            logged = vault.read_journal_entry(entry_time.date())
-            food_line = export.day_summary(logged.frontmatter) if logged else None
-            if food_line:
-                food_note = f"\n\n{food_line} so far that day"
-
-        guess_note = discipline_flow.guess_note(graph, guesses)
+        notes = "".join(f"\n\n{block}" for block in result.blocks)
         await message.reply_text(
-            f"Logged {entry_time.date().isoformat()}:\n\n{summary}"
-            f"{goals_note}{itinerary_note}{location_note}{other_day_note}{food_note}"
-            f"{chr(10) * 2 + guess_note if guess_note else ''}",
+            f"Logged {result.date.isoformat()}:\n\n{result.summary}{notes}",
             reply_markup=chat_flow.MENU,
         )
         await discipline_flow.after_entry(
-            message, context, graph, entry_time.date(), guesses, new_disciplines
+            message, context, result.graph, result.date, result.guesses, result.new_disciplines
         )
         try:
-            await rank_flow.prompt_after_entry(message, context, facts)
+            await rank_flow.prompt_after_entry(message, context, result.facts)
         except Exception:
             logger.exception("ranking prompt failed")
-        if _has_place_mentions(facts):
+        if result.place_mentions:
             context.application.create_task(
-                research_flow.resolve_days(context, message.chat_id, [entry_time.date()])
+                research_flow.resolve_days(context, message.chat_id, [result.date])
             )
     except Exception:
         logger.exception("failed to process entry")
@@ -995,14 +512,6 @@ async def _log_entry(transcript: str, message: Message, context: ContextTypes.DE
         )
         for chunk in _chunks(transcript):
             await message.reply_text(chunk)
-
-
-def _has_place_mentions(facts: dict[str, Any]) -> bool:
-    return any(
-        isinstance(item, dict) and item.get("place_mention") and not item.get("place")
-        for field_name in ("activities", "meals")
-        for item in facts.get(field_name) or []
-    )
 
 
 async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:

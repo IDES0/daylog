@@ -24,22 +24,23 @@ The ledger is the foundation; the assistant is only as good as its grounding.
 
 - **No database.** The vault is plain markdown and YAML in a private git
   repo. `vault.py` is the only module that touches the filesystem or git.
-- **Telegram is the interface for changing things.** The web surface is
-  read-only apart from signing in: the calendar feed (secret path), the
-  status site (one address on its own domain: a guest view, and a private
-  view once one password line is answered), and one inlet for
-  the phone's daily health numbers (secret path). The status site installs
-  as a home-screen app. Anything that writes from the web needs its own
-  decision below.
+- **Telegram and the web app are equal clients.** The web surface: the
+  calendar feed (secret path), the status site (one address on its own
+  domain: a guest view, and the web app once one password line is
+  answered), and one inlet for the phone's daily health numbers (secret
+  path). The web app writes only behind the session and a CSRF header,
+  through the same service functions and confirm cards as Telegram. The
+  status site installs as a home-screen app.
 - **The bot never contacts anyone on its own.** It may draft a message, and
   send it only after the user taps Confirm on the exact text and recipient.
   (Sending isn't built; today it only drafts.) The research routines stay
   read-only for email.
 - **Every handler checks the Telegram user id first.** On the web, the
-  private view needs the session cookie the password line sets; nothing on
-  the web can change the vault except the health inlet.
+  app and every `/api/*` call need the session cookie the password line
+  sets, and every write also the `X-Daylog: 1` header with a same-host
+  Origin; the health inlet has its own secret.
 - **Hard dates never move silently.** A hard goal or itinerary date changes
-  only after a Confirm in Telegram. Soft dates move freely and record every
+  only after a Confirm (a Telegram button or a web card). Soft dates move freely and record every
   move in `slip_history`; a goal that has slipped four times is the signal.
 - **Inferred facts are confirmed before they're written.** Research and
   chat propose; a confirm card applies. Notes on known places are written
@@ -144,6 +145,7 @@ The ledger is the foundation; the assistant is only as good as its grounding.
 | 2026-10-15 | Sports become a discipline graph (`disciplines.yaml`), replacing the fixed sport vocabulary: a DAG under Water, Air, Earth (Mountain → Snow) and Body, with two kinds of link kept apart — "kind of" (sessions roll up) and "requires" (unlocks, nothing rolls up), so a speedwing session is never paragliding time. The user sets only `active` or `want`; not started, ready and locked are derived. Goals take a `discipline`; progress stays as extracted, not recomputed. A vague sport is narrowed in code, not by the model: the kind logged most at that spot, then in that region, then by place (Austin → wakefoil), then a default (tow foil), written with `guessed` and a one-tap fix — an exception to confirming inferred facts, like location changes, because it's low stakes and corrected faster than confirmed. A sport the graph lacks joins only after an Add tap. Cliff jumping is Air only and deep water solo is climbing only: the water just catches you |
 | 2026-10-15 | The private view gets a week calendar of the journal: activities as blocks at rough times, a tap opens the day's summary (not the transcript). Extraction now estimates a rough start (`at`) per activity from what's said and when the note was recorded; untimed ones follow the one before. Direction, not built: measured times from a smartwatch or GPS (workouts with real start/end, e.g. posted through the health inlet) would replace estimates where they exist |
 | 2026-10-15 | The private view draws the whole discipline graph: a radial tree (sports on the outer ring, groupings inside, dashed curves to second parents), sized by all-time sessions, state shown by fill and stroke, a tap for each node's numbers and a list view beside it. Private only for now, since it carries goals and session counts; the guest view could show it later. Read-only, like the rest |
+| 2026-10-16 | The web app may now write, behind the session and a CSRF header (`X-Daylog: 1`, same-host Origin, no CORS), through the same service functions and confirm cards as Telegram: the journaling pipeline moved out of `bot.py` into `journal_service.py`, read helpers into `services.py`, and the other flows expose the pure functions both clients call. Telegram stays an equal client. Web confirm cards live in server memory for 24 h; the contract is `docs/web-api.md` |
 
 ## Not built
 

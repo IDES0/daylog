@@ -10,7 +10,8 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from datetime import datetime, timedelta
+import threading
+from datetime import date, datetime, timedelta
 from typing import Any
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
@@ -132,7 +133,7 @@ async def make_plan(context: ContextTypes.DEFAULT_TYPE, chat_id: int) -> None:
         chat_id=chat_id, text="Planning the next few weeks — a minute or two..."
     )
     try:
-        plan = await asyncio.to_thread(planner.run, build_context(v, now))
+        plan, text, path = await asyncio.to_thread(generate, v, now)
     except Exception:
         logger.exception("planner failed")
         await context.bot.send_message(chat_id=chat_id, text="Planning failed — check bot logs.")
@@ -140,13 +141,6 @@ async def make_plan(context: ContextTypes.DEFAULT_TYPE, chat_id: int) -> None:
     if not plan.options:
         await context.bot.send_message(chat_id=chat_id, text=plan.situation)
         return
-    text = planner.render(plan, now.date())
-    path = f"plans/{now.date().isoformat()}.md"
-    try:
-        v.write_text(path, text, f"plan: {now.date().isoformat()}")
-    except VaultError:
-        logger.exception("saving plan failed")
-    llm.flush(v)
     plan_key = now.strftime("%Y%m%d%H%M")
     context.bot_data.setdefault(_PLANS_KEY, {})[plan_key] = {"plan": plan, "path": path}
     chat_flow.remember(context, "The bot sent a travel plan", text)
@@ -187,18 +181,8 @@ async def handle_plan_callback(update: Update, context: ContextTypes.DEFAULT_TYP
         )
         return
     plan: planner.Plan = stored["plan"]
-    option = plan.options[int(idx)]
-    v = vault()
-    data = v.read_itinerary()
     try:
-        applied = planner.apply_option(data, option, datetime.now(tz()).date())
-        v.write_itinerary(data, f"itinerary: plan {option.get('label')}")
-        existing = v.read_text(stored["path"]) or ""
-        v.write_text(
-            stored["path"],
-            existing + f"\n**Chosen: {chr(65 + int(idx))}. {option.get('label')}**\n",
-            f"plan: chose {option.get('label')}",
-        )
+        label, applied = choose(vault(), plan, stored["path"], int(idx), datetime.now(tz()).date())
     except VaultError:
         logger.exception("applying plan failed")
         await context.bot.send_message(
@@ -209,8 +193,59 @@ async def handle_plan_callback(update: Update, context: ContextTypes.DEFAULT_TYP
     await query.edit_message_reply_markup(reply_markup=None)
     await context.bot.send_message(
         chat_id=allowed_user_id(),
-        text=f"Going with {option.get('label')}. Planned:\n" + "\n".join(f"- {a}" for a in applied),
+        text=f"Going with {label}. Planned:\n" + "\n".join(f"- {a}" for a in applied),
     )
+
+
+# The newest plan made in this process, by its file: the web app reads its
+# options back (the markdown alone can't be turned back into options).
+_recent_lock = threading.Lock()
+_recent: dict[str, planner.Plan] = {}
+
+
+def generate(v: Vault, now: datetime) -> tuple[planner.Plan, str, str]:
+    """Run the planner and save the plan. Returns (plan, markdown, vault path);
+    a plan without options is not saved (its situation says why)."""
+    plan = planner.run(build_context(v, now))
+    text = planner.render(plan, now.date())
+    path = f"plans/{now.date().isoformat()}.md"
+    if not plan.options:
+        llm.flush(v)
+        return plan, text, path
+    try:
+        v.write_text(path, text, f"plan: {now.date().isoformat()}")
+    except VaultError:
+        logger.exception("saving plan failed")
+    llm.flush(v)
+    with _recent_lock:
+        _recent.clear()
+        _recent[path] = plan
+    return plan, text, path
+
+
+def recent_plan(path: str) -> planner.Plan | None:
+    with _recent_lock:
+        return _recent.get(path)
+
+
+def choose(
+    v: Vault, plan: planner.Plan, path: str, index: int, today: date
+) -> tuple[str, list[str]]:
+    """Apply option `index`: its legs become planned itinerary windows, and the
+    plan file records the choice. Returns (label, legs applied); raises VaultError."""
+    option = plan.options[index]
+    data = v.read_itinerary()
+    applied = planner.apply_option(data, option, today)
+    v.write_itinerary(data, f"itinerary: plan {option.get('label')}")
+    existing = v.read_text(path) or ""
+    v.write_text(
+        path,
+        existing + f"\n**Chosen: {chr(65 + index)}. {option.get('label')}**\n",
+        f"plan: chose {option.get('label')}",
+    )
+    with _recent_lock:
+        _recent.pop(path, None)
+    return str(option.get("label")), applied
 
 
 def latest_plan(v: Vault) -> str | None:

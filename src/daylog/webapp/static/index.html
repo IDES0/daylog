@@ -1,0 +1,106 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="robots" content="noindex">
+<meta name="referrer" content="no-referrer">
+<meta name="theme-color" content="#f6f5f1" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#0e1013" media="(prefers-color-scheme: dark)">
+<meta name="color-scheme" content="light dark">
+<link rel="manifest" href="/manifest.webmanifest">
+<link rel="icon" href="/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="/icon-180.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="daylog">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&family=Newsreader:opsz,wght@6..72,400;6..72,500&display=swap">
+<link rel="stylesheet" href="/app.css">
+<title>daylog</title>
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+
+<div class="app" id="app">
+  <nav class="tabs" aria-label="Sections">
+    <div class="brand" aria-hidden="true"><span class="brand-mark"></span>daylog</div>
+    <a class="tab" href="#/home" data-tab="home">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3.5 10.5 12 3.5l8.5 7V20a1 1 0 0 1-1 1H15v-6H9v6H4.5a1 1 0 0 1-1-1z"/></svg>
+      <span>Home</span><b class="badge" data-badge="cards" hidden></b>
+    </a>
+    <a class="tab" href="#/log" data-tab="log">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="3" width="6" height="11.5" rx="3"/><path d="M5.5 11.5a6.5 6.5 0 0 0 13 0M12 18v3"/></svg>
+      <span>Log</span>
+    </a>
+    <a class="tab" href="#/chat" data-tab="chat">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4.5 5h15a1 1 0 0 1 1 1v9.5a1 1 0 0 1-1 1H10l-5.5 4v-4h0a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1z"/></svg>
+      <span>Chat</span>
+    </a>
+    <a class="tab" href="#/trips" data-tab="trips">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 21s-6.5-5.8-6.5-11a6.5 6.5 0 0 1 13 0c0 5.2-6.5 11-6.5 11z"/><circle cx="12" cy="10" r="2.4"/></svg>
+      <span>Trips</span>
+    </a>
+    <a class="tab" href="#/you" data-tab="you">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="8" r="3.8"/><path d="M4.5 20.5c1.4-3.7 4.2-5.6 7.5-5.6s6.1 1.9 7.5 5.6"/></svg>
+      <span>You</span>
+    </a>
+    <form class="signout" method="post" action="/logout"><button type="submit" class="link">Sign out</button></form>
+  </nav>
+
+  <main id="main" tabindex="-1">
+    <section class="view" id="view-home" data-view="home" aria-labelledby="t-home" hidden>
+      <header class="bar"><h1 id="t-home" class="bar-title">Home</h1><div class="bar-actions"><button class="icon-btn" data-action="refresh-home" aria-label="Refresh"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 12a8 8 0 1 1-2.3-5.6M20 4v5h-5"/></svg></button></div></header>
+      <div class="content" id="home"></div>
+    </section>
+
+    <section class="view" id="view-log" data-view="log" aria-labelledby="t-log" hidden>
+      <header class="bar"><h1 id="t-log" class="bar-title">Log</h1></header>
+      <div class="content" id="log"></div>
+    </section>
+
+    <section class="view view-chat" id="view-chat" data-view="chat" aria-labelledby="t-chat" hidden>
+      <header class="bar"><h1 id="t-chat" class="bar-title">Assistant</h1><div class="bar-actions"><button class="btn ghost" data-action="chat-reset">New chat</button></div></header>
+      <div class="content chat" id="chat"></div>
+    </section>
+
+    <section class="view" id="view-trips" data-view="trips" aria-labelledby="t-trips" hidden>
+      <header class="bar"><h1 id="t-trips" class="bar-title">Trips</h1></header>
+      <div class="content" id="trips"></div>
+    </section>
+
+    <section class="view" id="view-you" data-view="you" aria-labelledby="t-you" hidden>
+      <header class="bar"><h1 id="t-you" class="bar-title">You</h1></header>
+      <div class="content" id="you"></div>
+    </section>
+  </main>
+</div>
+
+<dialog class="sheet" id="sheet" aria-labelledby="sheet-title">
+  <div class="sheet-head">
+    <h2 id="sheet-title"></h2>
+    <button class="icon-btn" data-action="sheet-close" aria-label="Close"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg></button>
+  </div>
+  <div class="sheet-body" id="sheet-body" tabindex="-1"></div>
+</dialog>
+
+<div class="signin" id="signin" hidden>
+  <form method="post" action="/login" class="signin-box">
+    <span class="brand-mark big" aria-hidden="true"></span>
+    <h1>daylog</h1>
+    <p class="muted">You're signed out. Enter the password to open the app.</p>
+    <label class="sr-only" for="pw">Password</label>
+    <input id="pw" class="input" type="password" name="password" placeholder="Password" autocomplete="current-password" enterkeyhint="go" required>
+    <button class="btn primary block" type="submit">Sign in</button>
+  </form>
+</div>
+
+<div class="sr-only" aria-live="polite" id="announce"></div>
+
+<script defer src="https://cdn.jsdelivr.net/npm/d3@7.9.0/dist/d3.min.js"></script>
+<script defer src="https://cdn.jsdelivr.net/npm/topojson-client@3.1.0/dist/topojson-client.min.js"></script>
+<script type="module" src="/app.js"></script>
+</body>
+</html>

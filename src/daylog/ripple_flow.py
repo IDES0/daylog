@@ -61,7 +61,7 @@ def build_context(v: Vault, now: datetime, decision: str) -> str:
     )
 
 
-def _ids(v: Vault) -> tuple[set[str], set[str]]:
+def ids(v: Vault) -> tuple[set[str], set[str]]:
     return (
         {str(e["id"]) for e in v.read_itinerary() or []},
         {str(g["id"]) for g in v.read_goals() or []},
@@ -71,7 +71,7 @@ def _ids(v: Vault) -> tuple[set[str], set[str]]:
 def analyze(v: Vault, now: datetime, decision: str) -> str:
     """/ripple: run the analysis, save it and a proposal file. Returns the proposal path."""
     result = ripple.run(build_context(v, now, decision))
-    result.changes = ripple.valid_changes(result.changes, *_ids(v))
+    result.changes = ripple.valid_changes(result.changes, *ids(v))
     stem = f"{now.date().isoformat()}-{ripple.slug(result.decision)}"
     analysis = f"research/decisions/{stem}.md"
     v.write_text(analysis, ripple.render(result, now.date()), f"decisions: {result.decision}")
@@ -90,7 +90,7 @@ def pending(v: Vault) -> list[str]:
 
 
 def _keyboard(token: str, n: int, has_plan: bool) -> InlineKeyboardMarkup:
-    label = f"Apply all {n}" + (" + new plan" if has_plan else "") if n else "Use the new plan"
+    label = apply_label(n, has_plan)
     return InlineKeyboardMarkup(
         [
             [InlineKeyboardButton(label, callback_data=f"ripple:all:{token}")],
@@ -102,22 +102,60 @@ def _keyboard(token: str, n: int, has_plan: bool) -> InlineKeyboardMarkup:
     )
 
 
-async def send_card(context: ContextTypes.DEFAULT_TYPE, chat_id: int, v: Vault, path: str) -> None:
+def open_card(v: Vault, path: str) -> tuple[str, list[Any], bool] | None:
+    """(card text, changes, has a draft plan) for a pending proposal, or None when
+    it's answered or has nothing left to change (then it's marked reviewed)."""
     data = v.read_yaml(path, None)
     if not proposals.is_pending(data):
-        return
-    changes = proposals.changes_for(data, *_ids(v))
+        return None
+    changes = proposals.changes_for(data, *ids(v))
     if not changes and not data.get("plan_draft"):
-        _mark(v, path, "reviewed", ["nothing left to change"])
+        mark(v, path, "reviewed", ["nothing left to change"])
+        return None
+    return proposals.card_text(data, changes), changes, bool(data.get("plan_draft"))
+
+
+def apply_label(n: int, has_plan: bool) -> str:
+    return f"Apply all {n}" + (" + new plan" if has_plan else "") if n else "Use the new plan"
+
+
+def review_each(v: Vault, path: str) -> tuple[list[Any], bool]:
+    """'One by one': the changes to confirm separately and whether a draft plan
+    waits; the proposal is marked reviewed."""
+    data = v.read_yaml(path, {}) or {}
+    changes = proposals.changes_for(data, *ids(v))
+    mark(v, path, "reviewed", [])
+    return changes, bool(data.get("plan_draft"))
+
+
+def adopt(v: Vault, path: str, today: str) -> str | None:
+    """'Use it': make the proposal's draft plan the current one."""
+    return adopt_plan(v, v.read_yaml(path, {}) or {}, today)
+
+
+def trace(v: Vault, now: datetime, decision: str) -> tuple[str, str]:
+    """/ripple's work: analyze, save, and return (proposal path, analysis text)."""
+    try:
+        path = analyze(v, now, decision)
+    finally:
+        llm.flush(v)
+    data = v.read_yaml(path, {}) or {}
+    return path, v.read_text(str(data.get("analysis", ""))) or ""
+
+
+async def send_card(context: ContextTypes.DEFAULT_TYPE, chat_id: int, v: Vault, path: str) -> None:
+    card = open_card(v, path)
+    if card is None:
         return
+    text, changes, has_plan = card
     token = uuid.uuid4().hex[:10]
     context.bot_data.setdefault(_CARDS_KEY, {})[token] = path
-    for chunk in chunks(proposals.card_text(data, changes)):
+    for chunk in chunks(text):
         await context.bot.send_message(chat_id=chat_id, text=chunk)
     await context.bot.send_message(
         chat_id=chat_id,
         text="What should I do with these?",
-        reply_markup=_keyboard(token, len(changes), bool(data.get("plan_draft"))),
+        reply_markup=_keyboard(token, len(changes), has_plan),
     )
 
 
@@ -131,7 +169,7 @@ async def send_pending(context: ContextTypes.DEFAULT_TYPE, chat_id: int) -> None
             logger.exception("proposal card failed for %s", path)
 
 
-def _mark(v: Vault, path: str, status: str, results: list[str]) -> None:
+def mark(v: Vault, path: str, status: str, results: list[str]) -> None:
     data = v.read_yaml(path, {}) or {}
     data["status"] = status
     data["answered_on"] = datetime.now(tz()).date().isoformat()
@@ -164,14 +202,14 @@ def apply_all(v: Vault, changes: list[dict[str, Any]], today: Any) -> tuple[list
     return done, failed
 
 
-def _apply_proposal(v: Vault, path: str) -> str:
+def apply_proposal(v: Vault, path: str) -> str:
     data = v.read_yaml(path, {}) or {}
     today = datetime.now(tz()).date()
-    done, failed = apply_all(v, proposals.changes_for(data, *_ids(v)), today)
+    done, failed = apply_all(v, proposals.changes_for(data, *ids(v)), today)
     plan = adopt_plan(v, data, today.isoformat())
     if plan:
         done.append(f"current plan is now {plan}")
-    _mark(v, path, "applied", done + [f"failed: {f}" for f in failed])
+    mark(v, path, "applied", done + [f"failed: {f}" for f in failed])
     lines = [f"Applied {len(done)}:", *[f"• {d}" for d in done]]
     if failed:
         lines += [f"Didn't apply {len(failed)}:", *[f"• {f}" for f in failed]]
@@ -202,16 +240,16 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         return
     v = vault()
     if action == "no":
-        await asyncio.to_thread(_mark, v, path, "skipped", [])
+        await asyncio.to_thread(mark, v, path, "skipped", [])
         await query.edit_message_text("Left everything as is.")
         return
     if action == "each":
-        data = v.read_yaml(path, {}) or {}
+        changes, has_plan = await asyncio.to_thread(review_each, v, path)
         await query.edit_message_text("One at a time:")
         if isinstance(query.message, Message):
-            for change in proposals.changes_for(data, *_ids(v)):
+            for change in changes:
                 await chat_flow.send_proposal(query.message, context, change)
-        if data.get("plan_draft") and chat_id is not None:
+        if has_plan and chat_id is not None:
             plan_token = uuid.uuid4().hex[:10]
             context.bot_data.setdefault(_CARDS_KEY, {})[plan_token] = path
             await context.bot.send_message(
@@ -221,15 +259,13 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
                     [[InlineKeyboardButton("Use it", callback_data=f"ripple:adopt:{plan_token}")]]
                 ),
             )
-        await asyncio.to_thread(_mark, v, path, "reviewed", [])
         return
     if action == "adopt":
-        data = v.read_yaml(path, {}) or {}
-        plan = await asyncio.to_thread(adopt_plan, v, data, datetime.now(tz()).date().isoformat())
+        plan = await asyncio.to_thread(adopt, v, path, datetime.now(tz()).date().isoformat())
         await query.edit_message_text(f"Current plan is now {plan}." if plan else "No draft found.")
         return
     try:
-        outcome = await asyncio.to_thread(_apply_proposal, v, path)
+        outcome = await asyncio.to_thread(apply_proposal, v, path)
     except VaultError:
         logger.exception("applying proposal failed")
         await query.edit_message_text("Saving failed — check bot logs.")
@@ -250,17 +286,13 @@ async def run_for(context: ContextTypes.DEFAULT_TYPE, chat_id: int, decision: st
         chat_id=chat_id, text=f"⚡ Tracing what this changes: {decision}"
     )
     try:
-        path = await asyncio.to_thread(analyze, v, datetime.now(tz()), decision)
+        path, analysis = await asyncio.to_thread(trace, v, datetime.now(tz()), decision)
     except Exception:
         logger.exception("ripple failed")
         await context.bot.send_message(
             chat_id=chat_id, text="Couldn't trace that decision — check bot logs."
         )
         return
-    finally:
-        llm.flush(v)
-    data = v.read_yaml(path, {}) or {}
-    analysis = v.read_text(str(data.get("analysis", ""))) or ""
     for chunk in chunks(analysis.replace("**", "")):
         await context.bot.send_message(chat_id=chat_id, text=chunk)
     chat_flow.remember(context, "The bot traced a decision", analysis)

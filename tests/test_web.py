@@ -12,6 +12,7 @@ import pytest
 from daylog import calendar_server, dashboard, web
 from daylog.places import PlaceIndex
 from daylog.vault import Vault
+from daylog.webapp import api as webapi
 
 TODAY = date(2026, 10, 2)
 PLACES = [
@@ -141,6 +142,9 @@ def _serve(handler: type) -> tuple[ThreadingHTTPServer, int]:
 @pytest.fixture
 def server(vault: Vault, monkeypatch: pytest.MonkeyPatch) -> Iterator[int]:
     monkeypatch.setenv("VAULT_PATH", str(vault.path))
+    # The private view is what a signed-in / shows without the web app's
+    # shell (see test_webapp.py for the shell itself).
+    monkeypatch.setattr(webapi, "static_file", lambda name: None)
     vault.write_journal_entry(datetime(2026, 10, 1, 9, 0), {}, "t", "Private summary here")
     httpd, port = _serve(calendar_server._make_handler(None, None, True, "right horse"))
     yield port
