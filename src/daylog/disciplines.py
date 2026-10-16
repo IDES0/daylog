@@ -25,6 +25,7 @@ vault and passes plain data in.
 
 from __future__ import annotations
 
+import logging
 import re
 from collections import Counter
 from collections.abc import Iterable, Mapping
@@ -34,6 +35,8 @@ from typing import Any
 
 from daylog.places import PlaceIndex
 from daylog.vault import Vault
+
+logger = logging.getLogger(__name__)
 
 STATUSES = ("active", "want")
 
@@ -320,6 +323,66 @@ def resolve_vague(
     return guesses
 
 
+def _said(graph: Graph, node_id: str, words: str) -> bool:
+    node = graph.nodes.get(node_id, {})
+    labels = [node_id, graph.name(node_id), *(node.get("aliases") or [])]
+    return any(f" {_norm(label)} " in words for label in labels if _norm(label))
+
+
+def unsaid_kinds(graph: Graph, activities: list[Any], transcript: str) -> None:
+    """A specific kind under a vague-able discipline stands only if it was said.
+
+    "Fell on my wing" (the hydrofoil's wing) came back as a wingfoil session;
+    without "wingfoil", "winging" or the like in the transcript, the activity
+    goes back to the general discipline and resolve_vague picks the kind.
+    """
+    words = f" {_norm(transcript)} "
+    for activity in activities:
+        if not isinstance(activity, dict):
+            continue
+        node_id = graph.resolve(activity.get("type"))
+        if node_id is None:
+            continue
+        general = next(
+            (
+                a
+                for a in graph.lineage(node_id) - {node_id}
+                if _resolver(graph, a) is not None and node_id in graph.descendants(a)
+            ),
+            None,
+        )
+        if general is not None and not _said(graph, node_id, words):
+            activity["type"] = general
+
+
+def fitting_progress(
+    graph: Graph,
+    goals_data: Iterable[Any],
+    activities: list[Any],
+    progress: list[Any],
+) -> tuple[list[Any], list[Any]]:
+    """Split goal_progress into (kept, dropped): a goal tied to a discipline only
+    moves when the day has an activity under it. A foil session once counted
+    toward the surf goal."""
+    tied = {
+        str(g.get("id")): str(g["discipline"])
+        for g in goals_data or []
+        if g.get("discipline") in graph
+    }
+    logged: set[str] = set()
+    for activity in activities:
+        if isinstance(activity, Mapping):
+            node_id = graph.resolve(activity.get("type"))
+            if node_id:
+                logged |= graph.lineage(node_id)
+    kept: list[Any] = []
+    dropped: list[Any] = []
+    for item in progress or []:
+        goal_discipline = tied.get(str(item.get("goal_id"))) if isinstance(item, Mapping) else None
+        (dropped if goal_discipline and goal_discipline not in logged else kept).append(item)
+    return kept, dropped
+
+
 def history(graph: Graph, days: Mapping[date, Mapping[str, Any]]) -> list[tuple[str, str | None]]:
     """(discipline id, place id) for every logged session, oldest first."""
     out = []
@@ -332,14 +395,30 @@ def history(graph: Graph, days: Mapping[date, Mapping[str, Any]]) -> list[tuple[
     return out
 
 
-def stated(graph: Graph, fm: Mapping[str, Any] | None) -> list[str]:
-    """Discipline ids the user said or confirmed on a day (not ones the bot guessed)."""
+def stated(graph: Graph, fm: Mapping[str, Any] | None, transcript: str | None = None) -> list[str]:
+    """Discipline ids the user said or confirmed on a day (not ones the bot guessed).
+
+    With the transcript, a specific kind of a vague-able discipline counts only
+    if it was said or tapped (`confirmed`), so a kind the model made up isn't
+    carried into a rebuild."""
+    words = f" {_norm(transcript)} " if transcript is not None else None
     out = []
     for activity in (fm or {}).get("activities") or []:
         if isinstance(activity, Mapping) and not activity.get("guessed"):
             node_id = graph.resolve(activity.get("type"))
-            if node_id:
-                out.append(node_id)
+            if not node_id:
+                continue
+            vague_above = any(
+                _resolver(graph, a) is not None for a in graph.lineage(node_id) - {node_id}
+            )
+            if (
+                words is not None
+                and vague_above
+                and not activity.get("confirmed")
+                and not _said(graph, node_id, words)
+            ):
+                continue
+            out.append(node_id)
     return out
 
 
@@ -353,6 +432,7 @@ def set_type(fm: dict[str, Any], index: int, said: str, chosen: str) -> bool:
         return False
     activity["type"] = chosen
     activity.pop("guessed", None)
+    activity["confirmed"] = True
     return True
 
 
@@ -402,8 +482,10 @@ def prepare(
     places: PlaceIndex,
     current_place_id: str | None,
     prefer: list[str] | None = None,
+    transcript: str = "",
 ) -> tuple[list[Guess], list[Proposal]]:
-    """Before the entry is written: narrow vague sports, pull out new ones."""
+    """Before the entry is written: narrow vague sports, pull out new ones, and
+    drop goal progress for a discipline the day doesn't have."""
     activities = facts.get("activities") or []
     proposals: list[Proposal] = []
     for activity in activities:
@@ -419,8 +501,15 @@ def prepare(
                 )
     if not graph:
         return [], proposals
+    if transcript:
+        unsaid_kinds(graph, activities, transcript)
     past = history(graph, all_days(v, entry_date - timedelta(days=1)))
     guesses = resolve_vague(graph, activities, places, current_place_id, past, prefer or [])
+    if facts.get("goal_progress"):
+        kept, dropped = fitting_progress(graph, v.read_goals(), activities, facts["goal_progress"])
+        if dropped:
+            logger.info("goal progress dropped (no activity under its discipline): %s", dropped)
+        facts["goal_progress"] = kept
     return guesses, proposals
 
 

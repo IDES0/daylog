@@ -145,7 +145,48 @@ def test_set_type_applies_only_to_the_same_guess() -> None:
     assert not disciplines.set_type(fm, 0, "foiling", "wake_foil")
     assert not disciplines.set_type(fm, 3, "foil", "wake_foil")
     assert disciplines.set_type(fm, 0, "foil", "wake_foil")
-    assert fm["activities"] == [{"type": "wake_foil"}]
+    assert fm["activities"] == [{"type": "wake_foil", "confirmed": True}]
+
+
+def test_an_unsaid_kind_goes_back_to_the_general_discipline() -> None:
+    graph = _graph()
+    # The 2026-10-15 note: "fell on my wing" is the hydrofoil's wing.
+    activities: list[Any] = [{"type": "wing_foil"}, {"type": "kite"}]
+    disciplines.unsaid_kinds(graph, activities, "foil session, I fell on my wing and cut my hand")
+    assert activities == [{"type": "foil"}, {"type": "kite"}]
+
+    said: list[Any] = [{"type": "wing_foil"}, {"type": "tow_foil"}]
+    disciplines.unsaid_kinds(graph, said, "went wingfoiling, then a Tow foil session")
+    assert said == [{"type": "wing_foil"}, {"type": "tow_foil"}]
+
+
+def test_rebuild_keeps_said_or_tapped_kinds_only() -> None:
+    graph = _graph()
+    fm = {
+        "activities": [
+            {"type": "wing_foil"},  # the model's, never said
+            {"type": "wake_foil", "confirmed": True},  # tapped
+        ]
+    }
+    assert disciplines.stated(graph, fm, "fell on my wing") == ["wake_foil"]
+    assert disciplines.stated(graph, fm) == ["wing_foil", "wake_foil"]
+
+
+def test_goal_progress_needs_an_activity_under_the_goals_discipline() -> None:
+    graph = Graph({**_graph().nodes, "surf": {"name": "Surfing", "parents": ["water"]}})
+    goals = [
+        {"id": "surf", "discipline": "surf"},
+        {"id": "water", "discipline": "water"},
+        {"id": "build"},
+    ]
+    progress = [
+        {"goal_id": "surf", "delta": 1},
+        {"goal_id": "water", "delta": 1},
+        {"goal_id": "build", "delta": 1.5},
+    ]
+    kept, dropped = disciplines.fitting_progress(graph, goals, [{"type": "tow_foil"}], progress)
+    assert [k["goal_id"] for k in kept] == ["water", "build"]
+    assert dropped == [{"goal_id": "surf", "delta": 1}]
 
 
 def test_outline_and_tree_render_every_node() -> None:
