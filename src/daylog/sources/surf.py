@@ -342,16 +342,16 @@ def fetch_hourly(
     return marine.json(), wind.json()
 
 
-def report(
-    spots: list[Any], timezone: str, days: int = 3, comfort_face: float | None = None
-) -> str | None:
-    """Rated forecast for every spot node that has a `surf:` profile and coordinates.
+def _forecasts(
+    spots: list[Any], timezone: str, days: int
+) -> list[tuple[Any, SurfProfile, list[Hour]]]:
+    """(node, profile, its own copy of the hours) for every profiled spot with data.
 
     Spots within ~2 km share one model cell, so they share one fetch — the
     ratings still differ because each spot's profile differs.
     """
     cache: dict[tuple[float, float], list[Hour] | None] = {}
-    blocks = []
+    out = []
     for node in spots:
         profile = SurfProfile.from_node(node)
         if profile is None or node.get("lat") is None or node.get("lon") is None:
@@ -362,8 +362,72 @@ def report(
             cache[key] = parse(*raw) if raw else None
         hours = cache[key]
         if hours:
-            copies = [Hour(**{**h.__dict__}) for h in hours]
-            blocks.append(spot_report(str(node.get("name")), profile, copies, comfort_face))
+            out.append((node, profile, [Hour(**{**h.__dict__}) for h in hours]))
+    return out
+
+
+def day_data(
+    hours: list[Hour], profile: SurfProfile, comfort_face: float | None = None
+) -> dict[str, Any]:
+    """One day as numbers, for the web app's drawing (same rating as day_line)."""
+    window = best_window(hours)
+    peak = max(window, key=lambda h: h.rating)
+    lo, hi = face_estimate(peak.swell_h, peak.swell_t)
+    worst = min(hours, key=lambda h: h.rating)
+    return {
+        "date": peak.time.date().isoformat(),
+        "label": label(peak.rating, peak.swell_h),
+        "rating": peak.rating,
+        "start": window[0].time.hour,
+        "end": window[-1].time.hour + 1,
+        "faces": [lo, hi],
+        "period": round(peak.swell_t),
+        "swell_dir": compass(peak.swell_dir),
+        "wind_kn": round(peak.wind_kn),
+        "wind_from": round(peak.wind_dir),
+        "wind_dir": compass(peak.wind_dir),
+        "offshore": angle_diff(peak.wind_dir, profile.offshore) <= 45 or peak.wind_kn < 3,
+        "tide": peak.tide,
+        "tide_trend": peak.tide_trend,
+        "drops_to": (
+            {"label": label(worst.rating, worst.swell_h), "hour": worst.time.hour}
+            if worst.rating < peak.rating - 1.5
+            else None
+        ),
+        "above_comfort": bool(comfort_face and hi > comfort_face),
+        "hours": [{"hour": h.time.hour, "rating": h.rating} for h in hours],
+    }
+
+
+def report_data(
+    spots: list[Any], timezone: str, days: int = 3, comfort_face: float | None = None
+) -> list[dict[str, Any]]:
+    """The same forecast as `report`, as numbers per spot and day."""
+    out = []
+    for node, profile, hours in _forecasts(spots, timezone, days):
+        by_day: dict[str, list[Hour]] = {}
+        for h in hours:
+            if h.time.hour in DAYLIGHT:
+                h.rating = rate(h, profile)
+                by_day.setdefault(h.time.date().isoformat(), []).append(h)
+        out.append(
+            {
+                "id": node.get("id"),
+                "name": str(node.get("name")),
+                "days": [day_data(d, profile, comfort_face) for d in by_day.values() if d],
+            }
+        )
+    return out
+
+
+def report(
+    spots: list[Any], timezone: str, days: int = 3, comfort_face: float | None = None
+) -> str | None:
+    """Rated forecast for every spot node that has a `surf:` profile and coordinates."""
+    blocks = [
+        spot_report(str(node.get("name")), profile, hours, comfort_face)
+        for node, profile, hours in _forecasts(spots, timezone, days)
+    ]
     if not blocks:
         return None
     return (

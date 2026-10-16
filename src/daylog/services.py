@@ -265,6 +265,28 @@ def fly_text(v: Vault) -> str:
     return rated or "No launch sites with a profile around here yet."
 
 
+def _region(v: Vault) -> tuple[PlaceIndex, Any, dict[str, Any]]:
+    places_data = v.read_places()
+    index = PlaceIndex(list(places_data or []))
+    here = index.current_place(brief.current_location(v.read_location()))
+    profile = v.read_profile() or {}
+    return index, here, profile if isinstance(profile, dict) else {}
+
+
+def surf_data(v: Vault) -> list[dict[str, Any]]:
+    """The rated surf forecast for the current region, as numbers (web app)."""
+    index, here, profile = _region(v)
+    spots = index.with_coordinates(index.region_nodes(here, ("surf_spot",)))
+    return surf.report_data(spots, str(tz()), comfort_face=profile.get("surf_comfort_face_m"))
+
+
+def fly_data(v: Vault) -> list[dict[str, Any]]:
+    """Paragliding flyability for the current region, as numbers (web app)."""
+    index, here, profile = _region(v)
+    sites = index.with_coordinates(index.region_nodes(here, ("fly_site",)))
+    return fly.report_data(sites, str(tz()), profile.get("fly_rules"))
+
+
 # -- the morning brief -----------------------------------------------------------
 
 

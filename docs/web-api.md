@@ -88,9 +88,10 @@ The status site grows into the app that can replace Telegram. One address
 ### Daily tools
 - `GET /api/brief` → latest saved brief `{"date", "text"}` or `{"text": null}`
 - `POST /api/brief` → generates now (paid) → `{"date", "text"}`
-- `GET /api/surf` → `{"text": "…"}` (same text `/surf` sends) ; `GET /api/fly` likewise
+- `GET /api/surf` → `{"spots": [{"id", "name", "days": [{"date", "label", "rating", "start", "end", "faces": [lo, hi], "period", "swell_dir", "wind_kn", "wind_from", "wind_dir", "offshore", "tide", "tide_trend", "drops_to": {"label", "hour"}|null, "above_comfort", "hours": [{"hour", "rating"}]}]}], "message": null|"…"}` — the same ratings `/surf` sends as text
+- `GET /api/fly` → `{"sites": [{"id", "name", "elevation", "days": [{"date", "flyable", "hours": [{"hour", "ok"}], …flyable: "start", "end", "flyable_hours", "wind_kn", "wind_from", "wind_dir", "gust_kn", "thermals", "base_m", "headroom_m"; not: "blockers": ["…"]}]}], "message": null|"…"}`
 - `GET /api/upcoming` → `{"items": ["…"]}` ; `GET /api/status` → `{"text": "…"}`
-- `GET /api/usage` → `{"text": "…"}`
+- `GET /api/usage` → `{"month": "2026-10", "spent": 10.87, "budget": 40, "by_kind": [{"kind", "usd"}]}`
 - `GET /api/site?days=7` → `{"text": "…"}` or `{"text": null, "message": "not configured"}`
 
 ### Planning

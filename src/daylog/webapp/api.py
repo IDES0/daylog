@@ -920,10 +920,14 @@ class Api:
         return 200, {"date": today.isoformat(), "text": text}
 
     def surf(self, req: Request, m: re.Match[str]) -> Reply:
-        return 200, {"text": services.surf_text(self._vault())}
+        spots = services.surf_data(self._vault())
+        empty = None if spots else "No surf spots with a profile around here yet."
+        return 200, {"spots": spots, "message": empty}
 
     def fly(self, req: Request, m: re.Match[str]) -> Reply:
-        return 200, {"text": services.fly_text(self._vault())}
+        sites = services.fly_data(self._vault())
+        empty = None if sites else "No launch sites with a profile around here yet."
+        return 200, {"sites": sites, "message": empty}
 
     def upcoming(self, req: Request, m: re.Match[str]) -> Reply:
         v = self._vault()
@@ -936,7 +940,7 @@ class Api:
         return 200, {"text": services.format_status(v.read_goals(), v.read_itinerary())}
 
     def usage(self, req: Request, m: re.Match[str]) -> Reply:
-        return 200, {"text": llm.format_usage(self._vault())}
+        return 200, llm.usage_data(self._vault())
 
     def site(self, req: Request, m: re.Match[str]) -> Reply:
         if not analytics.configured():
