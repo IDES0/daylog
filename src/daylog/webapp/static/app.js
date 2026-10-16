@@ -528,13 +528,15 @@ function initHome() {
   const today = card(1, "Today");
   const strip = h("section.card", { id: "home-cards", style: { order: "2" }, hidden: true });
   const brief = card(3, "Morning brief");
+  const cond = card(3, "Conditions");
   const stats = card(4, "Last 7 days");
   const cal = card(5, "Week");
   const goals = card(6, "Goals");
   const next = card(7, "Next");
   const miles = card(8, "Milestones");
-  fill(root, hero, h("div.grid", h("div.col", today, brief, cal), h("div.col", strip, stats, goals, next, miles)));
+  fill(root, hero, h("div.grid", h("div.col", today, cond, brief, cal), h("div.col", strip, stats, goals, next, miles)));
   Object.assign(S, { hHero: hero, hToday: today, hBrief: brief, hStats: stats, hCal: cal, hGoals: goals, hNext: next, hMiles: miles });
+  initConditions(cond);
   loadHome(false);
 }
 
@@ -1557,34 +1559,171 @@ function discList(GD) {
   return h("ul.list.disc-list", items);
 }
 
-// ---- reports: surf, fly, status, upcoming, usage, site
+// ---- conditions: rated surf per spot and flyability per site, drawn
 
-function initReports(c) {
+// Rating 0–5 on one blue ordinal ramp (validated, light and dark: --rate-1..5);
+// flat and missing are neutral. Text on a chip stays in ink, never the hue.
+const rateStep = r => (r == null ? 0 : Math.min(5, Math.max(1, Math.ceil(r + 0.001))));
+const dayName = (s, i) => (i === 0 ? "Today" : i === 1 ? "Tomorrow" : `${weekday(s, 3)} ${parseD(s)?.getDate() ?? ""}`);
+const hrs = (a, b) => `${pad(a)}–${pad(b)}`;
+
+function windArrow(from, kn) {
+  // Points the way the wind blows. The drawn arrow points south (180°), so
+  // turning it by the "from" bearing makes it point to from + 180°.
+  const s = document.createElementNS(NS, "svg");
+  s.setAttribute("viewBox", "0 0 24 24");
+  s.setAttribute("class", "wind-arrow");
+  s.setAttribute("aria-hidden", "true");
+  s.style.transform = `rotate(${Number(from) || 0}deg)`;
+  s.innerHTML = kn < 3 ? '<circle cx="12" cy="12" r="3.5"/>' : '<path d="M12 4v16M6.5 14.5 12 20l5.5-5.5"/>';
+  return s;
+}
+
+function hourStrip(hours, value, hot, title) {
+  // One bar per hour; the window (hot) at full strength, the rest muted.
+  const s = document.createElementNS(NS, "svg");
+  const n = hours.length || 1, w = 100 / n;
+  s.setAttribute("viewBox", "0 0 100 22");
+  s.setAttribute("preserveAspectRatio", "none");
+  s.setAttribute("class", "hour-strip");
+  s.setAttribute("role", "img");
+  s.setAttribute("aria-label", title);
+  hours.forEach((hr, i) => {
+    const v = value(hr);
+    const r = document.createElementNS(NS, "rect");
+    const ht = Math.max(2, v * 20);
+    r.setAttribute("x", String(i * w + 0.6));
+    r.setAttribute("width", String(w - 1.2));
+    r.setAttribute("y", String(22 - ht));
+    r.setAttribute("height", String(ht));
+    r.setAttribute("rx", "1");
+    r.setAttribute("class", hot(hr) ? "hot" : "");
+    r.style.fill = `var(--rate-${rateStep(hr.rating ?? (hr.ok ? 4 : 1))})`;
+    if (hr.ok === false) r.style.fill = "var(--line-strong)";
+    const t = document.createElementNS(NS, "title");
+    t.textContent = `${pad(hr.hour)}:00 · ${hr.rating != null ? hr.rating.toFixed(1) : hr.ok ? "flyable" : "not flyable"}`;
+    r.append(t);
+    s.append(r);
+  });
+  return h("div.strip-wrap", s, h("div.strip-axis", h("span", `${pad(hours[0]?.hour ?? 6)}`), h("span", "12"), h("span", `${pad((hours.at(-1)?.hour ?? 18) + 1)}`)));
+}
+
+function surfRow(spot, day) {
+  const flat = day.label === "FLAT";
+  const step = flat ? 0 : rateStep(day.rating);
+  const chip = h("div.rate-chip", { style: { "--chip": `var(--rate-${step})`, "--chip-ink": `var(--rate-ink-${step})` } },
+    h("b", flat ? "–" : day.rating.toFixed(1)), h("span", day.label));
+  const wind = day.wind_kn < 3 ? "glassy" : `${day.wind_kn} kn ${day.wind_dir}${day.offshore ? " · offshore" : ""}`;
+  const facts = h("div.cond-facts",
+    h("span", `${day.faces[0]}–${day.faces[1]} m`),
+    h("span", `${day.period}s ${day.swell_dir}`),
+    h("span.wind", windArrow(day.wind_from, day.wind_kn), wind),
+    h("span", `${day.tide} tide ${day.tide_trend === "rising" ? "↑" : "↓"}`));
+  const notes = [];
+  if (day.above_comfort) notes.push(h("span.flag", "⚠ above your comfort size"));
+  if (day.drops_to) notes.push(h("span.faint", `${day.drops_to.label.toLowerCase()} by ${pad(day.drops_to.hour)}:00`));
+  return h("li.cond-row", chip,
+    h("div.cond-main",
+      h("div.row.between", h("b.cond-name", spot.name), h("span.mono.cond-when", hrs(day.start, day.end))),
+      facts,
+      notes.length ? h("div.cond-notes", notes) : null,
+      hourStrip(day.hours, hr => hr.rating / 5, hr => hr.hour >= day.start && hr.hour < day.end, `${spot.name} hourly rating`)));
+}
+
+function flyRow(site, day) {
+  const pill = day.flyable
+    ? h("span.status.good", icon("check"), `Flyable ${hrs(day.start, day.end)}`)
+    : h("span.status.bad", "✕ Not flyable");
+  const facts = day.flyable
+    ? h("div.cond-facts",
+        h("span.wind", windArrow(day.wind_from, day.wind_kn), `${day.wind_kn} kn ${day.wind_dir} aloft`),
+        h("span", `gusts ${day.gust_kn} kn`),
+        h("span", `thermals ${day.thermals}`),
+        h("span", day.headroom_m > -500 ? `base ~${day.base_m.toLocaleString()} m (${day.headroom_m >= 0 ? "+" : ""}${day.headroom_m} over launch)` : "base below launch"))
+    : h("div.cond-facts", (day.blockers || []).map(b => h("span", b)));
+  return h("li.cond-row.fly",
+    h("div.cond-main",
+      h("div.row.between", h("b.cond-name", site.name), pill),
+      facts,
+      hourStrip(day.hours, hr => (hr.ok ? 1 : 0.25), hr => hr.ok, `${site.name} flyable hours`)));
+}
+
+function conditionsView(list, kind) {
+  // Day tabs; under each, every spot ranked best first.
+  const dates = [...new Set(list.flatMap(s => s.days.map(d => d.date)))].sort();
+  if (!dates.length) return empty(null, "No forecast came back.");
+  const box = h("div");
+  const show = date => {
+    const rows = list
+      .map(s => ({ s, d: s.days.find(x => x.date === date) }))
+      .filter(x => x.d)
+      .sort((a, b) => kind === "surf" ? b.d.rating - a.d.rating : (b.d.flyable_hours || 0) - (a.d.flyable_hours || 0));
+    const top = rows[0];
+    const best = kind === "surf" && top && top.d.label !== "FLAT"
+      ? h("div.best-bet", h("span.label", "Best bet"), h("b", `${top.s.name} · ${top.d.label.toLowerCase()} ${hrs(top.d.start, top.d.end)}`), h("span.muted", ` ${top.d.faces[0]}–${top.d.faces[1]} m`))
+      : null;
+    fill(box, best, h("ul.list.cond-list", rows.map(x => (kind === "surf" ? surfRow(x.s, x.d) : flyRow(x.s, x.d)))));
+  };
+  const tabs = seg(dates.map((d, i) => [d, dayName(d, i)]), dates[0], show, "Day");
+  show(dates[0]);
+  const legend = kind === "surf"
+    ? h("div.rate-legend", h("span.faint", "Rating"), [1, 2, 3, 4, 5].map(n => h("i", { style: { background: `var(--rate-${n})` } })), h("span.faint", "0 → 5 against each spot's own best"))
+    : null;
+  return h("div", h("div.cond-tabs", tabs), legend, box);
+}
+
+function initConditions(c) {
   const box = h("div", { "aria-live": "polite" });
   const cache = {};
-  const SRC = {
-    surf: { path: "/api/surf", timeout: SLOW },
-    fly: { path: "/api/fly", timeout: SLOW },
-    status: { path: "/api/status" },
-    upcoming: { path: "/api/upcoming" },
-    usage: { path: "/api/usage" },
-    site: { path: "/api/site?days=7" },
-  };
+  const SRC = { surf: ["/api/surf", "spots"], fly: ["/api/fly", "sites"] };
   let cur = "surf";
   const show = (key, force) => {
     cur = key;
     if (cache[key] && !force) { fill(box, cache[key]); return; }
-    load(box, () => api(SRC[key].path, { timeout: SRC[key].timeout || NORMAL }), d => {
-      let node;
-      if (key === "upcoming") node = (d.items || []).length ? h("ul.notes-list", d.items.map(i => h("li", i))) : empty(null, "Nothing coming up.");
-      else if (d.text == null) node = empty(null, d.message ? `Not available: ${d.message}.` : "Nothing to show.");
-      else node = pre(d.text);
-      const wrap = h("div", node, h("button.btn.ghost", { type: "button", style: { "margin": "8px 0 -8px -12px" }, onclick: () => show(cur, true) }, "Refresh"));
-      cache[key] = wrap;
-      if (cur === key) fill(box, wrap);
+    load(box, () => api(SRC[key][0], { timeout: SLOW }), d => {
+      const list = d[SRC[key][1]] || [];
+      const node = list.length ? conditionsView(list, key) : empty(null, d.message || "Nothing to show.");
+      cache[key] = h("div", node);
+      if (cur === key) fill(box, cache[key]);
     });
   };
-  c.body.append(h("div", { style: { "margin-bottom": "12px" } }, seg([["surf", "Surf"], ["fly", "Fly"], ["status", "Status"], ["upcoming", "Upcoming"], ["usage", "Usage"], ["site", "Site"]], cur, k => show(k), "Report", true)), box);
+  c.head.append(seg([["surf", "Surf"], ["fly", "Fly"]], cur, k => show(k), "Conditions"));
+  c.body.append(box, h("p.faint.cond-foot", "Open-Meteo model data, rated against each spot's profile and your own rules. Guidance only."));
+  show(cur);
+}
+
+// ---- reports: usage, site
+
+function usageView(d) {
+  const pct = d.budget ? Math.min(100, (d.spent / d.budget) * 100) : 0;
+  const max = Math.max(...(d.by_kind || []).map(k => k.usd), 0.01);
+  return h("div",
+    h("div.row.between", h("span", h("b.big-num", `$${d.spent.toFixed(2)}`), h("span.muted", ` of $${Number(d.budget).toFixed(0)} · ${d.month}`)), h("span.mono.faint", `${pct.toFixed(0)}%`)),
+    h("div.meter", { role: "meter", "aria-valuenow": String(d.spent), "aria-valuemin": "0", "aria-valuemax": String(d.budget), "aria-label": "API spend this month" }, h("div", { style: { width: `${pct}%` }, class: pct >= 90 ? "over" : "" })),
+    h("ul.list.spend", (d.by_kind || []).map(k => h("li.row.between",
+      h("span", k.kind),
+      h("span.kv-bar", h("i", { style: { width: `${(k.usd / max) * 100}%` } })),
+      h("span.mono", `$${k.usd.toFixed(2)}`)))));
+}
+
+function initReports(c) {
+  const box = h("div", { "aria-live": "polite" });
+  const cache = {};
+  let cur = "usage";
+  const show = (key, force) => {
+    cur = key;
+    if (cache[key] && !force) { fill(box, cache[key]); return; }
+    const path = key === "usage" ? "/api/usage" : "/api/site?days=7";
+    load(box, () => api(path), d => {
+      let node;
+      if (key === "usage") node = usageView(d);
+      else if (d.text == null) node = empty(null, d.message ? `Not available: ${d.message}.` : "Nothing to show.");
+      else node = pre(d.text);
+      cache[key] = h("div", node, h("button.btn.ghost", { type: "button", style: { "margin": "8px 0 -8px -12px" }, onclick: () => show(cur, true) }, "Refresh"));
+      if (cur === key) fill(box, cache[key]);
+    });
+  };
+  c.body.append(h("div", { style: { "margin-bottom": "12px" } }, seg([["usage", "API spend"], ["site", "Site"]], cur, k => show(k), "Report")), box);
   show(cur);
 }
 

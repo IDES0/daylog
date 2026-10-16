@@ -128,3 +128,36 @@ def test_fly_day_line() -> None:
     assert line.startswith("Mon 12: FLYABLE 09-13 (4h)")
     assert "base ~1,775m" in line
     assert fly.day_line(bad, p).endswith("NOT FLYABLE (rain)")
+
+
+def test_surf_day_data_matches_the_text_line() -> None:
+    hours = 24
+    levels = [((i % 12) - 6) / 6 for i in range(hours)]
+    wind_dirs = [100.0 if i < 12 else 280.0 for i in range(hours)]
+    wind_speeds = [4.0 if i < 12 else 15.0 for i in range(hours)]
+    parsed = surf.parse(_marine(hours, 1.5, 13, 220, levels), _wind(hours, wind_speeds, wind_dirs))
+    p = surf.SurfProfile.from_node(PEAK)
+    assert p is not None
+    day = [h for h in parsed if h.time.hour in surf.DAYLIGHT]
+    for h in day:
+        h.rating = surf.rate(h, p)
+    data = surf.day_data(day, p, comfort_face=1.5)
+    line = surf.day_line(day)
+    assert f"{data['label']} ({data['rating']:.1f}/5)" in line
+    assert f"{data['start']:02d}-{data['end']:02d}" in line
+    assert data["offshore"] is True and data["above_comfort"] is True
+    assert data["drops_to"] is not None  # the onshore afternoon
+    assert [x["hour"] for x in data["hours"]] == [h.time.hour for h in day]
+
+
+def test_fly_day_data() -> None:
+    p = fly.FlyProfile.from_node({"fly": {"launch": [135, 250], "elevation": 1600}})
+    assert p is not None
+    good = [_air(time=_air().time.replace(hour=h)) for h in range(9, 13)]
+    bad = [_air(time=_air().time.replace(hour=h), precip_prob=80) for h in range(13, 17)]
+    data = fly.day_data(good + bad, p, site_ground=900)
+    assert (data["flyable"], data["start"], data["end"], data["flyable_hours"]) == (True, 9, 13, 4)
+    assert data["base_m"] == 1775 and data["headroom_m"] == 175
+    assert [x["ok"] for x in data["hours"]] == [True] * 4 + [False] * 4
+    grounded = fly.day_data(bad, p)
+    assert grounded["flyable"] is False and grounded["blockers"] == ["rain 80%"]

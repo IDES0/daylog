@@ -209,6 +209,70 @@ def fetch(lat: float, lon: float, timezone: str, days: int = 3) -> dict[str, Any
     return r.json()  # type: ignore[no-any-return]
 
 
+def day_data(hours: list[AirHour], p: FlyProfile, site_ground: float = 0.0) -> dict[str, Any]:
+    """One day as numbers, for the web app's drawing (same verdict as day_line)."""
+    flyable = [h for h in hours if not reasons_not_flyable(h, p)]
+    out: dict[str, Any] = {
+        "date": hours[0].time.date().isoformat(),
+        "flyable": bool(flyable),
+        "hours": [{"hour": h.time.hour, "ok": not reasons_not_flyable(h, p)} for h in hours],
+    }
+    if not flyable:
+        blockers: dict[str, str] = {}
+        counts: dict[str, int] = {}
+        for h in hours:
+            for key, text in reasons_not_flyable(h, p):
+                counts[key] = counts.get(key, 0) + 1
+                blockers.setdefault(key, text)
+        out["blockers"] = [blockers[k] for k in sorted(counts, key=lambda k: -counts[k])[:2]]
+        return out
+    mid = flyable[len(flyable) // 2]
+    base = site_ground + cloud_base(mid)
+    out.update(
+        {
+            "start": flyable[0].time.hour,
+            "end": flyable[-1].time.hour + 1,
+            "flyable_hours": len(flyable),
+            "wind_kn": round(mid.wind_launch),
+            "wind_from": round(mid.dir_launch),
+            "wind_dir": compass(mid.dir_launch),
+            "gust_kn": round(max(h.gust_10m for h in flyable)),
+            "thermals": thermals(mid),
+            "base_m": round(base),
+            "headroom_m": round(base - p.elevation),
+        }
+    )
+    return out
+
+
+def report_data(
+    sites: list[Any], timezone: str, rules: dict[str, Any] | None = None, days: int = 3
+) -> list[dict[str, Any]]:
+    """The same forecast as `report`, as numbers per site and day."""
+    out = []
+    for node in sites:
+        profile = FlyProfile.from_node(node, rules)
+        if profile is None or node.get("lat") is None or node.get("lon") is None:
+            continue
+        data = fetch(float(node["lat"]), float(node["lon"]), timezone, days)
+        if not data:
+            continue
+        ground = float(data.get("elevation") or 0)
+        by_day: dict[str, list[AirHour]] = {}
+        for h in parse(data):
+            if h.time.hour in FLYING_HOURS:
+                by_day.setdefault(h.time.date().isoformat(), []).append(h)
+        out.append(
+            {
+                "id": node.get("id"),
+                "name": str(node.get("name")),
+                "elevation": profile.elevation,
+                "days": [day_data(d, profile, ground) for d in by_day.values() if d],
+            }
+        )
+    return out
+
+
 def report(
     sites: list[Any], timezone: str, rules: dict[str, Any] | None = None, days: int = 3
 ) -> str | None:

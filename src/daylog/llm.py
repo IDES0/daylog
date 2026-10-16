@@ -166,7 +166,8 @@ def flush(vault: Vault) -> None:
     del _pending[: len(batch)]
 
 
-def format_usage(vault: Vault) -> str:
+def usage_data(vault: Vault) -> dict[str, Any]:
+    """This month's spend: {month, spent, budget, by_kind: [{kind, usd}]}, largest first."""
     m = _month()
     saved = dict(vault.read_yaml(USAGE_FILE, {}).get(m) or {})
     for p in _pending:
@@ -174,7 +175,19 @@ def format_usage(vault: Vault) -> str:
             saved[p.kind] = float(saved.get(p.kind, 0.0)) + p.usd
             saved["total"] = float(saved.get("total", 0.0)) + p.usd
     total = float(saved.pop("total", 0.0))
-    lines = [f"API spend {m}: ${total:.2f} of ${monthly_budget():.0f} budget"]
-    for kind, usd in sorted(saved.items(), key=lambda kv: -float(kv[1])):
-        lines.append(f"- {kind}: ${float(usd):.2f}")
+    return {
+        "month": m,
+        "spent": round(total, 2),
+        "budget": monthly_budget(),
+        "by_kind": [
+            {"kind": kind, "usd": round(float(usd), 2)}
+            for kind, usd in sorted(saved.items(), key=lambda kv: -float(kv[1]))
+        ],
+    }
+
+
+def format_usage(vault: Vault) -> str:
+    data = usage_data(vault)
+    lines = [f"API spend {data['month']}: ${data['spent']:.2f} of ${data['budget']:.0f} budget"]
+    lines += [f"- {k['kind']}: ${k['usd']:.2f}" for k in data["by_kind"]]
     return "\n".join(lines)
