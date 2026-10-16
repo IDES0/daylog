@@ -101,9 +101,10 @@ function announce(text) { const el = $("#announce"); el.textContent = ""; setTim
 
 // --------------------------------------------------------- safe markdown
 
-// Paragraphs, line breaks, # headings, - / 1. lists, **bold**, *italic*,
-// `code` and http(s) links. Everything lands as text nodes.
-const INLINE = /(\*\*([^*\n]+)\*\*|`([^`\n]+)`|\[([^\]\n]+)\]\((https?:\/\/[^\s)]+)\)|(https?:\/\/[^\s<>"']*[^\s<>"'.,;:!?)\]])|\*([^*\s][^*\n]*?)\*)/g;
+// Paragraphs (soft-wrapped lines join, as in markdown), # headings, - / 1.
+// lists, **bold**, *italic* / _italic_, `code` and http(s) links. Everything
+// lands as text nodes.
+const INLINE = /(\*\*([^*\n]+)\*\*|`([^`\n]+)`|\[([^\]\n]+)\]\((https?:\/\/[^\s)]+)\)|(https?:\/\/[^\s<>"']*[^\s<>"'.,;:!?)\]])|\*([^*\s][^*\n]*?)\*|(?<![\w])_([^_\s][^_\n]*?)_(?![\w]))/g;
 
 function inline(el, text) {
   let last = 0;
@@ -114,6 +115,7 @@ function inline(el, text) {
     else if (m[4]) el.append(link(m[5], m[4]));
     else if (m[6]) el.append(link(m[6], m[6].replace(/^https?:\/\/(www\.)?/, "")));
     else if (m[7]) el.append(h("em", m[7]));
+    else if (m[8]) el.append(h("em", m[8]));
     last = m.index + m[0].length;
   }
   if (last < text.length) el.append(text.slice(last));
@@ -131,7 +133,7 @@ function md(text, cls = "") {
   const flushPara = () => {
     if (!para.length) return;
     const p = h("p");
-    para.forEach((l, i) => { if (i) p.append(h("br")); inline(p, l); });
+    inline(p, para.map(l => l.trim()).join(" "));
     root.append(p); para = [];
   };
   const flushList = () => { if (list) root.append(list); list = null; };
