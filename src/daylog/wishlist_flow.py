@@ -11,6 +11,7 @@ against the API budget.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from datetime import datetime
 from typing import Any
@@ -110,6 +111,39 @@ def add_wish(v: Vault, query: str, today: Any) -> tuple[Any, bool]:
     return itinerary.find_entry(data, applied[0].id), True
 
 
+def want_message(entry: Any, created: bool) -> str:
+    verb = "Added" if created else "Already on the list —"
+    return (
+        f"{verb} {entry.get('place')}. Research is queued for the morning routine (free), "
+        "or run it now (API budget, a minute or two)."
+    )
+
+
+def research_target(v: Vault, entry_id: str) -> tuple[str | None, str] | str:
+    """(place id, name) to research for a wishlist entry, or why it can't run now."""
+    if not llm.can_spend(v, research_flow.RUN_ESTIMATE_USD):
+        return "Monthly budget reached — left queued for the routine."
+    entry = itinerary.find_entry(v.read_itinerary(), entry_id)
+    if entry is None:
+        return "That wishlist entry is gone."
+    index = PlaceIndex(v.read_places())
+    place_id = entry.get("place_id")
+    name = index.path_name(place_id) if place_id in index.by_id else str(entry.get("place"))
+    return place_id, name
+
+
+def research_entry(v: Vault, entry_id: str, place_id: str | None, name: str) -> tuple[str, str]:
+    """Write the research file now and mark the entry researched. (path, markdown)."""
+    path, text = research_flow.dossier_now(v, place_id, name)
+    data = v.read_itinerary()
+    entry = itinerary.find_entry(data, entry_id)
+    if entry is not None:
+        entry["research"] = "done"
+        entry["dossier"] = path
+        v.write_itinerary(data, f"itinerary: researched {entry.get('place')}")
+    return path, text
+
+
 async def want_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """/want <place> — add a destination to the wishlist and queue research on it."""
     if not is_authorized(update):
@@ -127,7 +161,6 @@ async def want_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         logger.exception("want failed for %s", query)
         await message.reply_text("Saving failed — check bot logs.")
         return
-    verb = "Added" if created else "Already on the list —"
     keyboard = InlineKeyboardMarkup(
         [
             [InlineKeyboardButton("Research now", callback_data=f"want:now:{entry['id']}")],
@@ -138,11 +171,7 @@ async def want_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
             ],
         ]
     )
-    await message.reply_text(
-        f"{verb} {entry.get('place')}. Research is queued for the morning routine (free), "
-        "or run it now (API budget, a minute or two).",
-        reply_markup=keyboard,
-    )
+    await message.reply_text(want_message(entry, created), reply_markup=keyboard)
 
 
 async def handle_want_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -156,30 +185,18 @@ async def handle_want_callback(update: Update, context: ContextTypes.DEFAULT_TYP
         await query.edit_message_text("Queued — tomorrow's morning routine will research it.")
         return
     v = vault()
-    if not llm.can_spend(v, research_flow.RUN_ESTIMATE_USD):
-        await query.edit_message_text("Monthly budget reached — left queued for the routine.")
+    target = research_target(v, entry_id)
+    if isinstance(target, str):
+        await query.edit_message_text(target)
         return
-    data = v.read_itinerary()
-    entry = itinerary.find_entry(data, entry_id)
-    if entry is None:
-        await query.edit_message_text("That wishlist entry is gone.")
-        return
-    index = PlaceIndex(v.read_places())
-    place_id = entry.get("place_id")
-    name = index.path_name(place_id) if place_id in index.by_id else str(entry.get("place"))
+    place_id, name = target
     await query.edit_message_text(f"Researching {name}...")
     try:
-        path, text = await research_flow.write_dossier(v, place_id, name)
+        path, text = await asyncio.to_thread(research_entry, v, entry_id, place_id, name)
     except Exception:
         logger.exception("dossier failed for %s", name)
         await query.edit_message_text(f"Research on {name} failed — still queued.")
         return
-    data = v.read_itinerary()
-    entry = itinerary.find_entry(data, entry_id)
-    if entry is not None:
-        entry["research"] = "done"
-        entry["dossier"] = path
-        v.write_itinerary(data, f"itinerary: researched {entry.get('place')}")
     for chunk in chunks(f"{text}\n\n(saved to {path})"):
         await context.bot.send_message(chat_id=allowed_user_id(), text=chunk)
 

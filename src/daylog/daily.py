@@ -132,13 +132,35 @@ async def send_weekly_review(
     from daylog import chat_flow, plan_flow
 
     v = vault()
-    start, end = review.week_bounds(any_day)
-    entries = v.read_journal_range(start, end)
-    if not entries:
+    try:
+        written = await asyncio.to_thread(write_review, v, any_day)
+    except Exception:
+        logger.exception("weekly review failed")
+        await context.bot.send_message(
+            chat_id=chat_id, text="Weekly review failed — check bot logs."
+        )
+        return
+    if written is None:
         await context.bot.send_message(
             chat_id=chat_id, text="No journal entries this week to review."
         )
         return
+    label, start, end, text = written
+    for chunk in chunks(f"Week {label} ({start.isoformat()} → {end.isoformat()})\n\n{text}"):
+        await context.bot.send_message(chat_id=chat_id, text=chunk)
+    chat_flow.remember(context, "The bot sent the weekly review", text)
+    if weekly_plan_enabled() and llm.can_spend(v, plan_flow.PLAN_ESTIMATE_USD):
+        await plan_flow.make_plan(context, chat_id)
+
+
+def write_review(v: Vault, any_day: date) -> tuple[str, date, date, str] | None:
+    """Write the review of `any_day`'s week (paid) and save it under reviews/.
+    Returns (week label, start, end, text), or None when the week has no entries.
+    Raises if the model call fails; a failed save is logged."""
+    start, end = review.week_bounds(any_day)
+    entries = v.read_journal_range(start, end)
+    if not entries:
+        return None
     goal_lines = "\n".join(
         f"- {g['id']}: {g['title']} ({g['type']}, metric {g.get('metric') or '-'})"
         for g in goals.active_summary(v.read_goals())
@@ -161,24 +183,15 @@ async def send_weekly_review(
         weekly_research,
     )
     try:
-        text, _cost = await asyncio.to_thread(review.write, review_input)
-    except Exception:
-        logger.exception("weekly review failed")
-        await context.bot.send_message(
-            chat_id=chat_id, text="Weekly review failed — check bot logs."
-        )
-        return
+        text, _cost = review.write(review_input)
+    finally:
+        llm.flush(v)
     label = review.week_label(start)
     try:
         v.write_text(f"reviews/{label}.md", f"# Week {label}\n\n{text}\n", f"review: {label}")
     except VaultError:
         logger.exception("saving review failed")
-    for chunk in chunks(f"Week {label} ({start.isoformat()} → {end.isoformat()})\n\n{text}"):
-        await context.bot.send_message(chat_id=chat_id, text=chunk)
-    chat_flow.remember(context, "The bot sent the weekly review", text)
-    llm.flush(v)
-    if weekly_plan_enabled() and llm.can_spend(v, plan_flow.PLAN_ESTIMATE_USD):
-        await plan_flow.make_plan(context, chat_id)
+    return label, start, end, text
 
 
 async def weekly_review_job(context: ContextTypes.DEFAULT_TYPE) -> None:

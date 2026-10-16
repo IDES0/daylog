@@ -117,3 +117,72 @@ The status site grows into the app that can replace Telegram. One address
 `GET /app.js`, `GET /app.css` (and the existing manifest/icons/sw). The
 frontend is plain HTML/CSS/JS (no build step), may load **d3@7.9.0** and
 **topojson-client@3.1.0** from jsdelivr (already used), nothing else.
+
+## As built (backend, 2026-10-16)
+
+Additions and precisions to the contract above; nothing above was removed.
+
+### Errors
+| Status | `error` | When |
+|---|---|---|
+| 400 | `bad_json`, `missing_field`, `bad_date`, `bad_number`, `bad_range`, `bad_action`, `bad_kind`, `empty` | malformed request; `bad_date` also for a future `date` on `/api/log` |
+| 401 | `signed_out` | no/expired session (checked before anything else, also for unknown `/api/*` paths) |
+| 402 | `budget` | a paid call (`POST /api/plan`, `POST /api/ripple`) when the monthly budget is spent |
+| 403 | `forbidden` | missing `X-Daylog: 1` or an `Origin` that isn't this host |
+| 404 | `not_found`, `unknown_change`, `nothing_to_review` | |
+| 405 | `method_not_allowed` | known path, wrong method |
+| 409 | `conflict` | an undo that can't revert cleanly |
+| 410 | `expired` | unknown/answered/expired card |
+| 413 | `too_large` | body over 64 KB (20 MB for `/api/voice`) |
+| 422 | `no_speech` | voice note with no speech |
+| 500 | `log_failed` (+ `"text"`, the note, so it isn't lost), `commit_failed` (+ `"cards"`: the entry is on disk, uncommitted), `transcribe_failed`, `server_error` | |
+| 502 | `upstream` | PostHog unreachable (`/api/site`) |
+
+### Cards: kinds and action ids
+`POST /api/cards/{id}` answers with `{"ok": bool, "message", "cards"}`; `ok`
+is false when the answer couldn't be applied (the card is gone either way).
+
+| kind | title | actions |
+|---|---|---|
+| `goal_slip`, `itinerary`, `correction` | the same question Telegram asks | `confirm`, `cancel` |
+| `chat_proposal` | the proposal's summary | `confirm`, `cancel` |
+| `discipline_fix` | "Not Tow foil? Tap what it was." | one per alternative (`id` = discipline id, `label` = its name), `cancel` (keep) |
+| `discipline_add` | "New discipline: X, under Y. Add it?" | `active`, `want`, `cancel` |
+| `ripple` (a proposal) | the decision; `detail` = summary + changes | `all`, `each` (follow-ups: `chat_proposal` cards, plus a `ripple` card `adopt`/`cancel` for a draft plan), `skip` |
+| `plan` | "Which option?" | `"0"`, `"1"`, … (option index; the recommended one has `style: primary`), `hold` |
+| `place` | "New place: …"; `detail` = what you said, description, facts | `add`, `skip`; a bulk card (more than 3 found by explore) has `addall`, `review` (follow-ups: one card each), `skipall` |
+| `want` | "Added X. Research is queued…" | `now` (runs the research, slow), `later` |
+| `research` (from chat) | "Research X now? (API budget…)" | `confirm` (slow; explore returns `place` follow-ups), `cancel` |
+
+`style` is only sent when set. Ripple cards are made from
+`research/proposals/*.yaml` whenever `GET /api/cards` or `GET /api/home`
+runs, and disappear once answered on either client. A logged note with
+unlinked place names, or a location change, starts a background place
+lookup, as on Telegram; its `place` cards show up later in `GET /api/cards`
+(poll it, e.g. on focus). Chat's "rank" jobs have no web card yet.
+
+### Shapes
+- `GET /api/home`: `where` is null when no location is known; `next` is at
+  most 8 legs; goal `progress`/`target` are numbers or null.
+- `GET /api/calendar`: each block also has `"detail"`; a day without an
+  entry has `"summary": null, "blocks": []`.
+- `GET /api/journal`: `location` is the day's `location` frontmatter or null;
+  the range is capped at 366 days.
+- `GET /api/journal/{date}`: 404 when there's no entry.
+- `GET /api/brief`: the latest brief built by either client since the
+  server started (briefs aren't saved to the vault) → `{"date": null,
+  "text": null}` before the first. `POST /api/brief` adds it to the web
+  chat's context, as `/plan`, `/ripple` and `/review` do.
+- `GET /api/plan`: `{"date": null, "text": null, "options": []}` with no plan;
+  `options` only for a plan made since the server started (the markdown
+  can't be turned back into options). `POST /api/plan` with no workable
+  option returns the planner's `text` and empty `options`/`cards`.
+- `GET /api/review`: `{"week": null, "text": null}` with none; `POST` → 404
+  `nothing_to_review` for an empty week.
+- `POST /api/research {"place"}` → `{"message": dossier text, "cards": []}`;
+  `{"kind": "backfill", "arg": "30"}` (days).
+- `GET /api/disciplines`: no graph → `{"nodes": [], "slots": {}}`.
+- `POST /api/changes/{sha}/revert`: only a sha from `GET /api/changes`.
+- Static: `GET /` signed in serves `static/index.html` (`no-store`), or the
+  old private page if the file is missing; `/app.js`, `/app.css` are
+  `no-cache` (404 if missing).

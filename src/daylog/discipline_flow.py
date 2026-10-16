@@ -11,84 +11,23 @@ from __future__ import annotations
 
 import logging
 import uuid
-from dataclasses import dataclass
-from datetime import date, datetime, timedelta
-from typing import Any
+from datetime import date, datetime
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Message, Update
 from telegram.ext import ContextTypes
 
 from daylog import disciplines
-from daylog.disciplines import Graph, Guess
-from daylog.places import PlaceIndex
+from daylog.disciplines import Fix, Graph, Guess, Proposal, guess_note, prepare
 from daylog.tg import chunks, is_authorized, tz, vault
-from daylog.vault import Vault, VaultError
+from daylog.vault import VaultError
+
+# The logic lives in disciplines.py (shared with the web app); re-exported here.
+__all__ = ["Fix", "Proposal", "guess_note", "prepare"]
 
 logger = logging.getLogger(__name__)
 
 _PENDING_FIX_KEY = "discipline_fixes"
 _PENDING_NEW_KEY = "discipline_new"
-
-
-@dataclass
-class Proposal:
-    """A sport logged that the graph doesn't have yet."""
-
-    node_id: str
-    name: str
-    parents: list[str]
-
-
-@dataclass
-class Fix:
-    entry_date: date
-    index: int
-    said: str
-
-
-def _display_name(node_id: str) -> str:
-    return node_id.replace("_", " ").strip().capitalize()
-
-
-def prepare(
-    v: Vault,
-    graph: Graph,
-    facts: dict[str, Any],
-    entry_date: date,
-    places: PlaceIndex,
-    current_place_id: str | None,
-    prefer: list[str] | None = None,
-) -> tuple[list[Guess], list[Proposal]]:
-    """Before the entry is written: narrow vague sports, pull out new ones."""
-    activities = facts.get("activities") or []
-    proposals: list[Proposal] = []
-    for activity in activities:
-        if not isinstance(activity, dict):
-            continue
-        parents = activity.pop("new_discipline_parents", None)
-        label = str(activity.get("type") or "")
-        if parents and label and graph.resolve(label) is None:
-            node_id = disciplines.slug(label)
-            if all(p.node_id != node_id for p in proposals):
-                proposals.append(
-                    Proposal(node_id, _display_name(node_id), [str(p) for p in parents])
-                )
-    if not graph:
-        return [], proposals
-    history = disciplines.history(graph, disciplines.all_days(v, entry_date - timedelta(days=1)))
-    guesses = disciplines.resolve_vague(
-        graph, activities, places, current_place_id, history, prefer or []
-    )
-    return guesses, proposals
-
-
-def guess_note(graph: Graph, guesses: list[Guess]) -> str:
-    """The reply line saying what a vague sport was logged as."""
-    return "\n".join(
-        f"{graph.name(g.said) if g.said in graph else g.said} → logged as "
-        f"{graph.name(g.chosen)} ({g.reason})."
-        for g in guesses
-    )
 
 
 async def after_entry(
@@ -156,20 +95,16 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
             await query.edit_message_text("This has expired or was already handled.")
             return
         chosen = parts[3]
-        entry = v.read_journal_entry(fix.entry_date)
-        frontmatter = dict(entry.frontmatter) if entry else {}
-        if entry is None or not disciplines.set_type(frontmatter, fix.index, fix.said, chosen):
-            await query.edit_message_text(
-                "That entry changed since — nothing was edited. Say the correction instead."
-            )
-            return
         try:
-            v.rewrite_journal_entry(
-                fix.entry_date, frontmatter, f"journal: {fix.entry_date.isoformat()} ({chosen})"
-            )
+            fixed = disciplines.apply_fix(v, fix, chosen)
         except VaultError:
             logger.exception("discipline fix commit failed")
             await query.edit_message_text("The fix didn't save — check bot logs.")
+            return
+        if not fixed:
+            await query.edit_message_text(
+                "That entry changed since — nothing was edited. Say the correction instead."
+            )
             return
         graph = Graph(v.read_disciplines())
         await query.edit_message_text(f"Fixed — logged as {graph.name(chosen)}.")
@@ -184,19 +119,15 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
             f"Left {proposal.name} out of the disciplines; the day still logs it."
         )
         return
-    data = v.read_disciplines()
-    graph = Graph(data)
-    if proposal.node_id in graph:
-        await query.edit_message_text(f"{proposal.name} is already a discipline.")
-        return
-    node = disciplines.new_node(graph, proposal.name, proposal.parents)
-    node["status"] = parts[3] if len(parts) > 3 and parts[3] in disciplines.STATUSES else "active"
-    data[proposal.node_id] = node
+    status = parts[3] if len(parts) > 3 else "active"
     try:
-        v.write_disciplines(data, f"disciplines: add {proposal.node_id}")
+        added = disciplines.add_discipline(v, proposal, status)
     except VaultError:
         logger.exception("disciplines commit failed")
         await query.edit_message_text("Adding it didn't save — check bot logs.")
+        return
+    if not added:
+        await query.edit_message_text(f"{proposal.name} is already a discipline.")
         return
     await query.edit_message_text(f"Added {proposal.name} to the disciplines.")
 

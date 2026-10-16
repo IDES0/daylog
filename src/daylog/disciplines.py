@@ -368,6 +368,98 @@ def new_node(graph: Graph, name: str, parents: list[str]) -> dict[str, Any]:
     }
 
 
+# -- at log time, and the answers to its cards ------------------------------------
+# Shared by Telegram (discipline_flow) and the web app; they only render.
+
+
+@dataclass
+class Proposal:
+    """A sport logged that the graph doesn't have yet."""
+
+    node_id: str
+    name: str
+    parents: list[str]
+
+
+@dataclass
+class Fix:
+    """A guessed sport that can be changed with one tap."""
+
+    entry_date: date
+    index: int
+    said: str
+
+
+def _display_name(node_id: str) -> str:
+    return node_id.replace("_", " ").strip().capitalize()
+
+
+def prepare(
+    v: Vault,
+    graph: Graph,
+    facts: dict[str, Any],
+    entry_date: date,
+    places: PlaceIndex,
+    current_place_id: str | None,
+    prefer: list[str] | None = None,
+) -> tuple[list[Guess], list[Proposal]]:
+    """Before the entry is written: narrow vague sports, pull out new ones."""
+    activities = facts.get("activities") or []
+    proposals: list[Proposal] = []
+    for activity in activities:
+        if not isinstance(activity, dict):
+            continue
+        parents = activity.pop("new_discipline_parents", None)
+        label = str(activity.get("type") or "")
+        if parents and label and graph.resolve(label) is None:
+            node_id = slug(label)
+            if all(p.node_id != node_id for p in proposals):
+                proposals.append(
+                    Proposal(node_id, _display_name(node_id), [str(p) for p in parents])
+                )
+    if not graph:
+        return [], proposals
+    past = history(graph, all_days(v, entry_date - timedelta(days=1)))
+    guesses = resolve_vague(graph, activities, places, current_place_id, past, prefer or [])
+    return guesses, proposals
+
+
+def guess_note(graph: Graph, guesses: list[Guess]) -> str:
+    """The reply line saying what a vague sport was logged as."""
+    return "\n".join(
+        f"{graph.name(g.said) if g.said in graph else g.said} → logged as "
+        f"{graph.name(g.chosen)} ({g.reason})."
+        for g in guesses
+    )
+
+
+def apply_fix(v: Vault, fix: Fix, chosen: str) -> bool:
+    """Retype a guessed activity. False if the entry changed since (nothing
+    written); raises VaultError when the commit fails."""
+    entry = v.read_journal_entry(fix.entry_date)
+    frontmatter = dict(entry.frontmatter) if entry else {}
+    if entry is None or not set_type(frontmatter, fix.index, fix.said, chosen):
+        return False
+    v.rewrite_journal_entry(
+        fix.entry_date, frontmatter, f"journal: {fix.entry_date.isoformat()} ({chosen})"
+    )
+    return True
+
+
+def add_discipline(v: Vault, proposal: Proposal, status: str) -> bool:
+    """Add a new sport to the graph. False if it's already there; raises
+    VaultError when the commit fails."""
+    data = v.read_disciplines()
+    graph = Graph(data)
+    if proposal.node_id in graph:
+        return False
+    node = new_node(graph, proposal.name, proposal.parents)
+    node["status"] = status if status in STATUSES else "active"
+    data[proposal.node_id] = node
+    v.write_disciplines(data, f"disciplines: add {proposal.node_id}")
+    return True
+
+
 # -- text for prompts, the brief and /disciplines ---------------------------------
 
 

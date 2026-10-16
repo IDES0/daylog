@@ -142,7 +142,7 @@ Scheduled once daily at `BRIEF_HOUR` (local `TZ`), and available on demand
 via `/brief`.
 
 ### Web surface (optional)
-A small HTTP server (`calendar_server.py`) serves three things, each off
+A small HTTP server (`calendar_server.py`) serves these, each off
 until its variable is set, and 404s everything else:
 
 - **Calendar feed** at `/calendar/<CALENDAR_FEED_SECRET>.ics`. Google and
@@ -180,7 +180,9 @@ until its variable is set, and 404s everything else:
     its numbers, goals and what it still needs; tapping a root zooms into
     it; "As a list" has the same facts as text. After 10 misses in 15 minutes every login
     fails until the window passes. Changing the password signs everyone
-    out. Still read-only: Telegram changes things.
+    out. Once the web app's shell (`webapp/static/index.html`) ships, a
+    signed-in `/` serves the web app instead (see **Web app** below); the
+    private view is the fallback when the shell is missing.
   - **Installable**: a manifest, icons and a service worker (it caches
     nothing; it only shows an offline note), so Safari's Share → Add to Home
     Screen or Chrome's Install opens it as an app. Sign in inside the
@@ -193,13 +195,43 @@ until its variable is set, and 404s everything else:
   object a day from an iOS Shortcut (`{"date": "2026-10-02", "steps": 8423}`),
   merged into `health.yaml`. Numbers may carry units ("1.9 mi"); the reply
   names what was saved and what was skipped.
+- **Web app** (with the status site): a JSON API under `/api/` and the app
+  shell at `/` (signed in), `/app.js`, `/app.css`. See below.
+
+### Web app
+The status site doubles as an app that can do what the Telegram bot does;
+Telegram stays an equal client. Both call the same service functions
+(`journal_service.py`, `services.py`, the pure functions in the `*_flow.py`
+modules), so a note logged on either lands identically. The contract is
+[`docs/web-api.md`](docs/web-api.md).
+
+- Every `/api/*` request needs the session cookie (401 `signed_out`);
+  every non-GET also the header `X-Daylog: 1` and, when sent, an `Origin`
+  equal to the host (403). No CORS headers. Bodies: 64 KB JSON, 20 MB
+  voice; never logged.
+- Anything inferred comes back as a **card** (server memory, 24 h) and is
+  applied only when answered: `GET /api/cards`, `POST /api/cards/{id}`.
+- Endpoints: `me`, `home`, `map`, `calendar`, `journal`, `journal/{date}`,
+  `log`, `voice`, `reconcile`, `chat` (+ `chat/reset`), `brief`, `surf`,
+  `fly`, `upcoming`, `status`, `usage`, `site`, `plan`, `ripple`, `trail`,
+  `places`, `places/{id}`, `wishlist`, `rankings`, `research`, `review`,
+  `disciplines`, `changes` (+ `changes/{sha}/revert`), `cards`.
+- The frontend is plain HTML/CSS/JS in `src/daylog/webapp/static/`, shipped
+  as package data. Ranking (the head-to-head flow) is Telegram-only for now.
 
 ## Architecture
 
 ```
 src/daylog/
-  bot.py           Telegram entrypoint: journaling pipeline, commands, job
-                   schedule. Feature handlers live in *_flow.py modules.
+  bot.py           Telegram entrypoint: commands, buttons, job schedule.
+                   Feature handlers live in *_flow.py modules.
+  journal_service.py  The journaling pipeline (extract -> location -> goals
+                   -> itinerary -> corrections -> journal -> disciplines),
+                   client-free; returns what waits for a confirm.
+  services.py      Read-side helpers both clients use: status, upcoming,
+                   trail, place card, conditions, the brief.
+  webapp/          The web app: api.py (routes), cards.py (confirm cards in
+                   memory), chat_store.py, static/ (the app shell).
   tg.py            Shared Telegram plumbing: the one auth check
                    (TELEGRAM_ALLOWED_USER_ID), vault handle, tz, chunking.
   vault.py         The ONLY module that touches the filesystem or git.
