@@ -129,14 +129,20 @@ def reconcile_day(
     if graph:
         index = PlaceIndex(places)
         here = index.current_place(location_entry)
+        activities = facts.get("activities") or []
+        disciplines.unsaid_kinds(graph, activities, entry.transcript)
         disciplines.resolve_vague(
             graph,
-            facts.get("activities") or [],
+            activities,
             index,
             here["id"] if here else None,
             history or [],
-            disciplines.stated(graph, entry.frontmatter),
+            disciplines.stated(graph, entry.frontmatter, entry.transcript),
         )
+        if facts.get("goal_progress"):
+            facts["goal_progress"], _ = disciplines.fitting_progress(
+                graph, active_goals, activities, facts["goal_progress"]
+            )
     return rebuild(entry, facts)
 
 

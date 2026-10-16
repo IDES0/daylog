@@ -217,7 +217,13 @@ def log(
     place_index = PlaceIndex(places_list)
     here = place_index.current_place(current)
     guesses, new_disciplines = disciplines.prepare(
-        v, graph, facts, entry_date, place_index, here["id"] if here else None
+        v,
+        graph,
+        facts,
+        entry_date,
+        place_index,
+        here["id"] if here else None,
+        transcript=transcript,
     )
     result = LogResult(
         date=entry_date,
