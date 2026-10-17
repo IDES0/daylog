@@ -834,18 +834,20 @@ def _head(title: str) -> str:
     )
 
 
-# The guest view is one screen: no scrolling on a phone, two columns on a
-# desktop with the map filling the right.
+# The guest view is for friends who keep me honest: where I am and where I'm
+# headed, goals with their progress (and how often their dates slipped), what
+# I've actually done lately by element, lifetime totals, what I said I'd start
+# and haven't, and the latest milestones. Never the journal's words, food,
+# mood, health numbers, or goal notes.
 _GUEST_CSS = """
-.one { box-sizing:border-box; height:100vh; height:100dvh; max-width:1180px; margin:0 auto;
-  display:grid; grid-template-rows:auto minmax(0,1fr) auto; gap:14px;
-  padding:calc(14px + env(safe-area-inset-top)) 16px calc(10px + env(safe-area-inset-bottom)); }
-.info { display:flex; flex-direction:column; gap:12px; min-width:0; }
-.info .eyebrow { margin:0; }
-.info h1 { font-size:clamp(30px,8vw,46px); margin:0; }
+.one { box-sizing:border-box; max-width:1240px; margin:0 auto; display:grid; gap:16px;
+  padding:calc(16px + env(safe-area-inset-top)) 16px calc(12px + env(safe-area-inset-bottom)); }
+.side, .cards { display:flex; flex-direction:column; gap:14px; min-width:0; }
+.side .eyebrow { margin:0; }
+.side h1 { font-size:clamp(30px,7vw,44px); margin:0; }
 .next { display:flex; flex-direction:column; gap:2px; padding:12px 14px;
   border:1px solid var(--line); border-radius:14px; background:var(--surface); }
-.next .k { font:500 11px/1 var(--mono); text-transform:uppercase; letter-spacing:.08em;
+.k { font:500 11px/1 var(--mono); text-transform:uppercase; letter-spacing:.08em;
   color:var(--faint); }
 .next b { font:500 24px/1.2 var(--serif); }
 .next .when { color:var(--muted); font-size:14px; }
@@ -855,25 +857,41 @@ _GUEST_CSS = """
 .then li span { font-family:var(--mono); color:var(--faint); }
 .one .stats { margin:0; gap:22px; }
 .one .stat b { font-size:24px; }
-.lately { display:flex; flex-wrap:wrap; gap:6px; }
-.lately span { font-size:13px; padding:4px 10px; border-radius:999px; background:var(--surface);
-  border:1px solid var(--line); color:var(--muted); }
-.lately span b { color:var(--text); font-weight:500; }
-.mapbox { display:flex; flex-direction:column; min-height:0; }
 .mapbox .legend { margin-bottom:6px; }
-.mapbox .map-card { flex:1; min-height:140px; }
+.mapbox .map-card { height:260px; }
 .one #map { height:100%; }
+.cards { display:grid; grid-template-columns:1fr; gap:14px; align-content:start; }
+.box { padding:14px 16px; border:1px solid var(--line); border-radius:14px;
+  background:var(--surface); min-width:0; }
+.box > .k { display:block; margin-bottom:10px; }
+.box li { padding:7px 0; border-top:1px solid var(--line); }
+.box li:first-child { border-top:0; padding-top:0; }
+.box .row span:last-child { font:12.5px/1.7 var(--mono); }
+.slip { color:var(--here); font-size:12.5px; }
+.roots li { display:grid; grid-template-columns:64px 1fr auto; align-items:center; gap:10px;
+  border:0; padding:4px 0; }
+.roots .bar { height:8px; border-radius:4px; background:var(--line); overflow:hidden; }
+.roots .bar i { display:block; height:100%; border-radius:4px; }
+.roots .n { font:12.5px var(--mono); color:var(--faint); white-space:nowrap; }
+.big { font:500 30px/1 var(--serif); }
+.dots { display:flex; gap:5px; margin:8px 0 10px; }
+.dots i { width:22px; height:8px; border-radius:3px; background:var(--line); }
+.dots i.on { background:var(--accent); }
+.chips { display:flex; flex-wrap:wrap; gap:6px; }
+.chips span { font-size:13px; padding:4px 10px; border-radius:999px; background:var(--bg);
+  border:1px solid var(--line); color:var(--muted); }
+.chips span b { color:var(--text); font-weight:500; }
+.chips.todo span { border-style:dashed; }
 .one footer { margin:0; padding:8px 0 0; }
 .one .empty { color:var(--faint); font-size:14px; }
-@media (min-width: 900px) {
-  .one { grid-template-columns:minmax(300px,380px) minmax(0,1fr);
-    grid-template-rows:minmax(0,1fr) auto; column-gap:28px; padding-top:28px; }
-  .info { justify-content:center; }
-  .one footer { grid-column:1 / -1; }
+@media (min-width: 720px) {
+  .cards { grid-template-columns:1fr 1fr; }
+  .wide { grid-column:1 / -1; }
 }
-@media (max-height: 600px) and (max-width: 899px) {
-  .one { height:auto; }
-  .mapbox .map-card { height:260px; }
+@media (min-width: 1000px) {
+  .one { grid-template-columns:minmax(300px,360px) minmax(0,1fr); column-gap:24px;
+    padding-top:28px; }
+  .one footer { grid-column:1 / -1; }
 }
 """
 
@@ -883,9 +901,13 @@ def _countdown(start: date, today: date) -> str:
     return "today" if days <= 0 else "tomorrow" if days == 1 else f"in {days} days"
 
 
+def _box(title: str, body: str, wide: bool = False) -> str:
+    cls = "box wide" if wide else "box"
+    return f'<section class="{cls}"><span class="k">{escape(title)}</span>{body}</section>'
+
+
 def render_guest(vault: Vault, today: date, login: bool = False) -> str:
-    """The guest view: where I am, where I'm headed and when, a few numbers,
-    what I've been doing, the map. Nothing from the journal's words."""
+    """The page friends see (see _GUEST_CSS's comment for what's in and out)."""
     location = vault.read_location() or []
     itinerary = vault.read_itinerary()
     current = brief.current_location(location)
@@ -922,35 +944,140 @@ def render_guest(vault: Vault, today: date, login: bool = False) -> str:
         + _stat(places_been, "Places so far")
         + "</div>"
     )
+    side = (
+        f'<section class="side"><div class="eyebrow">'
+        f"{escape(today.strftime('%A'))}, {escape(_short(today))}</div>"
+        f"<h1>{escape(place or 'Location unknown')}</h1>"
+        f'<p class="lede">{escape(here)}</p>{next_block}{stats}'
+        + (
+            f'<div class="mapbox">{_map_section(headed, title=False)}</div>'
+            if headed["stops"]
+            else ""
+        )
+        + "</section>"
+    )
 
-    # The last week's sports only: what I've been doing, not my job search.
-    graph = disciplines.Graph(vault.read_disciplines())
+    # Goals: title, progress, and how often the date slipped. No notes.
+    raw_goals = [g for g in vault.read_goals() or [] if isinstance(g, dict)]
+    slips = {str(g.get("title", g.get("id"))): len(g.get("slip_history") or []) for g in raw_goals}
+    goal_items = []
+    for g in goal_rows(raw_goals):
+        bar = (
+            f'<div class="track"><div class="fill" style="width:{g["percent"]}%"></div></div>'
+            if g["percent"] is not None
+            else ""
+        )
+        right = " ".join(x for x in (g["value"], g["metric"]) if x) or g["when"]
+        moved = slips.get(g["title"], 0)
+        slip = f'<div class="slip">date moved {moved}×</div>' if moved else ""
+        goal_items.append(_item(g["title"], right, bar + slip))
+    goals_box = _box(
+        "Goals",
+        f"<ul>{''.join(goal_items)}</ul>" if goal_items else '<p class="empty">None set.</p>',
+        wide=True,
+    )
+
+    graph, recent, all_time = disciplines.snapshot(vault, today)
+    slots = discipline_slots(graph)
+    roots = graph.roots()
+    top = max([recent[r].sessions for r in roots if recent.get(r)] or [1])
+    root_rows = ""
+    for r in roots:
+        t = recent.get(r) or disciplines.Totals()
+        hours = f" · {round(t.hours):g}h" if t.hours else ""
+        root_rows += (
+            f"<li><span>{escape(graph.name(r))}</span>"
+            f'<span class="bar"><i style="width:{100 * t.sessions / top:.0f}%;'
+            f'background:var(--root-{slots.get(r, 1)})"></i></span>'
+            f'<span class="n">{t.sessions}{hours}</span></li>'
+        )
+    elements_box = _box(
+        f"Last {disciplines.RECENT_DAYS} days", f'<ul class="roots">{root_rows}</ul>'
+    )
+
+    # This week: days logged out of 7, and the sports done.
     week = vault.read_journal_range(today - timedelta(days=RECENT_DAYS - 1), today)
+    logged = set(week)
+    dots = "".join(
+        f'<i class="{"on" if today - timedelta(days=i) in logged else ""}"></i>'
+        for i in range(RECENT_DAYS - 1, -1, -1)
+    )
     days_by_sport: dict[str, set[date]] = {}
     for d, e in week.items():
         for a in e.frontmatter.get("activities") or []:
             node = graph.resolve(a.get("type")) if isinstance(a, dict) else None
             if node:
                 days_by_sport.setdefault(node, set()).add(d)
-    top = sorted(days_by_sport.items(), key=lambda kv: -len(kv[1]))[:4]
-    lately = (
-        '<div class="lately">'
-        + "".join(f"<span><b>{escape(graph.name(n))}</b> {_days(len(ds))}</span>" for n, ds in top)
-        + "</div>"
-        if top
+    chips = "".join(
+        f"<span><b>{escape(graph.name(n))}</b> {_days(len(ds))}</span>"
+        for n, ds in sorted(days_by_sport.items(), key=lambda kv: -len(kv[1]))
+    )
+    week_box = _box(
+        "This week",
+        f'<div><span class="big">{len(logged)}</span>'
+        f'<span class="muted"> of {RECENT_DAYS} days logged</span></div>'
+        f'<div class="dots">{dots}</div>'
+        + (
+            f'<div class="chips">{chips}</div>'
+            if chips
+            else '<p class="empty">No sports yet this week.</p>'
+        ),
+    )
+
+    # Lifetime: the sports themselves (not the groupings), most sessions first.
+    # A sport whose sessions all sit in one of its kinds (Foiling = Tow foil)
+    # is shown once, as the kind.
+    def same_as_a_kind(n: str, sessions: int) -> bool:
+        return any(
+            (all_time.get(c) or disciplines.Totals()).sessions == sessions
+            for c in graph.descendants(n)
+        )
+
+    sports = sorted(
+        (
+            (n, t)
+            for n, t in all_time.items()
+            if graph.status(n) and t.sessions and not same_as_a_kind(n, t.sessions)
+        ),
+        key=lambda nt: -nt[1].sessions,
+    )[:6]
+    life_items = "".join(
+        _item(graph.name(n), f"{t.sessions} {'dives' if n == 'dive' else 'sessions'}")
+        for n, t in sports
+    )
+    life_box = _box(
+        "Lifetime", f"<ul>{life_items}</ul>" if life_items else '<p class="empty">Nothing yet.</p>'
+    )
+
+    # Said I'd do it, haven't logged it yet.
+    todo = [
+        graph.name(n)
+        for n in graph.nodes
+        if disciplines.state(graph, n, raw_goals, all_time) == "not started"
+    ]
+    todo_box = (
+        _box(
+            "Committed, not started yet",
+            '<div class="chips todo">'
+            + "".join(f"<span>{escape(t)}</span>" for t in todo)
+            + "</div>",
+        )
+        if todo
         else ""
     )
 
-    info = (
-        f'<section class="info"><div class="eyebrow">'
-        f"{escape(today.strftime('%A'))}, {escape(_short(today))}</div>"
-        f"<h1>{escape(place or 'Location unknown')}</h1>"
-        f'<p class="lede">{escape(here)}</p>{next_block}{stats}{lately}</section>'
-    )
-    mapbox = (
-        f'<section class="mapbox">{_map_section(headed, title=False)}</section>'
-        if headed["stops"]
-        else ""
+    everything = disciplines.all_days(vault, today)
+    milestones: list[tuple[str, str]] = []
+    for d, fm in sorted(everything.items()):
+        for m in fm.get("milestones") or []:
+            if isinstance(m, dict) and m.get("what"):
+                milestones.append((_short(d), str(m["what"])))
+    wins = "".join(_item(what, when) for when, what in reversed(milestones[-4:]))
+    wins_box = _box("Milestones", f"<ul>{wins}</ul>" if wins else '<p class="empty">None yet.</p>')
+
+    cards = (
+        f'<section class="cards">{goals_box}{week_box}{elements_box}'
+        f"{life_box}{wins_box}{todo_box}</section>"
     )
     door = (
         '<form class="key" method="post" action="/login">'
@@ -967,7 +1094,7 @@ def render_guest(vault: Vault, today: date, login: bool = False) -> str:
     return (
         _head("Alex · status")
         + f"<style>{_GUEST_CSS}</style>"
-        + f'<main class="one">{info}{mapbox}{footer}</main>{sw}</body></html>'
+        + f'<main class="one">{side}{cards}{footer}</main>{sw}</body></html>'
     )
 
 
