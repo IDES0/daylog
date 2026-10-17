@@ -66,9 +66,23 @@ def test_render_is_one_escaped_page(vault: Vault) -> None:
     assert "23 m &lt;depth&gt; PB" in html
 
 
-def test_guest_view_is_one_screen_of_where_and_next(vault: Vault) -> None:
+def test_guest_view_shows_progress_but_not_the_journal(vault: Vault) -> None:
     vault.write_yaml(
-        "goals.yaml", [{"id": "s", "title": "Secret goal", "status": "active"}], "goals"
+        "goals.yaml",
+        [
+            {
+                "id": "s",
+                "title": "Surf <more>",
+                "status": "active",
+                "progress": 3,
+                "target": 6,
+                "metric": "sessions",
+                "notes": "secret note",
+                "slip_history": [{"from": "2026-09-01", "to": "2026-10-01"}],
+            },
+            {"id": "d", "title": "Dropped thing", "status": "dropped"},
+        ],
+        "goals",
     )
     vault.write_yaml(
         "itinerary.yaml",
@@ -78,12 +92,22 @@ def test_guest_view_is_one_screen_of_where_and_next(vault: Vault) -> None:
         ],
         "itinerary",
     )
-    vault.write_disciplines({"surf": {"name": "Surfing"}}, "disciplines")
+    vault.write_disciplines(
+        {
+            "water": {"name": "Water"},
+            "body": {"name": "Body"},
+            "surf": {"name": "Surfing", "parents": ["water"], "status": "active"},
+            "gym": {"name": "Strength", "parents": ["body"], "status": "active"},
+        },
+        "disciplines",
+    )
     vault.write_journal_entry(
         datetime(2026, 10, 1, 9, 0),
         {
             "activities": [{"type": "surf", "hours": 2}, {"type": "job_search"}],
             "meals": [{"items": ["rice"], "kcal": 600}],
+            "felt": [{"mood": 2}],
+            "milestones": [{"what": "first <heelside> cutback", "type": "surf"}],
         },
         "t",
         "a private summary",
@@ -92,9 +116,15 @@ def test_guest_view_is_one_screen_of_where_and_next(vault: Vault) -> None:
 
     assert '<main class="one">' in html
     assert "Austin &lt;TX&gt;" in html and "in 3 days" in html and "Japan" in html
-    assert "<b>Surfing</b> 1 day" in html
-    # Not on the guest screen: goals, food, non-sport activities, journal words.
-    for private in ("Secret goal", "kcal", "job", "a private summary"):
+    # Progress for friends: goals with bars and slips, the week, elements,
+    # lifetime totals, what's not started, milestones.
+    assert "Surf &lt;more&gt;" in html and "3 / 6 sessions" in html and "width:50%" in html
+    assert "date moved 1×" in html
+    assert "<b>Surfing</b> 1 day" in html and '<span class="big">1</span>' in html
+    assert "Water" in html and "Committed, not started yet" in html and "Strength" in html
+    assert "first &lt;heelside&gt; cutback" in html
+    # Not for friends: notes, dropped goals, food, mood, non-sport activities, journal words.
+    for private in ("secret note", "Dropped thing", "kcal", "mood", "job", "a private summary"):
         assert private not in html, private
     # No password configured: no password line.
     assert "<form" not in html
