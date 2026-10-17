@@ -50,6 +50,7 @@ from daylog import (
     services,
     timeline,
     transcribe,
+    vocab,
     wishlist_flow,
 )
 from daylog.disciplines import Graph
@@ -489,7 +490,9 @@ class Api:
             with tempfile.TemporaryDirectory() as tmp_dir:
                 audio_path = Path(tmp_dir) / f"voice{_VOICE_SUFFIX.get(kind, '.webm')}"
                 audio_path.write_bytes(req.body)
-                transcript = transcribe.transcribe(audio_path)
+                transcript = transcribe.transcribe(
+                    audio_path, primer=vocab.primer_for(self._vault())
+                )
         except Exception:
             logger.exception("failed to transcribe a web voice note")
             raise ApiError(

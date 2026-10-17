@@ -26,6 +26,11 @@ specific gets linked:
   the user's own obscure local spot just because it's more recognizable.
 - A generic place with no name ("a beach", "the cafe") gets neither.
 
+Names. The user's own words are listed above the transcript. When the
+transcript has a plausible mishearing of one ("Lasco" for NASCO), write
+the listed spelling in every field you fill — never correct the
+transcript itself, only what you extract from it.
+
 Call `record_journal_entry` exactly once with what you can confidently infer.
 Guidelines:
 

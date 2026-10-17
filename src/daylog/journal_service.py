@@ -19,7 +19,7 @@ from dataclasses import dataclass, field
 from datetime import date, datetime
 from typing import Any
 
-from daylog import brief, disciplines, export, extract, goals, itinerary
+from daylog import brief, disciplines, export, extract, goals, itinerary, vocab
 from daylog.disciplines import Graph, Guess
 from daylog.places import PlaceIndex
 from daylog.vault import Vault, VaultError
@@ -210,6 +210,7 @@ def log(
         places=places_list,
         current_location_entry=current,
         disciplines=disciplines.outline(graph) if graph else None,
+        vocabulary=vocab.custom(v.read_profile()),
         # A backdated note was sent later than the day it's about.
         recorded_at=None if backdated else now.time(),
     )

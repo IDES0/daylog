@@ -17,7 +17,7 @@ class _FakeModel:
     def __init__(self, *args: Any, **kwargs: Any) -> None:
         _FakeModel.loads += 1
 
-    def transcribe(self, path: str) -> tuple[list[Any], Any]:
+    def transcribe(self, path: str, **_: Any) -> tuple[list[Any], Any]:
         segment = types.SimpleNamespace(text=" hello there ")
         info = types.SimpleNamespace(language="en", duration=1.0)
         return [segment], info

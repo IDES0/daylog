@@ -84,11 +84,15 @@ def _trim_heap() -> None:
         ctypes.CDLL("libc.so.6").malloc_trim(0)
 
 
-def transcribe(audio_path: Path, model_size: str = DEFAULT_MODEL_SIZE) -> str:
-    """Transcribe an audio file to text. Blocking; run off the event loop."""
+def transcribe(
+    audio_path: Path, model_size: str = DEFAULT_MODEL_SIZE, primer: str | None = None
+) -> str:
+    """Transcribe an audio file to text. Blocking; run off the event loop.
+
+    `primer` (see vocab.py) biases Whisper toward names the user says."""
     model = _acquire(model_size)
     try:
-        segments, info = model.transcribe(str(audio_path))
+        segments, info = model.transcribe(str(audio_path), initial_prompt=primer)
         text = " ".join(segment.text.strip() for segment in segments)
     finally:
         _release()
