@@ -704,14 +704,14 @@ def _number_text(key: str, value: float) -> str:
     )
 
 
-def _map_section(data: dict[str, Any]) -> str:
+def _map_section(data: dict[str, Any], title: bool = True) -> str:
     if not data["stops"]:
         return ""
     # `</` can't appear inside a script element, so the JSON can't close it early.
     payload = json.dumps(data, ensure_ascii=False).replace("</", "<\\/")
     return (
-        "<h2>Where I'm headed</h2>"
-        '<div class="legend"><span><i style="background:var(--here)"></i>Now</span>'
+        ("<h2>Where I'm headed</h2>" if title else "")
+        + '<div class="legend"><span><i style="background:var(--here)"></i>Now</span>'
         '<span><i style="background:var(--dot)"></i>Planned</span></div>'
         '<div class="map-card" id="mapCard">'
         '<svg id="map" role="img" aria-label="World map of where the itinerary goes next"></svg>'
@@ -834,6 +834,143 @@ def _head(title: str) -> str:
     )
 
 
+# The guest view is one screen: no scrolling on a phone, two columns on a
+# desktop with the map filling the right.
+_GUEST_CSS = """
+.one { box-sizing:border-box; height:100vh; height:100dvh; max-width:1180px; margin:0 auto;
+  display:grid; grid-template-rows:auto minmax(0,1fr) auto; gap:14px;
+  padding:calc(14px + env(safe-area-inset-top)) 16px calc(10px + env(safe-area-inset-bottom)); }
+.info { display:flex; flex-direction:column; gap:12px; min-width:0; }
+.info .eyebrow { margin:0; }
+.info h1 { font-size:clamp(30px,8vw,46px); margin:0; }
+.next { display:flex; flex-direction:column; gap:2px; padding:12px 14px;
+  border:1px solid var(--line); border-radius:14px; background:var(--surface); }
+.next .k { font:500 11px/1 var(--mono); text-transform:uppercase; letter-spacing:.08em;
+  color:var(--faint); }
+.next b { font:500 24px/1.2 var(--serif); }
+.next .when { color:var(--muted); font-size:14px; }
+.then { display:flex; flex-wrap:wrap; gap:4px 14px; margin-top:6px; font-size:13px;
+  color:var(--muted); }
+.then li { padding:0; border:0; }
+.then li span { font-family:var(--mono); color:var(--faint); }
+.one .stats { margin:0; gap:22px; }
+.one .stat b { font-size:24px; }
+.lately { display:flex; flex-wrap:wrap; gap:6px; }
+.lately span { font-size:13px; padding:4px 10px; border-radius:999px; background:var(--surface);
+  border:1px solid var(--line); color:var(--muted); }
+.lately span b { color:var(--text); font-weight:500; }
+.mapbox { display:flex; flex-direction:column; min-height:0; }
+.mapbox .legend { margin-bottom:6px; }
+.mapbox .map-card { flex:1; min-height:140px; }
+.one #map { height:100%; }
+.one footer { margin:0; padding:8px 0 0; }
+.one .empty { color:var(--faint); font-size:14px; }
+@media (min-width: 900px) {
+  .one { grid-template-columns:minmax(300px,380px) minmax(0,1fr);
+    grid-template-rows:minmax(0,1fr) auto; column-gap:28px; padding-top:28px; }
+  .info { justify-content:center; }
+  .one footer { grid-column:1 / -1; }
+}
+@media (max-height: 600px) and (max-width: 899px) {
+  .one { height:auto; }
+  .mapbox .map-card { height:260px; }
+}
+"""
+
+
+def _countdown(start: date, today: date) -> str:
+    days = (start - today).days
+    return "today" if days <= 0 else "tomorrow" if days == 1 else f"in {days} days"
+
+
+def render_guest(vault: Vault, today: date, login: bool = False) -> str:
+    """The guest view: where I am, where I'm headed and when, a few numbers,
+    what I've been doing, the map. Nothing from the journal's words."""
+    location = vault.read_location() or []
+    itinerary = vault.read_itinerary()
+    current = brief.current_location(location)
+    place = str(current.get("place", "")) if current else ""
+    since = _as_date(current.get("from")) if current else None
+    here = f"Day {(today - since).days + 1} · since {_short(since)}" if since else ""
+
+    headed = future_map(itinerary, PlaceIndex(vault.read_places()), location, today)
+    legs = sorted(
+        (ahead[0], str(e.get("place", e.get("id", "?"))), ahead[1])
+        for e in itinerary or []
+        if (ahead := _ahead(e, today)) is not None
+    )
+    if legs:
+        start, name, label = legs[0]
+        then = "".join(
+            f"<li>{escape(n)} <span>{escape(lbl)}</span></li>" for _, n, lbl in legs[1:3]
+        )
+        next_block = (
+            f'<div class="next"><span class="k">Next</span><b>{escape(name)}</b>'
+            f'<span class="when">{escape(_countdown(start, today))} · {escape(label)}</span>'
+            + (f'<ul class="then">{then}</ul>' if then else "")
+            + "</div>"
+        )
+    else:
+        next_block = '<p class="empty">Nothing dated ahead.</p>'
+
+    countries = {s["country"] for s in headed["stops"] if s["country"]}
+    places_been = len({str(s.get("place")) for s in location if s.get("place")})
+    stats = (
+        '<div class="stats">'
+        + _stat(len(headed["stops"]), "Legs ahead")
+        + _stat(len(countries), "Countries ahead")
+        + _stat(places_been, "Places so far")
+        + "</div>"
+    )
+
+    # The last week's sports only: what I've been doing, not my job search.
+    graph = disciplines.Graph(vault.read_disciplines())
+    week = vault.read_journal_range(today - timedelta(days=RECENT_DAYS - 1), today)
+    days_by_sport: dict[str, set[date]] = {}
+    for d, e in week.items():
+        for a in e.frontmatter.get("activities") or []:
+            node = graph.resolve(a.get("type")) if isinstance(a, dict) else None
+            if node:
+                days_by_sport.setdefault(node, set()).add(d)
+    top = sorted(days_by_sport.items(), key=lambda kv: -len(kv[1]))[:4]
+    lately = (
+        '<div class="lately">'
+        + "".join(f"<span><b>{escape(graph.name(n))}</b> {_days(len(ds))}</span>" for n, ds in top)
+        + "</div>"
+        if top
+        else ""
+    )
+
+    info = (
+        f'<section class="info"><div class="eyebrow">'
+        f"{escape(today.strftime('%A'))}, {escape(_short(today))}</div>"
+        f"<h1>{escape(place or 'Location unknown')}</h1>"
+        f'<p class="lede">{escape(here)}</p>{next_block}{stats}{lately}</section>'
+    )
+    mapbox = (
+        f'<section class="mapbox">{_map_section(headed, title=False)}</section>'
+        if headed["stops"]
+        else ""
+    )
+    door = (
+        '<form class="key" method="post" action="/login">'
+        '<input type="password" name="password" placeholder="password" aria-label="Password" '
+        'autocomplete="current-password" enterkeyhint="go" required></form>'
+        if login
+        else ""
+    )
+    footer = f"<footer><span>Read-only · {escape(today.isoformat())}</span>{door}</footer>"
+    sw = (
+        '<script>if ("serviceWorker" in navigator) '
+        'navigator.serviceWorker.register("/sw.js");</script>'
+    )
+    return (
+        _head("Alex · status")
+        + f"<style>{_GUEST_CSS}</style>"
+        + f'<main class="one">{info}{mapbox}{footer}</main>{sw}</body></html>'
+    )
+
+
 def render(
     vault: Vault,
     today: date,
@@ -842,10 +979,12 @@ def render(
     login: bool = False,
     week_of: date | None = None,
 ) -> str:
-    """The page. `private` adds the week calendar and the rest, showing the
-    week of `week_of` (this week by default, never a future one); `login`
-    shows the password line on the guest view (only when a password is
-    configured)."""
+    """The page. Guests get the one-screen `render_guest`; `private` is the
+    long page with the week calendar and the rest, showing the week of
+    `week_of` (this week by default, never a future one). `login` shows the
+    password line on the guest view (only when a password is configured)."""
+    if not private:
+        return render_guest(vault, today, login)
     location = vault.read_location() or []
     itinerary = vault.read_itinerary()
     current = brief.current_location(location)
