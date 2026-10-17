@@ -57,15 +57,47 @@ def test_render_is_one_escaped_page(vault: Vault) -> None:
         "t",
         "s",
     )
-    html = dashboard.render(vault, TODAY)
+    html = dashboard.render(vault, TODAY, private=True)
 
     assert html.startswith("<!doctype html>")
     assert "Surf &lt;rights&gt;" in html and "<rights>" not in html
     assert "width:50%" in html
     assert "1 of 7" in html and "1 day · 2 h" in html and "~600 kcal" in html
     assert "23 m &lt;depth&gt; PB" in html
-    # No password configured: no password line, and nothing private.
-    assert "<form" not in html and "Journal" not in html
+
+
+def test_guest_view_is_one_screen_of_where_and_next(vault: Vault) -> None:
+    vault.write_yaml(
+        "goals.yaml", [{"id": "s", "title": "Secret goal", "status": "active"}], "goals"
+    )
+    vault.write_yaml(
+        "itinerary.yaml",
+        [
+            {"place": "Austin <TX>", "status": "planned", "deadline": "2026-10-05"},
+            {"place": "Japan", "status": "planned", "target_window": ["2026-12-28", "2027-01-14"]},
+        ],
+        "itinerary",
+    )
+    vault.write_disciplines({"surf": {"name": "Surfing"}}, "disciplines")
+    vault.write_journal_entry(
+        datetime(2026, 10, 1, 9, 0),
+        {
+            "activities": [{"type": "surf", "hours": 2}, {"type": "job_search"}],
+            "meals": [{"items": ["rice"], "kcal": 600}],
+        },
+        "t",
+        "a private summary",
+    )
+    html = dashboard.render(vault, TODAY)
+
+    assert '<main class="one">' in html
+    assert "Austin &lt;TX&gt;" in html and "in 3 days" in html and "Japan" in html
+    assert "<b>Surfing</b> 1 day" in html
+    # Not on the guest screen: goals, food, non-sport activities, journal words.
+    for private in ("Secret goal", "kcal", "job", "a private summary"):
+        assert private not in html, private
+    # No password configured: no password line.
+    assert "<form" not in html
 
 
 def test_stay_rows_are_newest_first_with_what_was_done(vault: Vault) -> None:
