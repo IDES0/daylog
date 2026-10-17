@@ -561,6 +561,7 @@ def extract(
     places: list[Any] | None = None,
     current_location_entry: Any | None = None,
     disciplines: str | None = None,
+    vocabulary: list[str] | None = None,
     recorded_at: time | None = None,
     reconcile: bool = False,
     client: anthropic.Anthropic | None = None,
@@ -615,6 +616,8 @@ def extract(
         f"{outline(place_index, focus)}\n\n"
         f"Disciplines (id: name; indented under what it is a kind of):\n"
         f"{disciplines or '(none set)'}\n\n"
+        f"The user's own words (spell them like this; the transcript may garble them):\n"
+        f"{', '.join(vocabulary) if vocabulary else '(none)'}\n\n"
         f"Transcript:\n{transcript}"
     )
     messages: list[MessageParam] = [{"role": "user", "content": user_content}]

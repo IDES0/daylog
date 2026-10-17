@@ -238,6 +238,8 @@ src/daylog/
                    Syncs with the remote at most once a minute.
   transcribe.py    Voice (OGG) -> text via faster-whisper, lazy-loaded and
                    dropped after 5 idle minutes to keep RAM low.
+  vocab.py         The primer that biases transcription toward the user's
+                   words: profile.yaml `vocabulary`, nearby places, sports.
   extract.py       Transcript -> structured facts (activities, meals, felt,
                    goal progress, itinerary changes, place links, ...) via
                    one forced tool call, grounded in the places tree.
@@ -310,7 +312,7 @@ daylog-vault/
   health.yaml              # the phone's daily numbers (steps, distance, ...) by date
   research/proposals/      # proposed itinerary/goal/plan changes, answered by a tap
   site.yaml                # site analytics: one summary per day, written with the brief
-  profile.yaml             # durable preferences (surf comfort, fly rules)
+  profile.yaml             # durable preferences (surf comfort, fly rules, vocabulary)
   profile.md               # the user's operating principles — read by chat, planner, review, brief
 ```
 

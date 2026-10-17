@@ -51,6 +51,7 @@ from daylog import (
     services,
     site_flow,
     transcribe,
+    vocab,
     wishlist_flow,
 )
 from daylog.dateparse import parse_date_phrase
@@ -527,7 +528,7 @@ async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
             await telegram_file.download_to_drive(custom_path=ogg_path)
 
             await message.reply_text("Transcribing...")
-            transcript = transcribe.transcribe(ogg_path)
+            transcript = transcribe.transcribe(ogg_path, primer=vocab.primer_for(_vault()))
     except Exception:
         logger.exception("failed to transcribe voice note")
         await message.reply_text(
