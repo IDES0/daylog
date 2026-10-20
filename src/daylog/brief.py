@@ -209,13 +209,18 @@ def generate_brief(
         )
     messages: list[MessageParam] = [{"role": "user", "content": user_content}]
 
+    # Sonnet 5 thinks by default and the thinking counts against max_tokens:
+    # at 8192 it twice spent the whole budget reasoning over ~28k tokens of
+    # input and wrote no brief (2026-10-19, 10-20). A summary of inputs it
+    # already has needs medium effort, and room to write after it thinks.
     response = llm.create(
         client,
         model=MODEL,
-        max_tokens=8192,
+        max_tokens=32000,
         system=system_prompt,
         tools=llm.web_tools(MAX_SEARCHES, fetches=3),
         messages=messages,
+        output_config={"effort": "medium"},
     )
 
     search_requests = (

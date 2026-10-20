@@ -558,7 +558,7 @@ def respond(
         response = llm.create(
             client,
             model=llm.MAIN_MODEL,
-            max_tokens=8000,
+            max_tokens=16000,  # thinking counts against it (see brief.py)
             system=[{"type": "text", "text": system, "cache_control": {"type": "ephemeral"}}],
             tools=tools,
             messages=[*history, *turn],

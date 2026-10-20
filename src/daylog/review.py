@@ -183,7 +183,7 @@ def write(review_input: str, client: anthropic.Anthropic | None = None) -> tuple
     response = llm.create(
         client,
         model=llm.MAIN_MODEL,
-        max_tokens=4000,
+        max_tokens=16000,  # thinking counts against it (see brief.py)
         system=PROMPT_PATH.read_text(encoding="utf-8"),
         messages=[{"role": "user", "content": review_input}],
         output_config={"effort": "high"},
