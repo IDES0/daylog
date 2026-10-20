@@ -17,6 +17,7 @@ import asyncio
 import contextlib
 import logging
 import re
+import threading
 import uuid
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
@@ -37,6 +38,13 @@ SPOT_KINDS = ("surf_spot", "wind_spot", "dive_site", "hike", "viewpoint", "beach
 # Fewer known spots than this in a region the user just arrived in triggers
 # an 'arrive' research run.
 ARRIVE_THRESHOLD = 3
+# A place lookup needs a few searches, not a deep dive.
+RESOLVE_SEARCHES = 3
+
+# (day, mention) pairs being looked up right now: two notes about the same day
+# once started two identical lookups at the same moment.
+_in_flight: set[tuple[date, str]] = set()
+_in_flight_lock = threading.Lock()
 # Rough upper bound of one research run, for the budget check.
 RUN_ESTIMATE_USD = 0.40
 
@@ -76,6 +84,19 @@ def apply_matches(v: Vault, matches: list[dict[str, Any]], days: list[date]) -> 
     mention_to_id = {m["mention"]: m["place_id"] for m in matches}
     _link_days(v, days, mention_to_id)
     return [f"{m['mention']} → {by_id[m['place_id']][1].get('name')}" for m in matches]
+
+
+def _mark_looked_up(v: Vault, mentions: list[research.Mention]) -> None:
+    """Record that these mentions were looked up, so no later note repeats it."""
+    by_day: dict[date, set[str]] = {}
+    for m in mentions:
+        by_day.setdefault(m.day, set()).add(m.text)
+    for day, texts in sorted(by_day.items()):
+        entry = v.read_journal_entry(day)
+        if entry is not None and research.mark_looked_up(entry.frontmatter, texts, date.today()):
+            v.rewrite_journal_entry(
+                day, entry.frontmatter, f"journal: {day.isoformat()} (places looked up)"
+            )
 
 
 def _link_days(v: Vault, days: list[date], mention_to_id: dict[str, str]) -> None:
@@ -346,32 +367,62 @@ def lookup_mentions(
 ) -> tuple[str | None, research.Findings | None]:
     """Resolve the unlinked place mentions in `days`: link the known ones and
     return (headline, findings) whose new places become Add cards. Findings is
-    None when there's nothing to show (the headline, if any, says why)."""
+    None when there's nothing to show (the headline, if any, says why).
+
+    `quiet` is the automatic run after a note: it only matches names against
+    places already known, which is free. Searching the web for a new place
+    costs money and runs only when asked (/backfill, the assistant) — a
+    passing mention of a 1am shisha bar once cost ~$4 in automatic lookups."""
     mentions: list[research.Mention] = []
     for day in days:
         entry = v.read_journal_entry(day)
         if entry is not None:
             mentions += research.unresolved_mentions(day, entry.frontmatter)
     if not mentions:
-        return (None if quiet else "Every place is already linked."), None
-    if not llm.can_spend(v, RUN_ESTIMATE_USD):
-        return (
-            f"Skipping place research — monthly budget (${llm.monthly_budget():.0f}) reached.",
-            None,
-        )
+        return (None if quiet else "Every place is already linked or looked up."), None
     index = PlaceIndex(v.read_places())
-    focus, where = _where(v, index)
-    findings = research.run(research.resolve_job(mentions, where), index, focus, max_searches=6)
-    linked = apply_matches(v, findings.matches, days)
-    llm.flush(v)
+    focus, _ = _where(v, index)
+    region = index.region_of(focus["id"]) if focus else None
+    known = [
+        {"mention": m.text, "place_id": ids[0]}
+        for m in mentions
+        if (ids := index.resolve(m.text, within=region["id"] if region else None))
+    ]
+    linked_free = apply_matches(v, known, days) if known else []
+    if quiet:
+        return None, None
+    matched = {k["mention"] for k in known}
+    mentions = [m for m in mentions if m.text not in matched]
+    with _in_flight_lock:
+        mentions = [m for m in mentions if (m.day, m.text) not in _in_flight]
+        _in_flight.update((m.day, m.text) for m in mentions)
+    if not mentions:
+        if linked_free:
+            return "Linked: " + "; ".join(linked_free), None
+        return "Every place is already linked or looked up.", None
+    try:
+        if not llm.can_spend(v, RUN_ESTIMATE_USD):
+            return (
+                f"Skipping place research — monthly budget (${llm.monthly_budget():.0f}) reached.",
+                None,
+            )
+        index = PlaceIndex(v.read_places())
+        focus, where = _where(v, index)
+        findings = research.run(
+            research.resolve_job(mentions, where), index, focus, max_searches=RESOLVE_SEARCHES
+        )
+        linked = linked_free + apply_matches(v, findings.matches, days)
+        _mark_looked_up(v, mentions)
+        llm.flush(v)
+    finally:
+        with _in_flight_lock:
+            _in_flight.difference_update((m.day, m.text) for m in mentions)
     headline = f"Looked up {len(mentions)} place name(s) from your journal."
     if linked:
         headline += "\nLinked: " + "; ".join(linked)
     if findings.unresolved:
         headline += "\nCouldn't place: " + ", ".join(u["mention"] for u in findings.unresolved)
-    if findings.new_places or linked or not quiet:
-        return headline, findings
-    return None, None
+    return headline, findings
 
 
 async def arrive(context: ContextTypes.DEFAULT_TYPE, chat_id: int, force: bool = False) -> None:

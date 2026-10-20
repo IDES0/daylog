@@ -325,12 +325,27 @@ class Mention:
     detail: str
 
 
+# "The shisha place next to Savaya" describes a place; it isn't a name a
+# search can find. One such mention cost ~$4 in lookups on 2026-10-18.
+_DESCRIPTIVE = re.compile(
+    r"\b(next to|near|nearby|by the|behind|across from|opposite|beside|close to|around the)\b",
+    re.IGNORECASE,
+)
+
+
+def is_name(text: str) -> bool:
+    return bool(text.strip()) and not _DESCRIPTIVE.search(text)
+
+
 def unresolved_mentions(day: date, frontmatter: dict[str, Any]) -> list[Mention]:
+    """Mentions still worth a lookup: named, not linked, not looked up before."""
     out: list[Mention] = []
     seen: set[str] = set()
     for field_name in ("activities", "meals"):
         for item in frontmatter.get(field_name) or []:
             if not isinstance(item, dict) or item.get("place") or not item.get("place_mention"):
+                continue
+            if item.get("place_lookup") or not is_name(str(item["place_mention"])):
                 continue
             key = _norm(str(item["place_mention"]))
             if key in seen:
@@ -346,6 +361,25 @@ def unresolved_mentions(day: date, frontmatter: dict[str, Any]) -> list[Mention]
                 )
             )
     return out
+
+
+def mark_looked_up(frontmatter: dict[str, Any], texts: set[str], on: date) -> bool:
+    """Stamp `place_lookup: <date>` on unlinked mentions in `texts`, so they're
+    never looked up again (a found place is linked through its card instead)."""
+    keys = {_norm(t) for t in texts}
+    changed = False
+    for field_name in ("activities", "meals"):
+        for item in frontmatter.get(field_name) or []:
+            if (
+                isinstance(item, dict)
+                and not item.get("place")
+                and item.get("place_mention")
+                and _norm(str(item["place_mention"])) in keys
+                and not item.get("place_lookup")
+            ):
+                item["place_lookup"] = on.isoformat()
+                changed = True
+    return changed
 
 
 # -- job prompts ---------------------------------------------------------------

@@ -217,3 +217,71 @@ def test_add_trip_stops_appends_visits_once(vault: Vault) -> None:
     assert entry is not None
     visits = [a for a in entry.frontmatter["activities"] if a.get("type") == "visit"]
     assert visits == [{"type": "visit", "place": "labuan-bajo"}]
+
+
+def test_descriptions_and_looked_up_mentions_are_not_searched() -> None:
+    assert research.is_name("Eden") and research.is_name("Warung Bu Dayu")
+    assert not research.is_name("shisha place next to Savaya")
+    assert not research.is_name("cafe near the beach")
+    fm: dict[str, Any] = {
+        "activities": [
+            {"type": "social", "place_mention": "shisha place next to Savaya"},
+            {"type": "surf", "place_mention": "Nungas", "place_lookup": "2026-10-18"},
+            {"type": "surf", "place_mention": "Bingin"},
+        ]
+    }
+    assert [m.text for m in research.unresolved_mentions(TODAY, fm)] == ["Bingin"]
+    assert research.mark_looked_up(fm, {"Bingin"}, TODAY)
+    assert fm["activities"][2]["place_lookup"] == TODAY.isoformat()
+    assert research.unresolved_mentions(TODAY, fm) == []
+
+
+def _forbid_research(monkeypatch: Any) -> list[str]:
+    calls: list[str] = []
+
+    def fake_run(job: str, index: Any, focus: Any, max_searches: int = 0) -> research.Findings:
+        calls.append(job)
+        return research.Findings(unresolved=[{"mention": "x"}])
+
+    monkeypatch.setattr(research, "run", fake_run)
+    monkeypatch.setattr(llm, "can_spend", lambda v, usd: True)
+    return calls
+
+
+def test_the_automatic_run_after_a_note_never_pays(vault: Vault, monkeypatch: Any) -> None:
+    _seed(vault)  # a mention of "the inside", which Ekas Bay doesn't know yet
+    vault.write_journal_entry(
+        datetime(2026, 9, 27, 10, 0),
+        {
+            "activities": [
+                {"type": "surf", "place_mention": "Ekas Bay"},
+                {"type": "social", "place_mention": "Eden"},
+            ]
+        },
+        "t",
+        "s",
+    )
+    calls = _forbid_research(monkeypatch)
+    assert research_flow.lookup_mentions(vault, [TODAY]) == (None, None)
+    assert calls == []  # no web search, no cost
+    entry = vault.read_journal_entry(TODAY)
+    assert entry is not None
+    places = [(a.get("type"), a.get("place")) for a in entry.frontmatter["activities"]]
+    assert ("surf", "ekas-bay") in places  # a known name links for free
+    eden = next(a for a in entry.frontmatter["activities"] if a.get("place_mention") == "Eden")
+    assert "place" not in eden  # an unknown one waits for /backfill
+
+
+def test_an_asked_for_lookup_runs_once_per_mention(vault: Vault, monkeypatch: Any) -> None:
+    vault.write_journal_entry(
+        datetime(2026, 9, 27, 9, 0),
+        {"activities": [{"type": "surf", "place_mention": "Mystery Reef"}]},
+        "t",
+        "s",
+    )
+    calls = _forbid_research(monkeypatch)
+    research_flow.lookup_mentions(vault, [TODAY], quiet=False)
+    said, _ = research_flow.lookup_mentions(vault, [TODAY], quiet=False)
+    assert len(calls) == 1 and said == "Every place is already linked or looked up."
+    entry = vault.read_journal_entry(TODAY)
+    assert entry is not None and entry.frontmatter["activities"][0]["place_lookup"]
