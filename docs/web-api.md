@@ -75,6 +75,16 @@ The status site grows into the app that can replace Telegram. One address
   {"date": "2026-10-16", "summary": "…", "notes": ["Updated current location to …", "Foiling → logged as Tow foil (the default)."],
    "cards": [ ...goal_slip / itinerary / correction / discipline_fix / discipline_add / ripple... ]}
   ```
+- **Logging runs in the background (since 2026-10-23).** `POST /api/log` and
+  `POST /api/voice` answer `202 {"job": "<16 hex>", "status": "processing",
+  "repeated": false}` as soon as the note has arrived; the app can close.
+  `GET /api/jobs/{id}` → `{"id", "kind", "status": "processing|done|failed",
+  "code", "result"}` where `result` is the body described below;
+  `GET /api/jobs` lists the last day's jobs; an unknown id (server restarted)
+  → 404 `unknown_job`. Send `Idempotency-Key: <one id per note>` and reuse it
+  on Retry: a note sent again gets its existing job (`"repeated": true`)
+  instead of being logged twice; only a failed job runs again. Without the
+  header, the body's hash stands in. A future `date` is refused at once (400).
 - `POST /api/voice` — body is the raw audio (`audio/webm`, `audio/mp4`,
   `audio/ogg`; ≤ 20 MB), optional `?date=YYYY-MM-DD` → transcribes
   (faster-whisper, local) then the same as `/api/log`, plus `"transcript"`.

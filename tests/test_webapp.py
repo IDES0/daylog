@@ -11,7 +11,7 @@ from typing import Any
 
 import pytest
 
-from daylog import calendar_server, chat, daily, extract, web
+from daylog import calendar_server, chat, daily, extract, journal_service, web
 from daylog.tg import tz
 from daylog.vault import Vault
 from daylog.webapp import api as webapi
@@ -31,7 +31,8 @@ class App:
 def app(vault: Vault, monkeypatch: pytest.MonkeyPatch) -> Iterator[App]:
     monkeypatch.setenv("VAULT_PATH", str(vault.path))
     # No background research threads (they'd call the API) in tests.
-    api = webapi.Api(vault=lambda: vault, spawn=lambda fn: None)
+    # Notes are logged as they arrive here, so a job is done when the POST returns.
+    api = webapi.Api(vault=lambda: vault, spawn=lambda fn: None, run_notes=lambda fn: fn())
     handler = calendar_server._make_handler(None, None, True, PASSWORD, app=api)
     httpd = ThreadingHTTPServer(("127.0.0.1", 0), handler)
     threading.Thread(target=httpd.serve_forever, daemon=True).start()
@@ -202,8 +203,7 @@ def test_a_note_logs_and_a_hard_slip_waits_for_its_card(
         }
 
     monkeypatch.setattr(extract, "extract", fake_extract)
-    status, body = _json(app, "POST", "/api/log", {"text": "surfed", "date": "2026-10-01"})
-    assert status == 200, body
+    body = _logged(app, {"text": "surfed", "date": "2026-10-01"})
     assert body["date"] == "2026-10-01" and body["summary"] == "Surfed and pushed the cert."
     [card] = body["cards"]
     assert card["kind"] == "goal_slip" and "hard deadline" in card["title"]
@@ -323,3 +323,59 @@ def test_logical_day_is_what_me_reports(app: App) -> None:
     assert status == 200 and me["signed_in"] is True
     assert me["today"] == daily.logical_day(datetime.now(tz())).isoformat()
     assert me["tz"] == str(tz())
+
+
+def _logged(app: App, note: dict[str, Any], **kw: Any) -> Any:
+    """POST a note (answered 202 with a job), then read the job's result."""
+    status, accepted = _json(app, "POST", "/api/log", note, **kw)
+    assert status == 202, accepted
+    status, job = _json(app, "GET", f"/api/jobs/{accepted['job']}")
+    assert status == 200 and job["status"] == "done", job
+    return job["result"]
+
+
+def test_a_note_sent_again_is_logged_once(
+    app: App, vault: Vault, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # 2026-10-22: one voice note reached the server three times (the app was
+    # closed mid-request, then Retry) and was logged three times.
+    calls: list[str] = []
+
+    def fake_extract(transcript: str, *args: Any, **kwargs: Any) -> dict[str, Any]:
+        calls.append(transcript)
+        return {"summary": "Foiled.", "activities": [{"type": "surf", "hours": 1}]}
+
+    monkeypatch.setattr(extract, "extract", fake_extract)
+    note = {"text": "foiled with Oliver", "date": "2026-10-01"}
+    keyed = {"Idempotency-Key": "rec-1"}
+    first = _json(app, "POST", "/api/log", note, headers=keyed)[1]
+    again = _json(app, "POST", "/api/log", note, headers=keyed)[1]
+    assert again["job"] == first["job"] and again["repeated"] is True
+    # No key: the same text for the same day is still the same note.
+    plain = _json(app, "POST", "/api/log", note)[1]
+    assert _json(app, "POST", "/api/log", note)[1]["job"] == plain["job"]
+    assert len(calls) == 2  # once for the keyed note, once for the keyless one
+    entry = vault.read_journal_entry(date(2026, 10, 1))
+    assert entry is not None and journal_service.note_count(entry.transcript) == 2
+    jobs = _json(app, "GET", "/api/jobs")[1]["jobs"]
+    assert {j["id"] for j in jobs} == {first["job"], plain["job"]}
+    assert _json(app, "GET", "/api/jobs/0123456789abcdef")[0] == 404
+
+
+def test_only_a_failed_job_runs_again() -> None:
+    from daylog.webapp.jobs import Jobs
+
+    pending: list[Any] = []
+    jobs = Jobs(run=pending.append)  # run nothing until told
+    job, new = jobs.submit("k", "voice", lambda: (200, {"ok": True}))
+    assert new and job.status == "processing"
+    assert jobs.submit("k", "voice", lambda: (200, {}))[1] is False  # still running: same job
+    pending.pop()()
+    assert jobs.get(job.id) is not None and job.status == "done"
+    assert jobs.submit("k", "voice", lambda: (200, {}))[0] is job  # done: same answer
+
+    bad, _ = jobs.submit("b", "voice", lambda: (500, {"message": "boom"}))
+    pending.pop()()
+    assert bad.status == "failed" and bad.view()["result"]["message"] == "boom"
+    retry, new = jobs.submit("b", "voice", lambda: (200, {}))
+    assert new and retry is not bad  # a failure may run again
