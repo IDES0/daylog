@@ -902,7 +902,7 @@ function sendNote(upload, button) {
   box.hidden = false;
   box.scrollIntoView({ behavior: "smooth", block: "nearest" });
   return runSlow({
-    target: box, label: "Uploading…", hint: "Once it's uploaded you can close the app.", call: upload, button,
+    target: box, label: "Uploading…", call: upload, button,
     render: r => {
       setPending([...new Set([...pendingNotes(), r.job])]);
       watchNote(r.job);
@@ -912,10 +912,8 @@ function sendNote(upload, button) {
 
 function showLogging(box) {
   fill(box, h("div.progress", { role: "status" },
-    h("div.row", h("span", "Logging in the background…")),
-    h("div.progress-bar"),
-    h("div.muted", { style: { "font-size": "13px", "margin-top": "4px" } },
-      "Uploaded. You can close the app; the note will be here when you're back.")));
+    h("div.row", h("span", "Logging… you can close the app.")),
+    h("div.progress-bar")));
 }
 
 async function watchNote(id) {
@@ -926,12 +924,12 @@ async function watchNote(id) {
     if (document.visibilityState !== "visible") return; // resumes on return (catchUpNotes)
     let job;
     try { job = await api(`/api/jobs/${id}`); } catch (e) {
-      if (e.status === 404) { finishNote(id, null, "The server restarted before this note was logged, so it wasn't saved. Please send it again."); return; }
+      if (e.status === 404) { finishNote(id, null, "Not saved — please send it again."); return; }
       await sleep(4000);
       continue;
     }
     if (job.status === "done") { finishNote(id, job.result); return; }
-    if (job.status === "failed") { finishNote(id, null, (job.result && job.result.message) || "Logging failed; nothing was saved."); return; }
+    if (job.status === "failed") { finishNote(id, null, (job.result && job.result.message) || "Not saved — please send it again."); return; }
     await sleep(3000);
   }
 }

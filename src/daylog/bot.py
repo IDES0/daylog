@@ -470,7 +470,7 @@ async def _log_entry(transcript: str, message: Message, context: ContextTypes.DE
         if result.location_changed and research_flow.plan_arrive(vault) is not None:
             # Researching a new region costs ~$1–2, so it's offered, not run.
             await message.reply_text(
-                "New area. Want me to research what's around? Send /explore (about $1–2)."
+                "New area — /explore to research it (~$1–2)."
             )
 
         for slip in result.slips:
