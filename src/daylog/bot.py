@@ -467,8 +467,11 @@ async def _log_entry(transcript: str, message: Message, context: ContextTypes.DE
 
         vault = _vault()
         result = journal_service.log(vault, transcript, day, now, backdated=bool(pending_date))
-        if result.location_changed:
-            context.application.create_task(research_flow.arrive(context, message.chat_id))
+        if result.location_changed and research_flow.plan_arrive(vault) is not None:
+            # Researching a new region costs ~$1–2, so it's offered, not run.
+            await message.reply_text(
+                "New area — /explore to research it (~$1–2)."
+            )
 
         for slip in result.slips:
             await _ask_hard_slip_confirmation(message, context, slip)

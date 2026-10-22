@@ -59,6 +59,7 @@ from daylog.tg import tz
 from daylog.vault import CorrectionConflictError, Vault, VaultError
 from daylog.webapp.cards import Card, CardStore, Outcome, UnknownAction, action
 from daylog.webapp.chat_store import ChatStore
+from daylog.webapp.jobs import Jobs, key_for
 
 logger = logging.getLogger(__name__)
 
@@ -184,14 +185,19 @@ class Api:
         vault: Callable[[], Vault] = default_vault,
         now: Callable[[], datetime] | None = None,
         spawn: Callable[[Callable[[], None]], None] | None = None,
+        run_notes: Callable[[Callable[[], None]], None] | None = None,
     ) -> None:
         self._vault = vault
         self._now = now or (lambda: datetime.now(tz()))
         self._spawn = spawn or _spawn_thread
         self.cards = CardStore()
         self.chat = ChatStore()
+        # Notes are logged off the request: see jobs.py.
+        self.jobs = Jobs(run_notes or _spawn_thread)
         gets: list[tuple[str, Handler]] = [
             (r"/api/me", self.me),
+            (r"/api/jobs", self.job_list),
+            (r"/api/jobs/([0-9a-f]{16})", self.job),
             (r"/api/home", self.home),
             (r"/api/map", self.map),
             (r"/api/calendar", self.calendar),
@@ -478,13 +484,51 @@ class Api:
     def log(self, req: Request, m: re.Match[str]) -> Reply:
         data = self._json(req)
         text = _text_field(data, "text")
-        day = _date(data["date"]) if data.get("date") else None
-        return self._log(text, day)
+        day = self._past_day(data["date"]) if data.get("date") else None
+        key = key_for(req.headers.get("idempotency-key"), "log", text.encode(), str(day))
+        return self._submit(key, "log", lambda: self._log(text, day))
 
     def voice(self, req: Request, m: re.Match[str]) -> Reply:
         if not req.body:
             raise ApiError(400, "empty", "No audio in the request.")
-        day = _date(req.arg("date")) if req.arg("date") else None
+        day = self._past_day(req.arg("date")) if req.arg("date") else None
+        key = key_for(req.headers.get("idempotency-key"), "voice", req.body, str(day))
+        return self._submit(key, "voice", lambda: self._voice(req, day))
+
+    def _past_day(self, raw: Any) -> date:
+        """A day to log to, checked before the note is accepted, not after."""
+        day = _date(raw)
+        if day > daily.logical_day(self._now()):
+            raise ApiError(400, "bad_date", "Can't log a day that hasn't happened yet.")
+        return day
+
+    def _submit(self, key: str, kind: str, work: Callable[[], Reply]) -> Reply:
+        """Accept the note now and log it in the background (see jobs.py). A note
+        sent again gets its existing job back instead of being logged twice."""
+
+        def guarded() -> Reply:
+            try:
+                return work()
+            except ApiError as exc:
+                return exc.reply()
+
+        job, new = self.jobs.submit(key, kind, guarded)
+        if not new:
+            logger.info("note sent again; answered with its existing job")
+        return 202, {"job": job.id, "status": job.status, "repeated": not new}
+
+    def job(self, req: Request, m: re.Match[str]) -> Reply:
+        job = self.jobs.get(m.group(1))
+        if job is None:
+            raise ApiError(
+                404, "unknown_job", "That note isn't known here — the server may have restarted."
+            )
+        return 200, job.view()
+
+    def job_list(self, req: Request, m: re.Match[str]) -> Reply:
+        return 200, {"jobs": [j.view() for j in self.jobs.recent()]}
+
+    def _voice(self, req: Request, day: date | None) -> Reply:
         kind = req.headers.get("content-type", "").split(";")[0].strip().lower()
         try:
             with tempfile.TemporaryDirectory() as tmp_dir:
@@ -520,8 +564,11 @@ class Api:
                 "text": text,
             }
         cards = self._log_cards(result)
-        if result.location_changed:
-            self._spawn(self._arrive_in_background)
+        # A new region is researched only if asked: it costs ~$1–2.
+        if result.location_changed and research_flow.plan_arrive(v) is not None:
+            card = self._research_job_card({"job": "explore"})
+            if card is not None:
+                cards.append(card)
         if result.place_mentions:
             self._spawn(lambda: self._mentions_in_background([result.date]))
         if not result.saved:
@@ -730,12 +777,6 @@ class Api:
         return Outcome(
             f"Added: {', '.join(index.path_name(p) for p in new_ids) or 'already added'}"
         )
-
-    def _arrive_in_background(self) -> None:
-        v = self._vault()
-        job = research_flow.plan_arrive(v)
-        if job is not None:
-            self._place_cards(research_flow.run_job(v, job), [], bulk=True)
 
     def _mentions_in_background(self, days: list[date]) -> None:
         _, findings = research_flow.lookup_mentions(self._vault(), days)

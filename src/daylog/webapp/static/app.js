@@ -196,13 +196,15 @@ const STATUS_TEXT = {
   429: "Too many requests; wait a moment.",
 };
 
-async function api(path, { method = "GET", body, raw, type, timeout = NORMAL } = {}) {
+async function api(path, { method = "GET", body, raw, type, timeout = NORMAL, key } = {}) {
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), timeout);
   const headers = { Accept: "application/json" };
   let payload;
   if (method !== "GET") {
     headers["X-Daylog"] = "1";
+    // One key per note, reused by Retry, so a resend isn't logged twice.
+    if (key) headers["Idempotency-Key"] = key;
     if (raw) { payload = raw; headers["Content-Type"] = type || "application/octet-stream"; }
     else { payload = JSON.stringify(body ?? {}); headers["Content-Type"] = "application/json"; }
   }
@@ -809,6 +811,7 @@ function initLog() {
   note.body.append(picker, hint, h("div.recorder", recBtn, time, recHint, cancel), h("div.or", "or type it"), form);
   Object.assign(S, { lRecBtn: recBtn, lTime: time, lRecHint: recHint, lCancel: cancel, lResult: result, lRecent: recent });
   loadRecent();
+  catchUpNotes();
 }
 
 function pickMime() {
@@ -865,40 +868,100 @@ function stopRec(send) {
     const blob = new Blob(r.chunks, { type });
     if (!blob.size) { S.lRecHint.textContent = "Nothing was recorded. Try again."; return; }
     const q = S.logDate ? `?date=${S.logDate}` : "";
-    showLogResult("Transcribing and logging…", "Whisper runs on the server, then the note is read into the journal.",
-      () => api(`/api/voice${q}`, { method: "POST", raw: blob, type, timeout: SLOW }), S.lRecBtn);
+    const key = noteKey();
+    sendNote(() => api(`/api/voice${q}`, { method: "POST", raw: blob, type, timeout: SLOW, key }), S.lRecBtn);
   };
   r.recorder.stop();
+}
+
+function noteKey() {
+  return (crypto.randomUUID && crypto.randomUUID()) || `${Date.now()}-${Math.random().toString(36).slice(2)}`;
 }
 
 function logText(ta, btn) {
   const text = ta.value.trim();
   if (!text) { ta.focus(); return; }
-  showLogResult("Logging…", "Reading the note into the journal.", () => post("/api/log", { text, date: S.logDate }), btn)
+  const key = noteKey();
+  sendNote(() => api("/api/log", { method: "POST", body: { text, date: S.logDate }, timeout: SLOW, key }), btn)
     .then(r => { if (r) ta.value = ""; });
 }
 
-function showLogResult(label, hint, call, button) {
+// Notes log in the background (see webapp/jobs.py): only the upload needs the
+// app open. Closing it while a note is "logging" used to cut the request, show
+// a failure for a note the server went on to log, and Retry logged it again.
+const PENDING_KEY = "daylog.pendingNotes";
+function pendingNotes() {
+  try { return JSON.parse(localStorage.getItem(PENDING_KEY) || "[]"); } catch { return []; }
+}
+function setPending(ids) {
+  try { localStorage.setItem(PENDING_KEY, JSON.stringify(ids)); } catch { /* private mode */ }
+}
+
+function sendNote(upload, button) {
   const box = S.lResult;
   box.hidden = false;
   box.scrollIntoView({ behavior: "smooth", block: "nearest" });
   return runSlow({
-    target: box, label, hint, call, button,
+    target: box, label: "Uploading…", call: upload, button,
     render: r => {
-      box.append(
-        h("div.card-head", h("h2.label", `Logged · ${weekday(r.date)}, ${short(r.date)}`)),
-        h("div.stack",
-          r.transcript ? h("details.transcript", { style: { "margin-top": "0" } }, h("summary", "What you said"), h("blockquote", r.transcript)) : null,
-          r.summary ? md(r.summary) : null,
-          (r.notes || []).length ? h("ul.notes-list", r.notes.map(n => h("li", n))) : null,
-          cardList(r.cards)));
-      announce("Logged.");
-      S.homeStale = true;
-      if (r.cards && r.cards.length) refreshOpenCards();
-      loadRecent();
+      setPending([...new Set([...pendingNotes(), r.job])]);
+      watchNote(r.job);
     },
   });
 }
+
+function showLogging(box) {
+  fill(box, h("div.progress", { role: "status" },
+    h("div.row", h("span", "Logging… you can close the app.")),
+    h("div.progress-bar")));
+}
+
+async function watchNote(id) {
+  const box = S.lResult;
+  box.hidden = false;
+  showLogging(box);
+  for (let tries = 0; tries < 200; tries++) {
+    if (document.visibilityState !== "visible") return; // resumes on return (catchUpNotes)
+    let job;
+    try { job = await api(`/api/jobs/${id}`); } catch (e) {
+      if (e.status === 404) { finishNote(id, null, "Not saved — please send it again."); return; }
+      await sleep(4000);
+      continue;
+    }
+    if (job.status === "done") { finishNote(id, job.result); return; }
+    if (job.status === "failed") { finishNote(id, null, (job.result && job.result.message) || "Not saved — please send it again."); return; }
+    await sleep(3000);
+  }
+}
+
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+
+function finishNote(id, r, error) {
+  setPending(pendingNotes().filter(x => x !== id));
+  const box = S.lResult;
+  box.hidden = false;
+  fill(box);
+  if (error) { box.append(errorBox(new ApiError(0, "failed", error))); loadRecent(); return; }
+  box.append(
+    h("div.card-head", h("h2.label", `Logged · ${weekday(r.date)}, ${short(r.date)}`)),
+    h("div.stack",
+      r.transcript ? h("details.transcript", { style: { "margin-top": "0" } }, h("summary", "What you said"), h("blockquote", r.transcript)) : null,
+      r.summary ? md(r.summary) : null,
+      (r.notes || []).length ? h("ul.notes-list", r.notes.map(n => h("li", n))) : null,
+      cardList(r.cards)));
+  announce("Logged.");
+  S.homeStale = true;
+  if (r.cards && r.cards.length) refreshOpenCards();
+  loadRecent();
+}
+
+// Back in the app: pick up notes that finished (or failed) while it was closed.
+function catchUpNotes() {
+  for (const id of pendingNotes()) watchNote(id);
+}
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "visible" && S.lResult) catchUpNotes();
+});
 
 function loadRecent() {
   const body = S.lRecent.body;
