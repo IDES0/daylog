@@ -448,6 +448,7 @@ Requires a local clone of the private vault repo at the path set by
 | `CALENDAR_FEED_SECRET` | Optional. Enables the calendar feed at `/calendar/<secret>.ics` |
 | `STATUS_SITE` | Optional. `1` serves the status site's guest view at `/` without a password line; `STATUS_PASSWORD` turns the site on by itself |
 | `STATUS_PASSWORD` | Optional. Serves the status site at `/` with its password line and private view. Use a long passphrase |
+| `VAPID_PRIVATE_KEY`, `VAPID_PUBLIC_KEY` | Optional. Web Push keys (base64url): the morning brief also arrives as a notification on devices that turned it on in the app (You → Session). `VAPID_SUBJECT` (`mailto:…`) is optional |
 | `HEALTH_INGEST_SECRET` | Optional. Enables `POST /health/<secret>`: a JSON object of the day's numbers from the phone (`{"date": "2026-10-02", "steps": 8423, "sleep_h": 7.2}`), merged into `health.yaml` and joined by date into the export and the status page; unset disables it |
 | `POSTHOG_PERSONAL_API_KEY` | Optional. A read-only PostHog personal key (scopes `query:read` and friends). With `POSTHOG_PROJECT_ID`, enables a Site block at the end of the morning brief (last 24 h, including visitors who came through a company `?ref=` tag, i.e. not linkedin/github/test) and `/site [days]` for a deeper breakdown. Nothing polls. Never written to the vault or logs |
 | `POSTHOG_PROJECT_ID` | The PostHog project the site reports to |

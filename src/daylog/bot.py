@@ -45,6 +45,7 @@ from daylog import (
     journal_service,
     llm,
     plan_flow,
+    push,
     rank_flow,
     research_flow,
     ripple_flow,
@@ -173,7 +174,9 @@ async def fly_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         await message.reply_text(chunk)
 
 
-async def _send_brief(context: ContextTypes.DEFAULT_TYPE, chat_id: int) -> None:
+async def _send_brief(
+    context: ContextTypes.DEFAULT_TYPE, chat_id: int, notify: bool = False
+) -> None:
     bot = context.bot
     await bot.send_message(chat_id=chat_id, text="Building your brief...")
     try:
@@ -189,6 +192,10 @@ async def _send_brief(context: ContextTypes.DEFAULT_TYPE, chat_id: int) -> None:
 
     for chunk in _chunks(text):
         await bot.send_message(chat_id=chat_id, text=chunk)
+    if notify:
+        # The scheduled brief also lands on the phone's lock screen (push.py).
+        title = f"☀️ Brief · {today.strftime('%a %b')} {today.day}"
+        await asyncio.to_thread(push.send, vault, title, push.lock_screen(text))
     chat_flow.remember(context, "The bot sent the morning brief", text)
     llm.flush(vault)
     # Decisions the morning research traced (and anything else it proposed),
@@ -205,7 +212,7 @@ async def brief_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
 
 
 async def send_scheduled_brief(context: ContextTypes.DEFAULT_TYPE) -> None:
-    await _send_brief(context, _allowed_user_id())
+    await _send_brief(context, notify=True, chat_id=_allowed_user_id())
 
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -469,9 +476,7 @@ async def _log_entry(transcript: str, message: Message, context: ContextTypes.DE
         result = journal_service.log(vault, transcript, day, now, backdated=bool(pending_date))
         if result.location_changed and research_flow.plan_arrive(vault) is not None:
             # Researching a new region costs ~$1–2, so it's offered, not run.
-            await message.reply_text(
-                "New area — /explore to research it (~$1–2)."
-            )
+            await message.reply_text("New area — /explore to research it (~$1–2).")
 
         for slip in result.slips:
             await _ask_hard_slip_confirmation(message, context, slip)

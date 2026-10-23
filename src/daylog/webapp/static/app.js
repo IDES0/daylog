@@ -937,19 +937,35 @@ async function watchNote(id) {
       continue;
     }
     if (job.status === "done") { finishNote(id, job.result); return; }
-    if (job.status === "failed") { finishNote(id, null, (job.result && job.result.message) || "Not saved — please send it again."); return; }
+    if (job.status === "failed") {
+      const said = job.result && (job.result.transcript || job.result.text);
+      finishNote(id, null, (job.result && job.result.message) || "Not saved — please send it again.", said);
+      return;
+    }
     await sleep(3000);
   }
 }
 
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
-function finishNote(id, r, error) {
+function finishNote(id, r, error, said) {
   setPending(pendingNotes().filter(x => x !== id));
   const box = S.lResult;
   box.hidden = false;
   fill(box);
-  if (error) { box.append(errorBox(new ApiError(0, "failed", error))); loadRecent(); return; }
+  if (error) {
+    box.append(errorBox(new ApiError(0, "failed", error)));
+    // The recording was heard even if logging failed: keep the words.
+    if (said) {
+      const key = noteKey();
+      box.append(h("blockquote", said), h("button.btn", {
+        type: "button",
+        onclick: () => sendNote(() => api("/api/log", { method: "POST", body: { text: said, date: S.logDate }, timeout: SLOW, key })),
+      }, "Try again"));
+    }
+    loadRecent();
+    return;
+  }
   box.append(
     h("div.card-head", h("h2.label", `Logged · ${weekday(r.date)}, ${short(r.date)}`)),
     h("div.stack",
@@ -1438,9 +1454,48 @@ function initYou() {
   initReports(reports);
   initRankings(ranks.body);
   loadChanges(changes.body);
+  const notify = h("div", { style: { "margin-top": "12px" } });
   account.body.append(
     h("p.muted", { style: { "font-size": "14px" } }, `Signed in on this device${S.tz ? ` · times in ${S.tz}` : ""}. Telegram keeps working alongside.`),
+    notify,
     h("form", { method: "post", action: "/logout", style: { "margin-top": "12px" } }, h("button.btn", { type: "submit" }, "Sign out")));
+  initNotifications(notify);
+}
+
+// The morning brief on the lock screen (push.py). iOS allows it only for the
+// Home Screen app, and permission must be asked from a tap.
+function initNotifications(box) {
+  const supported = "serviceWorker" in navigator && "PushManager" in window && "Notification" in window;
+  if (!supported) {
+    fill(box, h("p.muted", { style: { "font-size": "14px" } }, "Add daylog to your Home Screen to get the brief as a notification."));
+    return;
+  }
+  const show = async () => {
+    let st;
+    try { st = await api("/api/push"); } catch { fill(box); return; }
+    if (!st.configured) { fill(box); return; }
+    const sub = await navigator.serviceWorker.ready.then(r => r.pushManager.getSubscription()).catch(() => null);
+    if (sub && Notification.permission === "granted") {
+      fill(box, h("div.row", h("span.muted", { style: { "font-size": "14px" } }, "Brief notifications on."),
+        h("button.btn.ghost", { type: "button", onclick: () => post("/api/push/test", {}, NORMAL).then(r => announce(r.ok ? "Sent." : "Not sent.")) }, "Send a test")));
+      return;
+    }
+    fill(box, h("button.btn", { type: "button", onclick: () => turnOn(st.publicKey) }, "Turn on brief notifications"));
+  };
+  const turnOn = async key => {
+    if (await Notification.requestPermission() !== "granted") { announce("Notifications are off in Settings."); return; }
+    const reg = await navigator.serviceWorker.ready;
+    const sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: b64urlBytes(key) });
+    await post("/api/push/subscribe", { subscription: sub.toJSON() }, NORMAL);
+    show();
+  };
+  show();
+}
+
+function b64urlBytes(s) {
+  const pad = "=".repeat((4 - (s.length % 4)) % 4);
+  const raw = atob((s + pad).replace(/-/g, "+").replace(/_/g, "/"));
+  return Uint8Array.from(raw, c => c.charCodeAt(0));
 }
 
 function renderReview(body, d) {
