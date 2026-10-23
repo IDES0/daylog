@@ -168,6 +168,22 @@ self.addEventListener("fetch", e => {
     "Offline. daylog needs a connection.</body>",
     { headers: { "Content-Type": "text/html; charset=utf-8" } })));
 });
+// The morning brief on the lock screen (push.py); a tap opens the app.
+self.addEventListener("push", e => {
+  let d = {};
+  try { d = e.data ? e.data.json() : {}; } catch { d = { body: e.data && e.data.text() }; }
+  e.waitUntil(self.registration.showNotification(d.title || "daylog", {
+    body: d.body || "", icon: "/icon-192.png", badge: "/icon-192.png",
+    tag: "daylog-brief", data: { url: d.url || "/#/home" } }));
+});
+self.addEventListener("notificationclick", e => {
+  e.notification.close();
+  const url = (e.notification.data && e.notification.data.url) || "/#/home";
+  e.waitUntil(self.clients.matchAll({ type: "window", includeUncontrolled: true }).then(cs => {
+    for (const c of cs) { if ("focus" in c) { c.navigate(url); return c.focus(); } }
+    return self.clients.openWindow(url);
+  }));
+});
 """
 
 ROBOTS = b"User-agent: *\nDisallow: /\n"

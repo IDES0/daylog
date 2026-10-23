@@ -41,6 +41,7 @@ from daylog import (
     journal_service,
     llm,
     plan_flow,
+    push,
     rank_flow,
     rankings,
     research,
@@ -197,6 +198,7 @@ class Api:
         gets: list[tuple[str, Handler]] = [
             (r"/api/me", self.me),
             (r"/api/jobs", self.job_list),
+            (r"/api/push", self.push_status),
             (r"/api/jobs/([0-9a-f]{16})", self.job),
             (r"/api/home", self.home),
             (r"/api/map", self.map),
@@ -228,6 +230,8 @@ class Api:
             (r"/api/reconcile", self.reconcile),
             (r"/api/chat", self.chat_send),
             (r"/api/chat/reset", self.chat_reset),
+            (r"/api/push/subscribe", self.push_subscribe),
+            (r"/api/push/test", self.push_test),
             (r"/api/brief", self.make_brief),
             (r"/api/plan", self.make_plan),
             (r"/api/ripple", self.ripple),
@@ -527,6 +531,29 @@ class Api:
 
     def job_list(self, req: Request, m: re.Match[str]) -> Reply:
         return 200, {"jobs": [j.view() for j in self.jobs.recent()]}
+
+    # -- lock-screen notifications (push.py) -----------------------------------
+
+    def push_status(self, req: Request, m: re.Match[str]) -> Reply:
+        return 200, {
+            "configured": push.configured(),
+            "publicKey": push.public_key(),
+            "devices": len(push.devices(self._vault())),
+        }
+
+    def push_subscribe(self, req: Request, m: re.Match[str]) -> Reply:
+        if not push.configured():
+            raise ApiError(409, "not_configured", "Notifications aren't set up on the server.")
+        data = self._json(req)
+        try:
+            count = push.add(self._vault(), data.get("subscription") or {}, self._today())
+        except ValueError:
+            raise ApiError(400, "bad_subscription", "That isn't a push subscription.") from None
+        return 200, {"ok": True, "devices": count}
+
+    def push_test(self, req: Request, m: re.Match[str]) -> Reply:
+        sent = push.send(self._vault(), "daylog", "Notifications are on. The brief comes at 7.")
+        return 200, {"ok": sent > 0, "sent": sent}
 
     def _voice(self, req: Request, day: date | None) -> Reply:
         kind = req.headers.get("content-type", "").split(";")[0].strip().lower()
