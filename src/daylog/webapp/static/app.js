@@ -833,14 +833,22 @@ async function startRec() {
   let recorder;
   try { recorder = new MediaRecorder(stream, mime ? { mimeType: mime } : undefined); }
   catch { recorder = new MediaRecorder(stream); }
-  rec = { recorder, stream, chunks: [], t0: Date.now(), mime };
-  recorder.ondataavailable = e => { if (e.data && e.data.size) rec && rec.chunks.push(e.data); };
+  // The recorder's last block arrives during stop(), after stopRec has cleared
+  // `rec`; pushing to this array (not rec.chunks) keeps it. iPhone Safari hands
+  // over audio in large blocks, so dropping the last one lost most of a note
+  // (2026-10-20: only the first 59 s arrived).
+  const chunks = [];
+  rec = { recorder, stream, chunks, t0: Date.now(), mime };
+  recorder.ondataavailable = e => { if (e.data && e.data.size) chunks.push(e.data); };
   recorder.start(1000);
   S.lRecBtn.classList.add("on");
   fill(S.lRecBtn, icon("stop"));
   S.lRecBtn.setAttribute("aria-label", "Stop and log");
   S.lCancel.hidden = false;
-  S.lRecHint.textContent = S.logDate ? `Recording for ${weekday(S.logDate)}, ${short(S.logDate)}. Tap to stop.` : "Recording. Tap to stop and log it.";
+  // iOS pauses the microphone when the app leaves the screen.
+  S.lRecHint.textContent = S.logDate
+    ? `Recording for ${weekday(S.logDate)}, ${short(S.logDate)}. Keep the app open; tap to stop.`
+    : "Recording. Keep the app open; tap to stop.";
   const tick = () => {
     const s = Math.floor((Date.now() - rec.t0) / 1000);
     S.lTime.textContent = `${Math.floor(s / 60)}:${pad(s % 60)}`;

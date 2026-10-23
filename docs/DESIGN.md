@@ -156,6 +156,31 @@ brief, static map images. Considered and declined: Strava (API needs a paid
 subscription since 2026-06), Surfline (no official API; unofficial access
 breaks its terms).
 
+### To do (wanted, not started — roughly in order)
+
+- **Sleep tracking.** Bed and wake times from notes ("hit the sack around
+  9"), plus sleep hours from the phone's health inlet when the Shortcut
+  sends them; show nights on the week calendar and averages in the numbers.
+- **Quantified analytics.** Trends over weeks and months: sessions and hours
+  per discipline, sleep, energy/mood/focus, food, spend; correlations worth
+  a glance (sleep vs. energy, sessions vs. mood). A tab in the web app.
+- **Periods.** Spans without daily entries ("10 days in Lombok, ~3 surfs"):
+  coarse counts with sources, shown as bands, never as made-up days; backfill
+  from email (flights, bookings, receipts) and photo locations, each as a
+  confirm card. Then migrate the "day approximate" stub entries into them.
+- **Timezone follows location.** Store each stay's timezone (Open-Meteo
+  returns it) and run the brief and the day cutoff by local time, instead of
+  a fixed TZ env var changed by hand.
+- **Cheaper chat.** A cheaper model for simple questions and/or caching the
+  repeated context; a chat question costs ~$0.08 today.
+- **Cheaper brief and plan.** Lower effort and fewer searches for the brief;
+  the weekly plan on demand or fortnightly.
+- **Notes survive a deploy.** Background note jobs live in memory; persist
+  the upload so a restart mid-note doesn't lose it.
+- **Telegram error handler.** Transient "Bad Gateway" errors log as
+  unhandled exceptions every night; handle and log them in one line.
+- **Rankings on the web.** The head-to-head ranking flow is Telegram-only.
+
 ## Working rule for new features
 
 Anything not described here or in the README needs an explicit conversation
