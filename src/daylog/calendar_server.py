@@ -95,6 +95,12 @@ def _make_handler(
     guard = web.LoginGuard(password) if password and site else None
     # One API per server too: it holds the open cards and the web chat.
     api = (app or webapi.Api()) if site else None
+    if api is not None and app is None:
+        # Web notes a restart interrupted are logged now (see webapp/jobs.py).
+        try:
+            api.resume()
+        except Exception:
+            logger.exception("couldn't resume spooled web notes")
 
     class Handler(BaseHTTPRequestHandler):
         web_api = api
