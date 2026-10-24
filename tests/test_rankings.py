@@ -9,55 +9,73 @@ from daylog.rank_flow import format_rankings, rank_candidates
 from .place_fixtures import tree
 
 
-def _insert(current: dict[str, Any], place_id: str, tier: str, better_than: set[str]) -> None:
+def _insert(current: dict[str, Any], place_id: str, better_than: set[str]) -> None:
     """Run a full insertion, answering each comparison from `better_than`."""
-    ins = rankings.start(current, "food", place_id, tier)
+    ins = rankings.start(current, "food", place_id)
     while (opponent := rankings.next_opponent(current, ins)) is not None:
         ins = rankings.answer(ins, new_is_better=opponent in better_than)
     rankings.finish(current, ins)
 
 
 def test_binary_insertion_finds_the_right_slot() -> None:
-    current: dict[str, Any] = {"food": {"liked": ["a", "b", "c", "d"]}}
-    _insert(current, "x", "liked", better_than={"c", "d"})
-    assert current["food"]["liked"] == ["a", "b", "x", "c", "d"]
+    current: dict[str, Any] = {"food": ["a", "b", "c", "d"]}
+    _insert(current, "x", better_than={"c", "d"})
+    assert current["food"] == ["a", "b", "x", "c", "d"]
 
 
-def test_insertion_into_an_empty_tier_needs_no_comparisons() -> None:
+def test_insertion_into_an_empty_list_needs_no_comparisons() -> None:
     current: dict[str, Any] = {}
-    ins = rankings.start(current, "food", "x", "fine")
+    ins = rankings.start(current, "food", "x")
     assert rankings.next_opponent(current, ins) is None
     rankings.finish(current, ins)
-    assert current == {"food": {"fine": ["x"]}}
+    assert current == {"food": ["x"]}
 
 
 def test_reranking_moves_rather_than_duplicates() -> None:
-    current: dict[str, Any] = {"food": {"liked": ["a", "x"], "fine": ["b"]}}
-    _insert(current, "x", "fine", better_than={"b"})
-    assert current["food"] == {"liked": ["a"], "fine": ["x", "b"]}
+    current: dict[str, Any] = {"food": ["a", "x", "b"]}
+    _insert(current, "x", better_than={"a", "b"})
+    assert current["food"] == ["x", "a", "b"]
 
 
 def test_settle_stops_at_the_midpoint() -> None:
-    current: dict[str, Any] = {"food": {"liked": ["a", "b", "c"]}}
-    ins = rankings.settle(rankings.start(current, "food", "x", "liked"))
+    current: dict[str, Any] = {"food": ["a", "b", "c"]}
+    ins = rankings.settle(rankings.start(current, "food", "x"))
     assert rankings.next_opponent(current, ins) is None
     rankings.finish(current, ins)
-    assert current["food"]["liked"] == ["a", "x", "b", "c"]
+    assert current["food"] == ["a", "x", "b", "c"]
 
 
-def test_scores_follow_tier_bands_and_position() -> None:
-    current = {"food": {"liked": ["a", "b", "c"], "fine": ["d"], "disliked": ["e"]}}
+def test_scores_are_relative_to_the_whole_list() -> None:
+    current = {"food": ["a", "b", "c", "d"]}
     assert rankings.score(current, "food", "a") == 10.0
-    assert rankings.score(current, "food", "c") == 6.7
-    assert rankings.score(current, "food", "d") == 6.6
-    assert rankings.score(current, "food", "e") is not None
-    assert rankings.score(current, "food", "e") < 3.4  # type: ignore[operator]
+    assert rankings.score(current, "food", "b") == 7.0
+    assert rankings.score(current, "food", "d") == 1.0
+    assert rankings.score({"food": ["solo"]}, "food", "solo") == 10.0
     assert rankings.score(current, "food", "zzz") is None
-    assert rankings.describe(current, "food", "b") == "#2 of 5 food · 8.3"
+    assert rankings.describe(current, "food", "b") == "#2 of 4 food · 7.0"
+
+
+def test_old_tiers_read_as_one_list_and_flatten_on_write() -> None:
+    current: dict[str, Any] = {"food": {"liked": ["a", "b"], "fine": ["c"], "disliked": ["d"]}}
+    assert rankings.ranked(current, "food") == ["a", "b", "c", "d"]
+    assert rankings.score(current, "food", "d") == 1.0
+    rankings.move(current, "food", "d", 1)
+    assert current["food"] == ["a", "d", "b", "c"]
+
+
+def test_move_and_remove() -> None:
+    current: dict[str, Any] = {"food": ["a", "b", "c"]}
+    assert rankings.move(current, "food", "c", 0) == 0
+    assert current["food"] == ["c", "a", "b"]
+    assert rankings.move(current, "food", "c", 99) == 2
+    assert current["food"] == ["a", "b", "c"]
+    assert rankings.remove(current, "food", "b") is True
+    assert rankings.remove(current, "food", "b") is False
+    assert current["food"] == ["a", "c"]
 
 
 def test_unranked_filters_kinds_and_already_ranked() -> None:
-    current = {"food": {"liked": ["ramen-otaku"]}}
+    current = {"food": ["ramen-otaku"]}
     todo = rankings.unranked(
         current,
         [
@@ -82,5 +100,5 @@ def test_rank_candidates_reads_meals_and_activities() -> None:
 
 
 def test_format_rankings_numbers_and_scores() -> None:
-    text = format_rankings({"food": {"liked": ["ramen-otaku"]}}, PlaceIndex(tree()), "food")
+    text = format_rankings({"food": ["ramen-otaku"]}, PlaceIndex(tree()), "food")
     assert text == "FOOD\n1. Ramen Otaku — 10.0 · Lombok"

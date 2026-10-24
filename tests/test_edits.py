@@ -59,15 +59,15 @@ def test_merge_moves_names_notes_children_and_links() -> None:
     assert index.by_id["warung"]["parent"] == "kuta" and index.by_id["kuta"]["my_notes"]
     fm = {"meals": [{"items": ["x"], "place": "kuta-dup"}]}
     assert edits.relink_journal(fm, "kuta-dup", "kuta") and fm["meals"][0]["place"] == "kuta"
-    ranks = {"food": {"liked": ["a", "kuta-dup", "b"]}}
-    assert edits.relink_rankings(ranks, "kuta-dup", "kuta") and ranks["food"]["liked"] == [
+    ranks = {"food": ["a", "kuta-dup", "b"]}
+    assert edits.relink_rankings(ranks, "kuta-dup", "kuta") and ranks["food"] == [
         "a",
         "kuta",
         "b",
     ]
-    ranks = {"food": {"liked": ["kuta", "kuta-dup"]}}
+    ranks = {"food": ["kuta", "kuta-dup"]}
     edits.relink_rankings(ranks, "kuta-dup", "kuta")
-    assert ranks["food"]["liked"] == ["kuta"]
+    assert ranks["food"] == ["kuta"]
 
 
 def test_delete_refuses_linked_or_parent_places() -> None:
@@ -134,7 +134,7 @@ def _seed(vault: Vault) -> None:
         "t",
         "s",
     )
-    vault.write_yaml("rankings.yaml", {"food": {"liked": ["ramen-otaku"]}}, "rank")
+    vault.write_yaml("rankings.yaml", {"food": ["ramen-otaku"]}, "rank")
 
 
 def test_apply_edit_merge_updates_journal_and_rankings(vault: Vault) -> None:
@@ -156,7 +156,7 @@ def test_apply_edit_merge_updates_journal_and_rankings(vault: Vault) -> None:
     assert outcome == "merged Ramen Otaku into Nami"
     entry = vault.read_journal_entry(date(2026, 9, 27))
     assert entry is not None and entry.frontmatter["meals"][0]["place"] == "nami"
-    assert vault.read_yaml("rankings.yaml", {})["food"]["liked"] == ["nami"]
+    assert vault.read_yaml("rankings.yaml", {})["food"] == ["nami"]
 
 
 def test_preview_rejects_bad_proposals_before_the_card(vault: Vault) -> None:

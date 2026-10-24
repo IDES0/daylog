@@ -17,6 +17,8 @@ from typing import Any
 
 from daylog import goals, trail
 from daylog.places import KINDS, PlaceIndex, file_for
+from daylog.rankings import items as ranked_items
+from daylog.rankings import ranked
 
 
 class EditError(ValueError):
@@ -166,17 +168,16 @@ def relink_journal(frontmatter: dict[str, Any], source_id: str, target_id: str) 
 def relink_rankings(rankings: Any, source_id: str, target_id: str) -> bool:
     """Target keeps its own position if ranked; otherwise it takes the source's."""
     hit = False
-    for tiers in (rankings or {}).values():
-        target_ranked = any(target_id in (lst or []) for lst in tiers.values())
-        for lst in tiers.values():
-            if lst and source_id in lst:
-                i = lst.index(source_id)
-                if target_ranked:
-                    del lst[i]
-                else:
-                    lst[i] = target_id
-                    target_ranked = True
-                hit = True
+    for category in list(rankings or {}):
+        if source_id not in ranked(rankings, category):
+            continue
+        lst = ranked_items(rankings, category)
+        i = lst.index(source_id)
+        if target_id in lst:
+            del lst[i]
+        else:
+            lst[i] = target_id
+        hit = True
     return hit
 
 

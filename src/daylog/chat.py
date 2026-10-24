@@ -228,8 +228,8 @@ TOOLS: list[ToolParam] = [
     ),
     _tool(
         "start_ranking",
-        "Send the user the rank-it buttons (tier, then head-to-heads) for a place, to "
-        "rank or re-rank it.",
+        'Put a "Rank X?" card in the app for a place (head-to-heads against the '
+        "places already ranked), to rank or re-rank it.",
         {"place_id": {"type": "string"}},
         ["place_id"],
     ),
@@ -357,7 +357,7 @@ class Tools:
             return f"Nothing ranked in {category}."
         return "\n".join(
             f"{i}. {self.index.path_name(pid)} — {rankings.score(current, category, pid)}"
-            for i, (pid, _tier) in enumerate(order, start=1)
+            for i, pid in enumerate(order, start=1)
         )
 
     def t_get_research(self, place_id: str) -> str:

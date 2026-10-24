@@ -312,12 +312,12 @@ function cardView(card) {
     btns, result);
   const actions = card.actions && card.actions.length ? card.actions
     : [{ id: "confirm", label: "Confirm", style: "primary" }, { id: "cancel", label: "Cancel" }];
-  // A rank card's tier buttons open the head-to-head flow instead.
+  // A rank card's "Rank it" opens the head-to-head flow instead.
   const ranks = card.kind === "rank" && card.data && card.data.place;
   for (const a of actions) {
     const cls = a.style === "primary" ? ".primary" : a.style === "danger" ? ".danger" : "";
     const go = ranks && a.id !== "skip"
-      ? () => rankFlow({ id: card.data.place, name: card.data.name, category: card.data.category }, { tier: a.id, card })
+      ? () => rankFlow({ id: card.data.place, name: card.data.name, category: card.data.category }, { card })
       : e => answerCard(card, a, el, e.currentTarget);
     btns.append(h("button.btn" + cls, { type: "button", onclick: go }, a.label || a.id));
   }
@@ -2119,11 +2119,11 @@ function initReports(c) {
 
 // ---- rankings
 
-// Category tabs → tiers → a numbered list, best first. Reorder by dragging the
-// handle (pointer events, so touch works), or the ⋯ sheet (up/down, tier, remove).
+// Category tabs → one numbered list, best first; the score is relative to the
+// list. Reorder by dragging the handle (pointer events, so touch works), or
+// the ⋯ sheet (up/down, rank again, remove).
 
 const RK = { data: null, cat: null, reload: null };
-const TIER_ICON = { liked: "👍", fine: "😐", disliked: "👎" };
 
 function initRankings(body) {
   const tabs = h("div.rk-tabs");
@@ -2133,7 +2133,7 @@ function initRankings(body) {
     const counts = d.counts || {};
     fill(tabs, seg((d.categories || []).map(c => [c, h("span", words(c), counts[c] ? h("small.rk-count", counts[c]) : null)]),
       RK.cat, v => { RK.cat = v; try { localStorage.setItem("daylog.rankCat", v); } catch {} draw(); }, "Category", true));
-    fill(box, rankTiers(d, RK.cat));
+    fill(box, rankList(d, RK.cat));
   };
   RK.reload = (cat) => {
     if (cat) RK.cat = cat;
@@ -2150,29 +2150,25 @@ function initRankings(body) {
   body.append(tabs, box);
 }
 
-function rankTiers(d, cat) {
-  const tiers = (d.lists || {})[cat] || [];
-  const total = tiers.reduce((n, t) => n + t.items.length, 0);
-  if (!total) {
-    return h("div.rk-empty", empty(`No ${words(cat)} ranked yet.`, "Rank somewhere you've been."),
-      h("button.btn", { type: "button", onclick: () => rankFlow(null, { category: cat }) }, icon("plus"), `Rank ${words(cat)}`));
-  }
-  const wrap = h("div.rk", { "data-cat": cat });
-  for (const t of tiers) {
-    wrap.append(h("section.rk-tier", { "data-tier": t.tier },
-      h("div.rk-tier-head", h("i.rk-dot"), h("span", t.label), h("span.rk-n", t.items.length || "")),
-      h("ol.rk-list", { "data-tier": t.tier },
-        t.items.length ? t.items.map(it => rankItem(cat, t.tier, it)) : h("li.rk-hole", "Drag here"))));
-  }
-  return wrap;
+const rankItems = cat => (RK.data && (RK.data.lists || {})[cat]) || [];
+
+function rankList(d, cat) {
+  const items = rankItems(cat);
+  const add = h("button.btn", { type: "button", onclick: () => rankFlow(null, { category: cat }) }, icon("plus"), `Rank ${words(cat)}`);
+  if (!items.length) return h("div.rk-empty", empty(`No ${words(cat)} ranked yet.`, "Rank somewhere you've been."), add);
+  return h("div.rk", { "data-cat": cat },
+    h("ol.rk-list", items.map(it => rankItem(cat, it))),
+    h("div.btns", { style: { "margin-top": "12px" } }, add));
 }
 
-function rankItem(cat, tier, it) {
+function rankItem(cat, it) {
   const handle = h("button.rk-handle", { type: "button", "aria-label": `Reorder ${it.name}. Arrow keys move it.` },
     h("span", { "aria-hidden": "true" }, "⋮⋮"));
-  const more = h("button.icon-btn.rk-more", { type: "button", "aria-label": `Options for ${it.name}`, onclick: () => rankSheet(cat, tier, it) },
+  const more = h("button.icon-btn.rk-more", { type: "button", "aria-label": `Options for ${it.name}`, onclick: () => rankSheet(cat, it) },
     h("span", { "aria-hidden": "true" }, "⋯"));
-  const el = h("li.rk-item", { "data-id": it.id },
+  // The score's colour runs green (top) to red (bottom) of this list.
+  const heat = it.score != null ? Math.round(((it.score - 1) / 9) * 100) : 50;
+  const el = h("li.rk-item", { "data-id": it.id, style: { "--heat": `${heat}%` } },
     handle,
     h("span.rk-rank.num", it.rank),
     h("button.rk-name", { type: "button", onclick: () => placeSheet(it.id, it.name) },
@@ -2189,36 +2185,18 @@ function rankItem(cat, tier, it) {
   return el;
 }
 
-// Where an item is: its tier and index (in the tier, without itself).
-function rankSlot(cat, id) {
-  const tiers = (RK.data.lists || {})[cat] || [];
-  for (const t of tiers) {
-    const i = t.items.findIndex(x => x.id === id);
-    if (i >= 0) return { tier: t.tier, index: i, tiers };
-  }
-  return null;
-}
+const rankIndex = (cat, id) => rankItems(cat).findIndex(x => x.id === id);
 
-// One step up or down, across tier edges.
 function stepItem(cat, id, dir, refocus) {
-  const at = rankSlot(cat, id);
-  if (!at) return;
-  const ti = at.tiers.findIndex(t => t.tier === at.tier);
-  const n = at.tiers[ti].items.length;
-  let tier = at.tier, index = at.index + dir;
-  if (index < 0) {
-    if (ti === 0) return;
-    tier = at.tiers[ti - 1].tier; index = at.tiers[ti - 1].items.length;
-  } else if (index > n - 1) {
-    if (ti === at.tiers.length - 1) return;
-    tier = at.tiers[ti + 1].tier; index = 0;
-  }
-  moveItem(cat, id, tier, index, refocus);
+  const i = rankIndex(cat, id);
+  const index = i + dir;
+  if (i < 0 || index < 0 || index > rankItems(cat).length - 1) return;
+  moveItem(cat, id, index, refocus);
 }
 
-async function moveItem(cat, id, tier, index, refocus) {
+async function moveItem(cat, id, index, refocus) {
   try {
-    await post("/api/rankings/move", { category: cat, item: id, tier, index }, NORMAL);
+    await post("/api/rankings/move", { category: cat, item: id, index }, NORMAL);
     await RK.reload();
     announce("Moved.");
     if (refocus) $(`.rk-item[data-id="${CSS.escape(id)}"] .rk-handle`)?.focus();
@@ -2229,7 +2207,7 @@ async function moveItem(cat, id, tier, index, refocus) {
 }
 
 // Pointer drag on the handle: a floating copy follows the finger, a line shows
-// where it lands, and the list scrolls near the screen edges.
+// where it lands, and the page scrolls near the screen edges.
 function dragHandle(handle, el, cat) {
   handle.addEventListener("pointerdown", e => {
     if (e.button !== 0) return;
@@ -2240,25 +2218,22 @@ function dragHandle(handle, el, cat) {
     const ghost = el.cloneNode(true);
     ghost.classList.add("rk-ghost");
     Object.assign(ghost.style, { width: `${box.width}px`, left: `${box.left}px`, top: `${box.top}px` });
-    ghost.style.setProperty("--tc", getComputedStyle(el).getPropertyValue("--tc"));
     document.body.append(ghost);
     el.classList.add("rk-dragging");
+    const list = el.closest(".rk-list");
     const line = h("li.rk-line", { "aria-hidden": "true" });
     let y = e.clientY, target = null, raf = 0;
     const place = () => {
-      const tiers = [...el.closest(".rk").querySelectorAll(".rk-tier")];
-      let sec = tiers.find(s => { const r = s.getBoundingClientRect(); return y < r.bottom; }) || tiers[tiers.length - 1];
-      const list = sec.querySelector(".rk-list");
       const items = [...list.querySelectorAll(".rk-item")].filter(x => x !== el);
       let index = items.findIndex(x => { const r = x.getBoundingClientRect(); return y < r.top + r.height / 2; });
       if (index < 0) index = items.length;
       if (items[index]) list.insertBefore(line, items[index]); else list.append(line);
-      target = { tier: sec.dataset.tier, index };
+      target = index;
     };
     const tick = () => {
       const edge = 72, bottom = innerHeight - (coarse.matches ? 90 : 20);
-      if (y < edge) window.scrollBy(0, -Math.ceil((edge - y) / 6));
-      else if (y > bottom - edge) window.scrollBy(0, Math.ceil((y - bottom + edge) / 6));
+      if (y < edge) scroller.scrollBy(0, -Math.ceil((edge - y) / 6));
+      else if (y > bottom - edge) scroller.scrollBy(0, Math.ceil((y - bottom + edge) / 6));
       ghost.style.top = `${y - dy}px`;
       place();
       raf = requestAnimationFrame(tick);
@@ -2272,14 +2247,12 @@ function dragHandle(handle, el, cat) {
       ghost.remove();
       line.remove();
       el.classList.remove("rk-dragging");
-      const from = rankSlot(cat, el.dataset.id);
-      if (ev.type === "pointerup" && target && from && (from.tier !== target.tier || from.index !== target.index)) {
+      const from = rankIndex(cat, el.dataset.id);
+      if (ev.type === "pointerup" && target != null && from >= 0 && from !== target) {
         // Show it where it was dropped right away; the reload renumbers.
-        const list = el.closest(".rk").querySelector(`.rk-list[data-tier="${target.tier}"]`);
         const items = [...list.querySelectorAll(".rk-item")].filter(x => x !== el);
-        list.querySelector(".rk-hole")?.remove();
-        if (items[target.index]) list.insertBefore(el, items[target.index]); else list.append(el);
-        moveItem(cat, el.dataset.id, target.tier, target.index);
+        if (items[target]) list.insertBefore(el, items[target]); else list.append(el);
+        moveItem(cat, el.dataset.id, target);
       }
     };
     handle.addEventListener("pointermove", move);
@@ -2289,21 +2262,21 @@ function dragHandle(handle, el, cat) {
   });
 }
 
-// The accessible way to do everything a drag does, plus re-rank and remove.
-function rankSheet(cat, tier, it) {
-  if (!rankSlot(cat, it.id)) return;
+// The accessible way to do what a drag does, plus re-rank and remove.
+function rankSheet(cat, it) {
+  if (rankIndex(cat, it.id) < 0) return;
   const res = h("div");
   const act = (label, fn, cls = "") => h("button.btn" + cls, { type: "button", onclick: fn }, label);
   const close = fn => () => { sheet.close(); fn(); };
-  const tiers = (RK.data.tiers || []);
+  const last = rankItems(cat).length - 1;
   const body = h("div.stack-lg",
     h("div.chips", h("span.chip.accent", `#${it.rank} ${words(cat)}`), it.score != null ? h("span.chip", Number(it.score).toFixed(1)) : null,
       it.region ? h("span.chip", it.region) : null),
     h("div.btns",
       act("Move up", close(() => stepItem(cat, it.id, -1))),
-      act("Move down", close(() => stepItem(cat, it.id, 1)))),
-    h("div", h("div.label", { style: { "margin-bottom": "8px" } }, "Tier"),
-      h("div.btns", tiers.filter(t => t.id !== tier).map(t => act(`${TIER_ICON[t.id] || ""} ${t.label}`, close(() => moveItem(cat, it.id, t.id, 0)))))),
+      act("Move down", close(() => stepItem(cat, it.id, 1))),
+      act("To top", close(() => moveItem(cat, it.id, 0))),
+      act("To bottom", close(() => moveItem(cat, it.id, last)))),
     h("div.btns",
       act("Rank again", () => rankFlow({ id: it.id, name: it.name, category: cat }), ".primary"),
       act("Remove", async e => {
@@ -2317,7 +2290,7 @@ function rankSheet(cat, tier, it) {
   openSheet(it.name, body);
 }
 
-// Rank a place: pick it (search) → tier → "which was better?" until it's placed.
+// Rank a place: pick it (search), then "which was better?" until it's placed.
 // The server holds nothing between steps: each answer carries the bounds.
 function rankFlow(place, opts = {}) {
   const body = openSheet(place ? `Rank ${place.name}` : "Rank a place", h("div"));
@@ -2343,21 +2316,17 @@ function rankFlow(place, opts = {}) {
     const keep = [...body.children];
     body.querySelectorAll("button").forEach(b => { b.disabled = true; });
     try { step(await call()); } catch (e) {
-      if (e.status === 409) { fill(body, errorBox(e), h("div.btns", h("button.btn", { type: "button", onclick: () => tierStep(place) }, "Start again"))); return; }
+      if (e.status === 409) { fill(body, errorBox(e), h("div.btns", h("button.btn", { type: "button", onclick: () => start(place) }, "Start again"))); return; }
       fill(body, ...keep, errorBox(e));
       body.querySelectorAll("button").forEach(b => { b.disabled = false; });
     }
   };
-  const start = (p, tier) => send(() => post("/api/rankings/session", { place: p.id, tier, category: p.category || undefined, card: opts.card ? opts.card.id : undefined }, NORMAL)
-    .then(r => { if (opts.card) { cardDone(opts.card, `Ranking ${p.name}…`); opts.card = null; } return r; }));
-  const tierStep = p => {
+  const start = p => {
     place = p;
     $("#sheet-title").textContent = `Rank ${p.name}`;
-    const tiers = (RK.data && RK.data.tiers) || [{ id: "liked", label: "Liked it" }, { id: "fine", label: "Fine" }, { id: "disliked", label: "Didn't like it" }];
-    fill(body, h("div.stack-lg",
-      h("h3.rk-q", `How was ${p.name}?`),
-      h("div.rk-tiers", tiers.map(t => h("button.rk-tierbtn", { type: "button", "data-tier": t.id, onclick: () => start(p, t.id) },
-        h("span", { "aria-hidden": "true" }, TIER_ICON[t.id] || ""), t.label)))));
+    fill(body, skeleton());
+    return send(() => post("/api/rankings/session", { place: p.id, category: p.category || undefined, card: opts.card ? opts.card.id : undefined }, NORMAL)
+      .then(r => { if (opts.card) { cardDone(opts.card, `Ranking ${p.name}…`); opts.card = null; } return r; }));
   };
   const searchStep = () => {
     const kinds = (RK.data && RK.data.kinds) || {};
@@ -2374,7 +2343,7 @@ function rankFlow(place, opts = {}) {
         if (mine !== seq) return;
         const list = (d.results || []).map(p => ({ ...p, category: catOf(p.kind) })).filter(p => p.category);
         fill(results, list.length
-          ? h("ul.list", list.map(p => h("li", { style: { padding: "0" } }, h("button.li-btn", { type: "button", onclick: () => opts.tier ? start(p, opts.tier) : tierStep(p) },
+          ? h("ul.list", list.map(p => h("li", { style: { padding: "0" } }, h("button.li-btn", { type: "button", onclick: () => start(p) },
             h("div", { style: { padding: "10px 0" } }, h("div.li-main", h("span", p.name), h("span.li-right", words(p.category))), sub(p.path))))))
           : empty(null, `No rankable place matches “${q}”.`));
       }, e => { if (mine === seq) fill(results, errorBox(e, search)); });
@@ -2384,8 +2353,7 @@ function rankFlow(place, opts = {}) {
     setTimeout(() => input.focus(), 60);
   };
   if (!place) searchStep();
-  else if (opts.tier) { tierStep(place); start(place, opts.tier); }
-  else tierStep(place);
+  else start(place);
 }
 
 // ---- recent changes with undo

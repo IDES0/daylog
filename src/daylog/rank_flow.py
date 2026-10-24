@@ -1,7 +1,7 @@
 """Rankings' vault side: which places in an entry can be ranked, and the list as text.
 
-Ranking itself is a binary insertion (rankings.py): a tier, then one
-"which was better?" question at a time until the slot is found, then
+Ranking itself is a binary insertion (rankings.py): one "which was
+better?" question at a time until the slot is found, then
 rankings.yaml is written once. The web app drives it (webapp/api.py).
 """
 
@@ -32,7 +32,7 @@ def format_rankings(current: Any, index: PlaceIndex, category: str | None) -> st
         if not order:
             continue
         lines = [f"{cat.upper()}"]
-        for i, (place_id, _tier) in enumerate(order, start=1):
+        for i, place_id in enumerate(order, start=1):
             score = rankings.score(current, cat, place_id)
             region = index.region_of(place_id)
             where = f" · {region.get('name')}" if region else ""

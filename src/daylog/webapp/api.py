@@ -1265,8 +1265,8 @@ class Api:
     # -- rankings: lists, the head-to-head flow, manual reorder -----------------------
     #
     # The flow is stateless: each comparison answer carries the insertion's
-    # bounds ({place, category, tier, lo, hi}) and the server checks them against
-    # the tier as it is now, so a restart or a second tab never loses a flow.
+    # bounds ({place, category, lo, hi}) and the server checks them against the
+    # list as it is now, so a restart or a second tab never loses a flow.
     # rankings.yaml is written once, when the slot is found.
 
     @staticmethod
@@ -1290,28 +1290,20 @@ class Api:
         lists: dict[str, list[dict[str, Any]]] = {}
         counts: dict[str, int] = {}
         for cat in categories:
-            order = [pid for pid, _ in rankings.ranked(current, cat)]
+            order = rankings.ranked(current, cat)
             counts[cat] = len(order)
             if wanted and cat != wanted:
                 continue
             lists[cat] = [
                 {
-                    "tier": tier,
-                    "label": rankings.TIER_LABELS[tier],
-                    "items": [
-                        {
-                            **self._place_view(index, pid),
-                            "rank": order.index(pid) + 1,
-                            "score": rankings.score(current, cat, pid),
-                        }
-                        for pid in rankings.tier_list(current, cat, tier)
-                    ],
+                    **self._place_view(index, pid),
+                    "rank": i + 1,
+                    "score": rankings.score(current, cat, pid),
                 }
-                for tier in rankings.TIERS
+                for i, pid in enumerate(order)
             ]
         return 200, {
             "categories": categories,
-            "tiers": [{"id": t, "label": rankings.TIER_LABELS[t]} for t in rankings.TIERS],
             "kinds": {cat: list(kinds) for cat, kinds in rankings.CATEGORIES.items()},
             "counts": counts,
             "lists": lists,
@@ -1331,13 +1323,6 @@ class Api:
             raise ApiError(400, "bad_category", "Unknown category.")
         return place_id, str(category)
 
-    @staticmethod
-    def _tier(data: Mapping[str, Any]) -> str:
-        tier = data.get("tier")
-        if tier not in rankings.TIERS:
-            raise ApiError(400, "bad_tier", f"'tier' must be one of {', '.join(rankings.TIERS)}.")
-        return str(tier)
-
     def _rank_step(self, v: Vault, current: Any, index: PlaceIndex, ins: Insertion) -> Reply:
         """The next comparison, or (when the slot is found) save and say where it went."""
         new = self._place_view(index, ins.place_id)
@@ -1348,7 +1333,6 @@ class Api:
                 "state": {
                     "place": ins.place_id,
                     "category": ins.category,
-                    "tier": ins.tier,
                     "lo": ins.lo,
                     "hi": ins.hi,
                 },
@@ -1364,8 +1348,7 @@ class Api:
             "done": True,
             "place": new,
             "category": ins.category,
-            "tier": ins.tier,
-            "index": found[1] if found else ins.lo,
+            "index": ins.lo if found is None else found,
             "line": line,
             "message": f"Ranked {new['name']}: {line}",
         }
@@ -1383,19 +1366,17 @@ class Api:
         v = self._vault()
         index = PlaceIndex(v.read_places())
         place_id, category = self._rank_target(data, index)
-        tier = self._tier(data)
         if isinstance(data.get("card"), str):
             # Started from a "Rank X?" card: the card is answered.
             self.cards.discard(data["card"])
         current = v.read_yaml(rankings.RANKINGS_FILE, {})
-        return self._rank_step(v, current, index, rankings.start(current, category, place_id, tier))
+        return self._rank_step(v, current, index, rankings.start(current, category, place_id))
 
     def rank_next(self, req: Request, m: re.Match[str]) -> Reply:
         data = self._json(req)
         v = self._vault()
         index = PlaceIndex(v.read_places())
         place_id, category = self._rank_target(data, index)
-        tier = self._tier(data)
         answer = data.get("answer")
         if answer not in ("better", "worse", "tie"):
             raise ApiError(400, "bad_action", "'answer' must be better, worse or tie.")
@@ -1404,7 +1385,7 @@ class Api:
             raise ApiError(400, "bad_number", "'lo' and 'hi' must be numbers.")
         current = v.read_yaml(rankings.RANKINGS_FILE, {})
         try:
-            ins = rankings.restore(current, category, place_id, tier, lo, hi)
+            ins = rankings.restore(current, category, place_id, lo, hi)
         except ValueError:
             raise ApiError(409, "stale", "The list changed meanwhile. Start again.") from None
         ins = (
@@ -1419,16 +1400,14 @@ class Api:
         v = self._vault()
         index = PlaceIndex(v.read_places())
         place_id, category = self._rank_target({**data, "place": data.get("item")}, index)
-        tier = self._tier(data)
         position = data.get("index")
         if not isinstance(position, int) or position < 0:
             raise ApiError(400, "bad_number", "'index' must be a number from 0.")
         current = v.read_yaml(rankings.RANKINGS_FILE, {})
-        slot = rankings.move(current, category, place_id, tier, position)
+        slot = rankings.move(current, category, place_id, position)
         self._save_rankings(v, current, f"rankings: {category} move {place_id}")
         return 200, {
             "ok": True,
-            "tier": tier,
             "index": slot,
             "line": rankings.describe(current, category, place_id),
         }
@@ -1468,18 +1447,16 @@ class Api:
         return self._rank_card(place_id, category, str(node.get("name", place_id)))
 
     def _rank_card(self, place_id: str, category: str, name: str) -> Card:
-        """Tier buttons; the app turns a tier tap into the head-to-head flow
+        """Rank it / Skip; the app turns "Rank it" into the head-to-head flow
         (POST /api/rankings/session with this card's id). Answered here instead
-        (another client), a tier places it mid-tier, like "too close to call"."""
+        (another client), it lands mid-list, like "too close to call"."""
 
         def apply(answer: str) -> Outcome:
             if answer == "skip":
                 return Outcome(f"Skipped {name}.")
             v = self._vault()
             current = v.read_yaml(rankings.RANKINGS_FILE, {})
-            rankings.finish(
-                current, rankings.settle(rankings.start(current, category, place_id, answer))
-            )
+            rankings.finish(current, rankings.settle(rankings.start(current, category, place_id)))
             try:
                 v.write_yaml(rankings.RANKINGS_FILE, current, f"rankings: {category} +{place_id}")
             except VaultError:
@@ -1492,8 +1469,7 @@ class Api:
             f"Rank {name}?",
             apply,
             detail=category,
-            actions=[action(t, rankings.TIER_LABELS[t]) for t in rankings.TIERS]
-            + [action("skip", "Skip")],
+            actions=[action("rank", "Rank it"), action("skip", "Skip")],
             key=f"rank:{category}:{place_id}",
             data={"place": place_id, "category": category, "name": name},
         )
