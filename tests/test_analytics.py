@@ -336,3 +336,19 @@ def test_replay_links_fall_back_to_all_when_lookup_fails() -> None:
     d = analytics.fetch_report_data(7, client, today=date(2026, 10, 24))
     assert d["by_hour"] == [] and d["by_day"]
     assert d["visitors"][0]["recording"].endswith("/replay/s-9")
+
+
+def test_visit_list_and_hour_chart_failing_leave_the_rest() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        hogql = request.read().decode()
+        if "GROUP BY session ORDER" in hogql or "toStartOfHour" in hogql:
+            return httpx.Response(400, text="bad query")
+        if "AS people, countIf" in hogql:
+            return httpx.Response(200, json=_TOTALS[next(iter(_TOTALS))])
+        return httpx.Response(200, json={"columns": [], "results": []})
+
+    client = httpx.Client(transport=httpx.MockTransport(handler))
+    now = datetime(2026, 10, 24, 15, 20, tzinfo=UTC)
+    d = analytics.fetch_report_data(1, client, now=now, zone=ZoneInfo("America/Chicago"))
+    assert d["people"] and d["visitors"] == []
+    assert all(not r["people"] for r in d["by_hour"])

@@ -512,6 +512,16 @@ def _by_hour(rows: list[dict[str, Any]], now: datetime, zone: tzinfo) -> list[di
     return [seen.get(k) or {"key": k, "people": 0, "n": 0} for k in sorted({*keys, *seen})]
 
 
+def _soft(hogql: str, client: httpx.Client | None) -> list[dict[str, Any]]:
+    """A query the report can do without (the hour chart, the visit list):
+    a failure is logged and leaves that part empty rather than the report."""
+    try:
+        return query(hogql, client)
+    except AnalyticsError as exc:
+        logger.warning("site report: optional query failed: %s", exc)
+        return []
+
+
 def fetch_report_data(
     days: int,
     client: httpx.Client | None = None,
@@ -548,13 +558,13 @@ def fetch_report_data(
     if not summary["people"] and not summary["resume"]:
         return data
     if days == 1:
-        data["by_hour"] = _by_hour(query(breakdown_hogql(_HOUR, 1, 26), client), now, zone)
+        data["by_hour"] = _by_hour(_soft(breakdown_hogql(_HOUR, 1, 26), client), now, zone)
     else:
         data["by_day"] = _by_day(query(breakdown_hogql(_DAY, days, days + 1), client), days, today)
     for key, _title, expr, limit in _SECTIONS:
         data[key] = _rows(query(breakdown_hogql(expr, days, limit), client))
     data["engagement"] = _engagement((query(engagement_hogql(days), client) or [{}])[0])
-    listed = sessions(query(sessions_hogql(days), client))
+    listed = sessions(_soft(sessions_hogql(days), client))
     company = visits(query(visits_hogql(days), client))
     recorded = _recorded([s.session for s in listed] + [v.session for v in company], client)
 
