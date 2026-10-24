@@ -24,6 +24,7 @@ import threading
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
+from functools import partial
 from importlib import resources
 from pathlib import Path
 from typing import Any
@@ -91,7 +92,11 @@ def static_file(name: str) -> bytes | None:
 
 def default_vault() -> Vault:
     """The vault, caught up with the remote (throttled — see Vault.sync)."""
-    v = Vault(Path(os.environ.get("VAULT_PATH", "../daylog-vault")))
+    spool = os.environ.get("SPOOL_PATH")
+    v = Vault(
+        Path(os.environ.get("VAULT_PATH", "../daylog-vault")),
+        Path(spool) if spool else None,
+    )
     v.sync()
     return v
 
@@ -194,8 +199,9 @@ class Api:
         self._spawn = spawn or _spawn_thread
         self.cards = CardStore()
         self.chat = ChatStore()
-        # Notes are logged off the request: see jobs.py.
-        self.jobs = Jobs(run_notes or _spawn_thread)
+        # Notes are logged off the request, and spooled so a restart resumes
+        # them: see jobs.py and `resume`.
+        self.jobs = Jobs(run_notes or _spawn_thread, spool=lambda: self._vault().spool())
         gets: list[tuple[str, Handler]] = [
             (r"/api/me", self.me),
             (r"/api/jobs", self.job_list),
@@ -491,14 +497,17 @@ class Api:
         text = _text_field(data, "text")
         day = self._past_day(data["date"]) if data.get("date") else None
         key = key_for(req.headers.get("idempotency-key"), "log", text.encode(), str(day))
-        return self._submit(key, "log", lambda: self._log(text, day))
+        note = {"text": text, "date": day.isoformat() if day else None}
+        return self._submit(key, "log", lambda: self._log(text, day), note)
 
     def voice(self, req: Request, m: re.Match[str]) -> Reply:
         if not req.body:
             raise ApiError(400, "empty", "No audio in the request.")
         day = self._past_day(req.arg("date")) if req.arg("date") else None
         key = key_for(req.headers.get("idempotency-key"), "voice", req.body, str(day))
-        return self._submit(key, "voice", lambda: self._voice(req, day))
+        audio, kind = req.body, req.headers.get("content-type", "")
+        note = {"content_type": kind, "date": day.isoformat() if day else None}
+        return self._submit(key, "voice", lambda: self._voice(audio, kind, day), note, audio)
 
     def _past_day(self, raw: Any) -> date:
         """A day to log to, checked before the note is accepted, not after."""
@@ -507,26 +516,50 @@ class Api:
             raise ApiError(400, "bad_date", "Can't log a day that hasn't happened yet.")
         return day
 
-    def _submit(self, key: str, kind: str, work: Callable[[], Reply]) -> Reply:
+    def _submit(
+        self,
+        key: str,
+        kind: str,
+        work: Callable[[], Reply],
+        note: dict[str, Any],
+        audio: bytes | None = None,
+    ) -> Reply:
         """Accept the note now and log it in the background (see jobs.py). A note
         sent again gets its existing job back instead of being logged twice."""
-
-        def guarded() -> Reply:
-            try:
-                return work()
-            except ApiError as exc:
-                return exc.reply()
-
-        job, new = self.jobs.submit(key, kind, guarded)
+        job, new = self.jobs.submit(key, kind, _guarded(work), note, audio)
         if not new:
             logger.info("note sent again; answered with its existing job")
         return 202, {"job": job.id, "status": job.status, "repeated": not new}
+
+    def resume(self) -> None:
+        """On start: know the spooled jobs again and log the notes a restart
+        interrupted, once each, under their old job ids (see jobs.py)."""
+        spool = self._vault().spool()
+        for job in self.jobs.load():
+            note = job.note or {}
+            try:
+                day = date.fromisoformat(note["date"]) if note.get("date") else None
+            except (TypeError, ValueError):
+                day = None
+            if job.kind == "log" and isinstance(note.get("text"), str):
+                text = note["text"]
+                self.jobs.resume(job, _guarded(partial(self._log, text, day)))
+                continue
+            audio = spool.read_audio(job.id) if job.kind == "voice" else None
+            if audio is None:
+                self.jobs.fail(
+                    job,
+                    (500, {"error": "lost", "message": "This note was lost in a restart."}),
+                )
+                continue
+            kind = str(note.get("content_type") or "")
+            self.jobs.resume(job, _guarded(partial(self._voice, audio, kind, day)))
 
     def job(self, req: Request, m: re.Match[str]) -> Reply:
         job = self.jobs.get(m.group(1))
         if job is None:
             raise ApiError(
-                404, "unknown_job", "That note isn't known here — the server may have restarted."
+                404, "unknown_job", "That note isn't known here (jobs are kept for a day)."
             )
         return 200, job.view()
 
@@ -556,12 +589,12 @@ class Api:
         sent = push.send(self._vault(), "daylog", "Notifications are on. The brief comes at 7.")
         return 200, {"ok": sent > 0, "sent": sent}
 
-    def _voice(self, req: Request, day: date | None) -> Reply:
-        kind = req.headers.get("content-type", "").split(";")[0].strip().lower()
+    def _voice(self, audio: bytes, content_type: str, day: date | None) -> Reply:
+        kind = content_type.split(";")[0].strip().lower()
         try:
             with tempfile.TemporaryDirectory() as tmp_dir:
                 audio_path = Path(tmp_dir) / f"voice{_VOICE_SUFFIX.get(kind, '.webm')}"
-                audio_path.write_bytes(req.body)
+                audio_path.write_bytes(audio)
                 transcript = transcribe.transcribe(
                     audio_path, primer=vocab.primer_for(self._vault())
                 )
@@ -1322,6 +1355,18 @@ class Api:
         except VaultError as exc:
             raise ApiError(409, "conflict", f"Couldn't undo that: {exc}") from exc
         return 200, {"ok": True, "message": f"Undone ({sha})."}
+
+
+def _guarded(work: Callable[[], Reply]) -> Callable[[], Reply]:
+    """A note's work, with a refusal (ApiError) as its failed reply."""
+
+    def run() -> Reply:
+        try:
+            return work()
+        except ApiError as exc:
+            return exc.reply()
+
+    return run
 
 
 def _spawn_thread(fn: Callable[[], None]) -> None:

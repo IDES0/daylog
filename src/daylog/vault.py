@@ -8,7 +8,10 @@ to `Vault` to persist.
 from __future__ import annotations
 
 import io
+import json
 import logging
+import os
+import re
 import subprocess
 import threading
 import time
@@ -112,9 +115,85 @@ def _merge_frontmatter(
     return merged
 
 
-class Vault:
+_SPOOL_ID = re.compile(r"[0-9a-f]{16}")
+
+
+class Spool:
+    """Web notes accepted but not yet logged, and the outcome of each note's job.
+
+    Plain files, never committed: `<id>.json` is a job's record (the note's
+    text or audio type while it waits, then its status and result) and
+    `<id>.audio` a voice note's upload until its job ends. A restart reads
+    them back, so a note sent just before a deploy is still logged.
+    """
+
     def __init__(self, path: Path) -> None:
         self.path = path
+
+    def _file(self, job_id: str, suffix: str) -> Path:
+        if not _SPOOL_ID.fullmatch(job_id):
+            raise ValueError(f"not a job id: {job_id!r}")
+        return self.path / f"{job_id}{suffix}"
+
+    def _write(self, target: Path, data: bytes) -> None:
+        # Write then rename, so a restart never finds half a file.
+        self.path.mkdir(parents=True, exist_ok=True)
+        tmp = target.with_name(target.name + ".tmp")
+        tmp.write_bytes(data)
+        os.replace(tmp, target)
+
+    def save_job(self, job_id: str, record: dict[str, Any]) -> None:
+        self._write(self._file(job_id, ".json"), json.dumps(record).encode())
+
+    def save_audio(self, job_id: str, audio: bytes) -> None:
+        self._write(self._file(job_id, ".audio"), audio)
+
+    def read_audio(self, job_id: str) -> bytes | None:
+        path = self._file(job_id, ".audio")
+        return path.read_bytes() if path.exists() else None
+
+    def drop_audio(self, job_id: str) -> None:
+        self._file(job_id, ".audio").unlink(missing_ok=True)
+
+    def drop_job(self, job_id: str) -> None:
+        self._file(job_id, ".json").unlink(missing_ok=True)
+        self.drop_audio(job_id)
+
+    def jobs(self) -> list[dict[str, Any]]:
+        """Every readable job record; a damaged one is logged and skipped."""
+        if not self.path.is_dir():
+            return []
+        records = []
+        for path in sorted(self.path.glob("*.json")):
+            try:
+                record = json.loads(path.read_text())
+            except (OSError, ValueError):
+                logger.warning("spool: unreadable job record %s, skipped", path.name)
+                continue
+            if isinstance(record, dict) and record.get("id") == path.stem:
+                records.append(record)
+        return records
+
+
+class Vault:
+    def __init__(self, path: Path, spool_path: Path | None = None) -> None:
+        self.path = path
+        # Inside the vault by default, so it's on the same volume, but kept
+        # out of git (see `spool`).
+        self.spool_path = spool_path or path / ".spool"
+
+    def spool(self) -> Spool:
+        """The web notes' spool. When it sits inside the vault, it's listed in
+        the repo's .git/info/exclude so no commit ever picks it up."""
+        root, spool = self.path.resolve(), self.spool_path.resolve()
+        if spool.is_relative_to(root) and (root / ".git").is_dir():
+            pattern = "/" + spool.relative_to(root).as_posix() + "/"
+            exclude = root / ".git" / "info" / "exclude"
+            lines = exclude.read_text().splitlines() if exclude.exists() else []
+            if pattern not in lines:
+                exclude.parent.mkdir(parents=True, exist_ok=True)
+                exclude.write_text("\n".join([*lines, pattern]) + "\n")
+        return Spool(self.spool_path)
 
     # -- paths -----------------------------------------------------------
 

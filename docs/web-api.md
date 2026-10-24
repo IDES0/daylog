@@ -82,8 +82,11 @@ The status site is the app, and the only interface (Telegram was retired on
   "repeated": false}` as soon as the note has arrived; the app can close.
   `GET /api/jobs/{id}` → `{"id", "kind", "status": "processing|done|failed",
   "code", "result"}` where `result` is the body described below;
-  `GET /api/jobs` lists the last day's jobs; an unknown id (server restarted)
-  → 404 `unknown_job`. Send `Idempotency-Key: <one id per note>` and reuse it
+  `GET /api/jobs` lists the last day's jobs; an unknown id (older than a
+  day) → 404 `unknown_job`. Jobs survive a restart (since 2026-10-24): the
+  note is spooled before the 202 (`<vault>/.spool/`, git-excluded, or
+  `SPOOL_PATH`), a note a restart interrupted is logged on start under the
+  same job id, and a finished job's status and result still answer. Send `Idempotency-Key: <one id per note>` and reuse it
   on Retry: a note sent again gets its existing job (`"repeated": true`)
   instead of being logged twice; only a failed job runs again. Without the
   header, the body's hash stands in. A future `date` is refused at once (400).
