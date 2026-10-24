@@ -656,36 +656,17 @@ function renderGoals(body, goals, detail) {
   body.append(h("ul.list", goals.map(g => {
     const right = goalRight(g);
     const meta = [g.progress != null && g.target ? words(g.metric) : "", g.when !== right ? g.when : "", g.slips ? `moved ${g.slips}×` : ""].filter(Boolean).join(" · ");
-    return li(g.title, right,
-      g.percent != null ? track(g.percent) : null,
-      sub(meta),
-      detail ? h("div.chips", { style: { "margin-top": "8px" } },
-        g.type === "hard" ? h("span.chip.warn", "hard date") : null,
-        g.discipline ? h("span.chip.accent", words(g.discipline)) : null) : null,
-      detail && g.notes ? h("details.notes-fold", h("summary", "Notes"), md(g.notes)) : null);
+    if (!detail) return li(g.title, right, g.percent != null ? track(g.percent) : null, sub(meta));
+    // You → Goals: the row and its bar show; the rest opens on a tap.
+    const chips = [g.type === "hard" ? h("span.chip.warn", "hard date") : null,
+      g.discipline ? h("span.chip.accent", words(g.discipline)) : null].filter(Boolean);
+    const more = [sub(meta), chips.length ? h("div.chips", { style: { "margin-top": "8px" } }, ...chips) : null,
+      g.notes ? md(g.notes) : null].filter(Boolean);
+    const head = h("summary", h("div.li-main", h("span", g.title), right ? h("span.li-right", right) : null),
+      g.percent != null ? track(g.percent) : null);
+    if (!more.length) return li(g.title, right, g.percent != null ? track(g.percent) : null);
+    return h("li", h("details.goal-fold", head, h("div.goal-more", ...more)));
   })));
-}
-
-// You → Goals is reference (Home already shows progress), so it starts folded
-// to one line; the choice is remembered on this device.
-const GOALS_OPEN_KEY = "daylog.youGoalsOpen";
-function renderFoldedGoals(body, goals) {
-  fill(body);
-  const list = goals || [];
-  if (!list.length) { renderGoals(body, list, true); return; }
-  const moved = list.filter(g => g.slips).length;
-  const line = [`${list.length} goal${list.length === 1 ? "" : "s"}`, moved ? `${moved} moved` : ""].filter(Boolean).join(" · ");
-  const inner = h("div");
-  renderGoals(inner, list, true);
-  let open = false;
-  try { open = localStorage.getItem(GOALS_OPEN_KEY) === "1"; } catch { /* private mode */ }
-  const fold = h("details.goals-fold", { open: open || null }, h("summary", h("span", line), h("span.muted", "Show")), inner);
-  fold.addEventListener("toggle", () => {
-    fold.querySelector("summary .muted").textContent = fold.open ? "Hide" : "Show";
-    try { localStorage.setItem(GOALS_OPEN_KEY, fold.open ? "1" : "0"); } catch { /* private mode */ }
-  });
-  if (open) fold.querySelector("summary .muted").textContent = "Hide";
-  body.append(fold);
 }
 
 function renderNext(body, next) {
@@ -1492,7 +1473,7 @@ function initYou() {
   fill(goals.body, skeleton());
   fill(miles.body, skeleton());
   const fromHome = force => getHome(force).then(d => {
-    renderFoldedGoals(goals.body, d.goals);
+    renderGoals(goals.body, d.goals, true);
     renderMilestones(miles.body, d.milestones, 5);
   }, e => { fill(goals.body, errorBox(e, () => fromHome(true))); fill(miles.body); });
   fromHome(false);
