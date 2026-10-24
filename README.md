@@ -214,10 +214,12 @@ modules), so a note logged on either lands identically. The contract is
 - Endpoints: `me`, `home`, `map`, `calendar`, `journal`, `journal/{date}`,
   `log`, `voice`, `reconcile`, `chat` (+ `chat/reset`), `brief`, `surf`,
   `fly`, `upcoming`, `status`, `usage`, `site`, `plan`, `ripple`, `trail`,
-  `places`, `places/{id}`, `wishlist`, `rankings`, `research`, `review`,
+  `places`, `places/{id}`, `wishlist`, `rankings` (+ `rankings/session`,
+  `rankings/session/next`, `rankings/move`, `rankings/remove`), `research`, `review`,
   `disciplines`, `changes` (+ `changes/{sha}/revert`), `cards`.
 - The frontend is plain HTML/CSS/JS in `src/daylog/webapp/static/`, shipped
-  as package data. Ranking (the head-to-head flow) is Telegram-only for now.
+  as package data. Rankings (tiers, head-to-heads, drag to reorder) live in
+  the You tab; a note that mentions an unranked place offers a Rank card.
 
 ## Architecture
 
@@ -250,7 +252,8 @@ src/daylog/
   daily.py         The 4am day cutoff, end-of-day reconcile job, weekly
                    review job.
   reconcile.py     Rebuilds a multi-note day in one pass.
-  rankings.py      Beli-style tiers + binary insertion; rank_flow.py is
+  rankings.py      Beli-style tiers + binary insertion, moves, the after-a-
+                   note prompt (pure; both clients); rank_flow.py is
                    the Telegram side.
   llm.py           Pricing, monthly spend ledger (usage.yaml), budget
                    caps, and streamed calls for long requests.

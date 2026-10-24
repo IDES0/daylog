@@ -18,34 +18,20 @@ from telegram.ext import ContextTypes
 
 from daylog import rankings
 from daylog.places import PlaceIndex
+from daylog.rankings import MAX_PROMPTS_PER_ENTRY, RANKINGS_FILE, rank_candidates
 from daylog.tg import chunks, is_authorized, vault
 from daylog.vault import VaultError
 
 logger = logging.getLogger(__name__)
 
-RANKINGS_FILE = "rankings.yaml"
+__all__ = ["MAX_PROMPTS_PER_ENTRY", "RANKINGS_FILE", "rank_candidates"]
+
 _PENDING_KEY = "pending_rankings"
-# Don't turn one voice note into a questionnaire.
-MAX_PROMPTS_PER_ENTRY = 2
 
 
 def _name(index: PlaceIndex, place_id: str) -> str:
     node = index.get(place_id)
     return str(node.get("name")) if node else place_id
-
-
-def rank_candidates(facts: dict[str, Any], index: PlaceIndex) -> list[tuple[str, str | None]]:
-    """(place_id, kind) for every linked place in an entry's activities and meals."""
-    out: list[tuple[str, str | None]] = []
-    for field_name in ("meals", "activities"):
-        for item in facts.get(field_name) or []:
-            if not isinstance(item, dict):
-                continue
-            place_id = item.get("place")
-            node = index.get(place_id)
-            if node is not None:
-                out.append((str(place_id), node.get("kind")))
-    return out
 
 
 def _pending(context: ContextTypes.DEFAULT_TYPE) -> dict[str, dict[str, Any]]:
@@ -88,8 +74,7 @@ async def prompt_after_entry(
     v = vault()
     index = PlaceIndex(v.read_places())
     current = v.read_yaml(RANKINGS_FILE, {})
-    todo = rankings.unranked(current, rank_candidates(facts, index))
-    for place_id, category in todo[:MAX_PROMPTS_PER_ENTRY]:
+    for place_id, category in rankings.to_prompt(current, facts, index):
         await ask_to_rank(message, context, place_id, category, _name(index, place_id))
 
 

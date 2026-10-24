@@ -19,6 +19,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
+from daylog.places import PlaceIndex
+
 # category -> the place kinds ranked in it
 CATEGORIES: dict[str, tuple[str, ...]] = {
     "food": ("food",),
@@ -153,3 +155,66 @@ def unranked(rankings: Any, candidates: list[tuple[str, str | None]]) -> list[tu
         if (place_id, category) not in out:
             out.append((place_id, category))
     return out
+
+
+# -- shared by both clients (Telegram's rank_flow.py, the web app) -------------
+
+RANKINGS_FILE = "rankings.yaml"
+# Don't turn one note into a questionnaire.
+MAX_PROMPTS_PER_ENTRY = 2
+TIER_LABELS = {"liked": "Liked it", "fine": "Fine", "disliked": "Didn't like it"}
+
+
+def rank_candidates(facts: dict[str, Any], index: PlaceIndex) -> list[tuple[str, str | None]]:
+    """(place_id, kind) for every linked place in an entry's activities and meals."""
+    out: list[tuple[str, str | None]] = []
+    for field_name in ("meals", "activities"):
+        for item in facts.get(field_name) or []:
+            if not isinstance(item, dict):
+                continue
+            place_id = item.get("place")
+            node = index.get(place_id)
+            if node is not None:
+                out.append((str(place_id), node.get("kind")))
+    return out
+
+
+def to_prompt(rankings: Any, facts: dict[str, Any], index: PlaceIndex) -> list[tuple[str, str]]:
+    """(place_id, category) for the unranked places in a logged entry worth a
+    "rank it?" prompt, at most MAX_PROMPTS_PER_ENTRY."""
+    return unranked(rankings, rank_candidates(facts, index))[:MAX_PROMPTS_PER_ENTRY]
+
+
+def restore(rankings: Any, category: str, place_id: str, tier: str, lo: int, hi: int) -> Insertion:
+    """An insertion a client carried between comparisons (the web app holds the
+    bounds, not the server). ValueError if they no longer fit the tier."""
+    others = [p for p in tier_list(rankings, category, tier) if p != place_id]
+    if not 0 <= lo <= hi <= len(others):
+        raise ValueError("bounds no longer fit the tier")
+    return Insertion(category=category, tier=tier, place_id=place_id, lo=lo, hi=hi)
+
+
+def comparisons_left(ins: Insertion) -> int:
+    """At most this many more questions (a binary search over hi - lo slots)."""
+    return (ins.hi - ins.lo).bit_length()
+
+
+def remove(rankings: Any, category: str, place_id: str) -> bool:
+    """Unrank a place in one category. Mutates `rankings`; False if it wasn't ranked."""
+    found = False
+    for tier in TIERS:
+        existing = (rankings.get(category) or {}).get(tier)
+        if existing and place_id in existing:
+            existing.remove(place_id)
+            found = True
+    return found
+
+
+def move(rankings: Any, category: str, place_id: str, tier: str, index: int) -> int:
+    """A manual reorder: put `place_id` at `index` (0 = best) of `tier`, taking it
+    out of wherever it was. `index` counts the tier without the place, so it is
+    the slot the place ends up in. Mutates `rankings`; returns that slot."""
+    remove(rankings, category, place_id)
+    slot = max(0, min(index, len(tier_list(rankings, category, tier))))
+    finish(rankings, Insertion(category, tier, place_id, slot, slot))
+    return slot

@@ -42,7 +42,6 @@ from daylog import (
     llm,
     plan_flow,
     push,
-    rank_flow,
     rankings,
     research,
     research_flow,
@@ -56,6 +55,7 @@ from daylog import (
 )
 from daylog.disciplines import Graph
 from daylog.places import PlaceIndex
+from daylog.rankings import Insertion
 from daylog.tg import tz
 from daylog.vault import CorrectionConflictError, Vault, VaultError
 from daylog.webapp.cards import Card, CardStore, Outcome, UnknownAction, action
@@ -237,6 +237,10 @@ class Api:
             (r"/api/ripple", self.ripple),
             (r"/api/wishlist", self.want),
             (r"/api/research", self.research),
+            (r"/api/rankings/session", self.rank_start),
+            (r"/api/rankings/session/next", self.rank_next),
+            (r"/api/rankings/move", self.rank_move),
+            (r"/api/rankings/remove", self.rank_remove),
             (r"/api/review", self.make_review),
             (r"/api/changes/([0-9a-f]{4,40})/revert", self.revert),
             (r"/api/cards/(c_[0-9a-f]+)", self.answer_card),
@@ -591,6 +595,7 @@ class Api:
                 "text": text,
             }
         cards = self._log_cards(result)
+        cards += self._rank_prompts(v, result.facts)
         # A new region is researched only if asked: it costs ~$1–2.
         if result.location_changed and research_flow.plan_arrive(v) is not None:
             card = self._research_job_card({"job": "explore"})
@@ -817,8 +822,9 @@ class Api:
             title = "Research what's around here? (API budget, a minute or two)"
         elif kind == "dossier" and name:
             title = f"Research {name} now? (API budget, a minute or two)"
+        elif kind == "rank" and name:
+            return self._rank_card_for(name)
         else:
-            # Ranking is a Telegram flow for now; nothing to confirm here.
             return None
 
         def apply(answer: str) -> Outcome:
@@ -1206,27 +1212,241 @@ class Api:
         )
         return 200, {"cards": self._cards([card])}
 
+    # -- rankings: lists, the head-to-head flow, manual reorder -----------------------
+    #
+    # The flow is stateless: each comparison answer carries the insertion's
+    # bounds ({place, category, tier, lo, hi}) and the server checks them against
+    # the tier as it is now, so a restart or a second tab never loses a flow.
+    # rankings.yaml is written once, when the slot is found (as on Telegram).
+
+    @staticmethod
+    def _place_view(index: PlaceIndex, place_id: str) -> dict[str, Any]:
+        node = index.get(place_id) or {}
+        region = index.region_of(place_id)
+        return {
+            "id": place_id,
+            "name": str(node.get("name", place_id)),
+            "kind": node.get("kind"),
+            "path": index.path_name(place_id) if node else None,
+            "region": str(region.get("name")) if region and region is not node else None,
+        }
+
     def rankings(self, req: Request, m: re.Match[str]) -> Reply:
         v = self._vault()
-        current = v.read_yaml(rank_flow.RANKINGS_FILE, {})
+        current = v.read_yaml(rankings.RANKINGS_FILE, {})
         index = PlaceIndex(v.read_places())
         wanted = req.arg("category")
         categories = list(rankings.CATEGORIES)
         lists: dict[str, list[dict[str, Any]]] = {}
-        for cat in [wanted] if wanted in rankings.CATEGORIES else categories:
-            tiers = [
+        counts: dict[str, int] = {}
+        for cat in categories:
+            order = [pid for pid, _ in rankings.ranked(current, cat)]
+            counts[cat] = len(order)
+            if wanted and cat != wanted:
+                continue
+            lists[cat] = [
                 {
                     "tier": tier,
+                    "label": rankings.TIER_LABELS[tier],
                     "items": [
-                        str((index.get(pid) or {}).get("name", pid))
+                        {
+                            **self._place_view(index, pid),
+                            "rank": order.index(pid) + 1,
+                            "score": rankings.score(current, cat, pid),
+                        }
                         for pid in rankings.tier_list(current, cat, tier)
                     ],
                 }
                 for tier in rankings.TIERS
             ]
-            if any(t["items"] for t in tiers):
-                lists[cat] = [t for t in tiers if t["items"]]
-        return 200, {"categories": categories, "lists": lists}
+        return 200, {
+            "categories": categories,
+            "tiers": [{"id": t, "label": rankings.TIER_LABELS[t]} for t in rankings.TIERS],
+            "kinds": {cat: list(kinds) for cat, kinds in rankings.CATEGORIES.items()},
+            "counts": counts,
+            "lists": lists,
+        }
+
+    def _rank_target(self, data: Mapping[str, Any], index: PlaceIndex) -> tuple[str, str]:
+        place_id = _text_field(data, "place", limit=200)
+        node = index.get(place_id)
+        if node is None:
+            raise ApiError(404, "not_found", "No such place.")
+        category = data.get("category") or rankings.category_for(node.get("kind"))
+        if category is None:
+            raise ApiError(
+                400, "not_rankable", f"A {str(node.get('kind')).replace('_', ' ')} isn't ranked."
+            )
+        if category not in rankings.CATEGORIES:
+            raise ApiError(400, "bad_category", "Unknown category.")
+        return place_id, str(category)
+
+    @staticmethod
+    def _tier(data: Mapping[str, Any]) -> str:
+        tier = data.get("tier")
+        if tier not in rankings.TIERS:
+            raise ApiError(400, "bad_tier", f"'tier' must be one of {', '.join(rankings.TIERS)}.")
+        return str(tier)
+
+    def _rank_step(self, v: Vault, current: Any, index: PlaceIndex, ins: Insertion) -> Reply:
+        """The next comparison, or (when the slot is found) save and say where it went."""
+        new = self._place_view(index, ins.place_id)
+        opponent = rankings.next_opponent(current, ins)
+        if opponent is not None:
+            return 200, {
+                "done": False,
+                "state": {
+                    "place": ins.place_id,
+                    "category": ins.category,
+                    "tier": ins.tier,
+                    "lo": ins.lo,
+                    "hi": ins.hi,
+                },
+                "place": new,
+                "other": self._place_view(index, opponent),
+                "left": rankings.comparisons_left(ins),
+            }
+        rankings.finish(current, ins)
+        self._save_rankings(v, current, f"rankings: {ins.category} +{ins.place_id}")
+        line = rankings.describe(current, ins.category, ins.place_id)
+        found = rankings.position(current, ins.category, ins.place_id)
+        return 200, {
+            "done": True,
+            "place": new,
+            "category": ins.category,
+            "tier": ins.tier,
+            "index": found[1] if found else ins.lo,
+            "line": line,
+            "message": f"Ranked {new['name']}: {line}",
+        }
+
+    @staticmethod
+    def _save_rankings(v: Vault, current: Any, message: str) -> None:
+        try:
+            v.write_yaml(rankings.RANKINGS_FILE, current, message)
+        except VaultError as exc:
+            logger.exception("rankings commit failed")
+            raise ApiError(500, "commit_failed", "Saving the ranking failed.") from exc
+
+    def rank_start(self, req: Request, m: re.Match[str]) -> Reply:
+        data = self._json(req)
+        v = self._vault()
+        index = PlaceIndex(v.read_places())
+        place_id, category = self._rank_target(data, index)
+        tier = self._tier(data)
+        if isinstance(data.get("card"), str):
+            # Started from a "Rank X?" card: the card is answered.
+            self.cards.discard(data["card"])
+        current = v.read_yaml(rankings.RANKINGS_FILE, {})
+        return self._rank_step(v, current, index, rankings.start(current, category, place_id, tier))
+
+    def rank_next(self, req: Request, m: re.Match[str]) -> Reply:
+        data = self._json(req)
+        v = self._vault()
+        index = PlaceIndex(v.read_places())
+        place_id, category = self._rank_target(data, index)
+        tier = self._tier(data)
+        answer = data.get("answer")
+        if answer not in ("better", "worse", "tie"):
+            raise ApiError(400, "bad_action", "'answer' must be better, worse or tie.")
+        lo, hi = data.get("lo"), data.get("hi")
+        if not isinstance(lo, int) or not isinstance(hi, int):
+            raise ApiError(400, "bad_number", "'lo' and 'hi' must be numbers.")
+        current = v.read_yaml(rankings.RANKINGS_FILE, {})
+        try:
+            ins = rankings.restore(current, category, place_id, tier, lo, hi)
+        except ValueError:
+            raise ApiError(409, "stale", "The list changed meanwhile. Start again.") from None
+        ins = (
+            rankings.settle(ins)
+            if answer == "tie"
+            else rankings.answer(ins, new_is_better=answer == "better")
+        )
+        return self._rank_step(v, current, index, ins)
+
+    def rank_move(self, req: Request, m: re.Match[str]) -> Reply:
+        data = self._json(req)
+        v = self._vault()
+        index = PlaceIndex(v.read_places())
+        place_id, category = self._rank_target({**data, "place": data.get("item")}, index)
+        tier = self._tier(data)
+        position = data.get("index")
+        if not isinstance(position, int) or position < 0:
+            raise ApiError(400, "bad_number", "'index' must be a number from 0.")
+        current = v.read_yaml(rankings.RANKINGS_FILE, {})
+        slot = rankings.move(current, category, place_id, tier, position)
+        self._save_rankings(v, current, f"rankings: {category} move {place_id}")
+        return 200, {
+            "ok": True,
+            "tier": tier,
+            "index": slot,
+            "line": rankings.describe(current, category, place_id),
+        }
+
+    def rank_remove(self, req: Request, m: re.Match[str]) -> Reply:
+        data = self._json(req)
+        v = self._vault()
+        index = PlaceIndex(v.read_places())
+        place_id, category = self._rank_target({**data, "place": data.get("item")}, index)
+        current = v.read_yaml(rankings.RANKINGS_FILE, {})
+        if not rankings.remove(current, category, place_id):
+            raise ApiError(404, "not_found", "That place isn't ranked there.")
+        self._save_rankings(v, current, f"rankings: {category} -{place_id}")
+        name = self._place_view(index, place_id)["name"]
+        return 200, {"ok": True, "message": f"Unranked {name}."}
+
+    # -- "Rank X?" cards (after a note, or from chat) --
+
+    def _rank_prompts(self, v: Vault, facts: dict[str, Any]) -> list[Card]:
+        try:
+            index = PlaceIndex(v.read_places())
+            current = v.read_yaml(rankings.RANKINGS_FILE, {})
+            todo = rankings.to_prompt(current, facts, index)
+        except Exception:
+            logger.exception("ranking prompt failed")
+            return []
+        return [
+            self._rank_card(pid, cat, self._place_view(index, pid)["name"]) for pid, cat in todo
+        ]
+
+    def _rank_card_for(self, place_id: str) -> Card | None:
+        index = PlaceIndex(self._vault().read_places())
+        node = index.get(place_id)
+        category = rankings.category_for(node.get("kind")) if node else None
+        if node is None or category is None:
+            return None
+        return self._rank_card(place_id, category, str(node.get("name", place_id)))
+
+    def _rank_card(self, place_id: str, category: str, name: str) -> Card:
+        """Tier buttons; the app turns a tier tap into the head-to-head flow
+        (POST /api/rankings/session with this card's id). Answered here instead
+        (another client), a tier places it mid-tier, like "too close to call"."""
+
+        def apply(answer: str) -> Outcome:
+            if answer == "skip":
+                return Outcome(f"Skipped {name}.")
+            v = self._vault()
+            current = v.read_yaml(rankings.RANKINGS_FILE, {})
+            rankings.finish(
+                current, rankings.settle(rankings.start(current, category, place_id, answer))
+            )
+            try:
+                v.write_yaml(rankings.RANKINGS_FILE, current, f"rankings: {category} +{place_id}")
+            except VaultError:
+                logger.exception("rankings commit failed for %s", place_id)
+                return Outcome("Saving failed — check the logs.", ok=False)
+            return Outcome(f"Ranked {name}: {rankings.describe(current, category, place_id)}")
+
+        return self.cards.add(
+            "rank",
+            f"Rank {name}?",
+            apply,
+            detail=category,
+            actions=[action(t, rankings.TIER_LABELS[t]) for t in rankings.TIERS]
+            + [action("skip", "Skip")],
+            key=f"rank:{category}:{place_id}",
+            data={"place": place_id, "category": category, "name": name},
+        )
 
     def research(self, req: Request, m: re.Match[str]) -> Reply:
         data = self._json(req)

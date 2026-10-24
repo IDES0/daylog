@@ -115,7 +115,7 @@ The status site grows into the app that can replace Telegram. One address
 - `GET /api/places/{id}` → `{"id", "name", "kind", "path", "description", "facts", "checklist", "my_notes", "children": [...], "card_text": "…"}`
 - `GET /api/wishlist` → `{"entries": [{"id", "place", "status", "type", "date", "research", "why"}]}`
 - `POST /api/wishlist` `{"place": "…"}` → `{"cards": [want card]}`
-- `GET /api/rankings?category=` → `{"categories": [...], "lists": {"<category>": [{"tier", "items": ["…"]}]}}`
+- `GET /api/rankings?category=` → see "Rankings" under As built
 - `POST /api/research` `{"place": "…"}` / `{"kind": "explore"|"trip"|"backfill", "arg": "…"}` → `{"message": "…", "cards": [...]}`
 
 ### Review, disciplines, undo
@@ -170,7 +170,48 @@ is false when the answer couldn't be applied (the card is gone either way).
 runs, and disappear once answered on either client. A logged note with
 unlinked place names, or a location change, starts a background place
 lookup, as on Telegram; its `place` cards show up later in `GET /api/cards`
-(poll it, e.g. on focus). Chat's "rank" jobs have no web card yet.
+(poll it, e.g. on focus).
+
+Kind `rank`: title "Rank X?", `detail` = category, `data` = `{"place",
+"category", "name"}`, actions `liked`, `fine`, `disliked`, `skip`. It comes with a logged note that mentions an unranked place of a
+rankable kind (at most 2, as on Telegram) and from chat's "rank" job. The app
+turns a tier tap into the head-to-head flow (`POST /api/rankings/session`
+with `"card"`); answered through `/api/cards` instead, a tier places the
+place mid-tier ("too close to call" from the start). A card may carry
+`data` (only rank cards do).
+
+### Rankings (since 2026-10-24)
+- `GET /api/rankings?category=` →
+  ```json
+  {"categories": ["food", "surf", …], "tiers": [{"id": "liked", "label": "Liked it"}, …],
+   "kinds": {"food": ["food"], "outdoors": ["hike", "viewpoint", "beach"], …},
+   "counts": {"food": 8, "surf": 2, …},
+   "lists": {"food": [{"tier": "liked", "label": "Liked it",
+                       "items": [{"id", "name", "kind", "path", "region", "rank": 1, "score": 10.0}]}, …]}}
+  ```
+  Every tier is listed, empty ones too; `rank` counts across tiers, best
+  first; `lists` holds only `category` when one is given.
+- **The flow is stateless.** The client carries the insertion's bounds; the
+  server re-checks them against the tier as it is now, so a restart or a
+  second tab never strands a flow. rankings.yaml is written once, when the
+  slot is found (one commit, as on Telegram).
+  - `POST /api/rankings/session` `{"place": id, "tier": "liked|fine|disliked", "category"?: …, "card"?: card id}`
+    starts (re-ranking takes the place out first). `category` defaults to
+    the one for the place's kind (400 `not_rankable` otherwise); `card`
+    closes that rank card.
+  - `POST /api/rankings/session/next` `{...state, "answer": "better|worse|tie"}` — `better` means
+    the new place beat `other`; `tie` stops and takes the midpoint.
+  - Both answer either a comparison
+    `{"done": false, "state": {"place", "category", "tier", "lo", "hi"}, "place": {…}, "other": {…}, "left": 3}`
+    (`left` = at most this many more) or the result
+    `{"done": true, "place", "category", "tier", "index", "line": "#2 of 9 food · 9.2", "message"}`.
+  - 409 `stale` when the bounds no longer fit the tier (start again).
+- `POST /api/rankings/move` `{"category", "item": id, "tier", "index"}` — a manual reorder or
+  a move between tiers; `index` is the slot in `tier` (0 = best) counted
+  without the item, clamped → `{"ok": true, "tier", "index", "line"}`.
+- `POST /api/rankings/remove` `{"category", "item"}` → `{"ok": true, "message"}`; 404 if it wasn't ranked.
+- Errors besides the usual: 400 `bad_tier`, `bad_category`, `not_rankable`; 404 `not_found` (place);
+  500 `commit_failed` (nothing changed in git).
 
 ### Shapes
 - `GET /api/home`: `where` is null when no location is known; `next` is at

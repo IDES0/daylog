@@ -149,6 +149,7 @@ The ledger is the foundation; the assistant is only as good as its grounding.
 | 2026-10-17 | Speech-to-text gets a primer of the words the user says (Whisper's `initial_prompt`): `vocabulary` in profile.yaml first, then the current region's places, then the active sports, capped at ~700 characters. Before transcription, not after, because transcripts are kept verbatim — it's the only point a name can be heard right. Extraction also gets the user's list and writes those spellings in the facts. Prompted by NASCO → "Lasco", foiling → "forling", heelside → "hillside". Skate joins the disciplines (skateboarding and surfskating, under Earth and Body) |
 | 2026-10-20 | Nothing spends money on its own over a passing mention. After a note, unlinked place names are only matched against known places (free); a web lookup for a new place runs only when asked (/backfill, the assistant), at most 3 searches, once per mention (`place_lookup` stamps it), never for a description ("…next to Savaya"). Prompted by ~$4 of automatic lookups on 2026-10-18 for one 1am shisha bar, run twice at once by two notes about the same day. The brief gets room to write after thinking (32k, effort medium) after two days of briefs lost to max_tokens; the server's TZ follows where the user lives |
 | 2026-10-24 | The morning brief also arrives as a lock-screen notification through the installed web app (Web Push, iOS 16.4+): the app subscribes on a tap, the subscription lives in the vault (`push.yaml`), the server signs pushes with its VAPID keys, and only the scheduled brief notifies (a manual /brief doesn't). It's the user's own channel, like Telegram, so "never contacts anyone" holds. Web notes also keep the transcript when logging fails, with Try again |
+| 2026-10-24 | Rankings move to the web ahead of retiring Telegram: the same tier + head-to-head insertion (logic in `rankings.py`, shared), a "Rank X?" card after a note that mentions an unranked place, and manual reordering by drag (or up/down and tier buttons) plus unranking. A manual move is the user's own statement, so it's written without a confirm. The flow is stateless on the server (the client carries the bounds) so a deploy mid-flow loses nothing. The You tab is reordered by use (disciplines, goals, rankings, milestones, then the review collapsed) |
 
 ## Not built
 
@@ -180,7 +181,6 @@ breaks its terms).
   the upload so a restart mid-note doesn't lose it.
 - **Telegram error handler.** Transient "Bad Gateway" errors log as
   unhandled exceptions every night; handle and log them in one line.
-- **Rankings on the web.** The head-to-head ranking flow is Telegram-only.
 
 ## Working rule for new features
 
