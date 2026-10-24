@@ -449,7 +449,7 @@ def new_node(graph: Graph, name: str, parents: list[str]) -> dict[str, Any]:
 
 
 # -- at log time, and the answers to its cards ------------------------------------
-# Shared by Telegram (discipline_flow) and the web app; they only render.
+# The web app renders these as cards.
 
 
 @dataclass

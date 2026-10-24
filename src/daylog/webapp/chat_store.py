@@ -1,8 +1,8 @@
 """The web app's chat: what's shown (the last 40 messages) and what the model
 is given (chat.trim_history of the same turns), in server memory.
 
-Separate from Telegram's history (bot_data): the two clients are equal, and
-each keeps its own conversation. Thread-safe; single user.
+Scheduled jobs add what they produced (the brief, the review, a plan) so
+a reply has it as context. Thread-safe; single user.
 """
 
 from __future__ import annotations

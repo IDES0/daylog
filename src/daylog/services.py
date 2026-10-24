@@ -1,8 +1,7 @@
-"""Read-side helpers both clients use: status text, upcoming dates, the trail
-range, a place card, the conditions reports and the morning brief.
+"""Read-side helpers: status text, upcoming dates, the trail range, a place
+card, the conditions reports and the morning brief.
 
-Telegram (bot.py and the *_flow modules) and the web app (webapp/api.py)
-call these and only differ in how they show the result.
+The web app (webapp/api.py) and the scheduler (scheduler.py) call these.
 """
 
 from __future__ import annotations
@@ -28,9 +27,9 @@ from daylog import (
 )
 from daylog.places import PlaceIndex
 from daylog.rank_flow import RANKINGS_FILE
+from daylog.runtime import tz
 from daylog.sources import fly, marine, surf, wind
-from daylog.tg import tz
-from daylog.vault import Vault
+from daylog.vault import Vault, VaultError
 
 logger = logging.getLogger(__name__)
 
@@ -300,17 +299,36 @@ _brief_lock = threading.Lock()
 _last_brief: Brief | None = None
 
 
-def last_brief() -> Brief | None:
-    """The latest brief either client built since the process started."""
+BRIEFS = "briefs"
+
+
+def brief_path(day: date) -> str:
+    return f"{BRIEFS}/{day.isoformat()}.md"
+
+
+def last_brief(v: Vault | None = None) -> Brief | None:
+    """The latest brief: the one built in this process, else (given the vault)
+    the newest saved under briefs/, so a restart doesn't lose it."""
     with _brief_lock:
-        return _last_brief
+        if _last_brief is not None or v is None:
+            return _last_brief
+    docs = v.list_docs(BRIEFS)
+    if not docs:
+        return None
+    try:
+        day = date.fromisoformat(docs[-1].rsplit("/", 1)[-1].removesuffix(".md"))
+    except ValueError:
+        return None
+    text = v.read_text(docs[-1])
+    return Brief(day, text.strip()) if text else None
 
 
 def build_brief(v: Vault, today: date) -> str:
     """The morning brief, with the Site block when analytics are set up.
 
     Raises if the brief itself fails; a Site failure is logged and left out.
-    The result is remembered for last_brief().
+    The result is remembered for last_brief() and saved to briefs/YYYY-MM-DD.md
+    (a failed save is logged).
     """
     global _last_brief
     location_data = v.read_location()
@@ -352,4 +370,8 @@ def build_brief(v: Vault, today: date) -> str:
         text += "\n\n" + site
     with _brief_lock:
         _last_brief = Brief(today, text)
+    try:
+        v.write_text(brief_path(today), text.rstrip() + "\n", f"brief: {today.isoformat()}")
+    except VaultError:
+        logger.exception("saving the brief failed")
     return text

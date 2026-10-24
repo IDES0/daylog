@@ -1,11 +1,10 @@
 """The journaling pipeline, free of any client: a transcript in, a LogResult out.
 
-Telegram (bot._log_entry) and the web app (webapp/api.py) both call `log`,
-so a note logged on either lands identically. What needs a tap before it's
-written (a hard goal or itinerary date, a correction that removes
-something, a sport the graph lacks, a fix to a guessed sport) comes back as
-plain pending objects; each client renders them its own way (buttons or
-cards) and applies the answer with the `confirm_*` functions here.
+The web app (webapp/api.py) calls `log` for typed and voice notes alike.
+What needs a tap before it's written (a hard goal or itinerary date, a
+correction that removes something, a sport the graph lacks, a fix to a
+guessed sport) comes back as plain pending objects; the app shows them as
+confirm cards and applies the answer with the `confirm_*` functions here.
 
 Order of the pipeline: extract → location → other-day notes → goals →
 itinerary → corrections → journal write → discipline guesses.

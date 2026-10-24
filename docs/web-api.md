@@ -1,14 +1,16 @@
 # daylog web app — API contract
 
-The status site grows into the app that can replace Telegram. One address
+The status site is the app, and the only interface (Telegram was retired on
+2026-10-24). One address
 (`status.johnalexborkowski.com`), two faces:
 
 - **Guest** (no session): the existing read-only guest page, unchanged in
   substance (`GET /` without a session still renders `dashboard.render`).
 - **App** (session cookie set by the password line): `GET /` serves the app
   shell (`index.html`), which loads `/app.css` and `/app.js` and talks to the
-  JSON API below. Telegram keeps working in parallel; both call the same
-  service functions, so a note logged on either lands identically.
+  JSON API below, which calls the service functions. What the scheduler
+  does on its own (brief, review, plan, decisions waiting) is left here and
+  announced by one Web Push notification per event (README, Notifications).
 
 ## Rules every endpoint follows
 
@@ -27,8 +29,8 @@ The status site grows into the app that can replace Telegram. One address
   plain blocking requests; the client shows progress and uses a 180 s
   timeout. Nothing is streamed in the prototype.
 - **Confirmations.** Anything that would change the vault after an inference
-  comes back as a **card**, never applied directly — the same rule as
-  Telegram (`docs/DESIGN.md`). A card is:
+  comes back as a **card**, never applied directly (see
+  `docs/DESIGN.md`). A card is:
 
   ```json
   {"id": "c_8f2…", "kind": "goal_slip|itinerary|correction|chat_proposal|discipline_fix|discipline_add|ripple|plan|place|want|research",
@@ -70,7 +72,7 @@ The status site grows into the app that can replace Telegram. One address
 - `GET /api/journal?from=YYYY-MM-DD&to=YYYY-MM-DD` → `{"days": [{"date", "summary", "activities", "meals", "felt", "milestones", "location", "notes": <count of ### HH:MM notes>}]}` (default: last 14 days, newest first)
 - `GET /api/journal/{date}` → one day incl. `"transcript"` (verbatim).
 - `POST /api/log` `{"text": "…", "date": "YYYY-MM-DD"|null}` → runs the same
-  pipeline as a Telegram note →
+  pipeline as a voice note →
   ```json
   {"date": "2026-10-16", "summary": "…", "notes": ["Updated current location to …", "Foiling → logged as Tow foil (the default)."],
    "cards": [ ...goal_slip / itinerary / correction / discipline_fix / discipline_add / ripple... ]}
@@ -80,8 +82,11 @@ The status site grows into the app that can replace Telegram. One address
   "repeated": false}` as soon as the note has arrived; the app can close.
   `GET /api/jobs/{id}` → `{"id", "kind", "status": "processing|done|failed",
   "code", "result"}` where `result` is the body described below;
-  `GET /api/jobs` lists the last day's jobs; an unknown id (server restarted)
-  → 404 `unknown_job`. Send `Idempotency-Key: <one id per note>` and reuse it
+  `GET /api/jobs` lists the last day's jobs; an unknown id (older than a
+  day) → 404 `unknown_job`. Jobs survive a restart (since 2026-10-24): the
+  note is spooled before the 202 (`<vault>/.spool/`, git-excluded, or
+  `SPOOL_PATH`), a note a restart interrupted is logged on start under the
+  same job id, and a finished job's status and result still answer. Send `Idempotency-Key: <one id per note>` and reuse it
   on Retry: a note sent again gets its existing job (`"repeated": true`)
   instead of being logged twice; only a failed job runs again. Without the
   header, the body's hash stands in. A future `date` is refused at once (400).
@@ -101,8 +106,8 @@ The status site grows into the app that can replace Telegram. One address
 - `GET /api/surf` → `{"spots": [{"id", "name", "days": [{"date", "label", "rating", "start", "end", "faces": [lo, hi], "period", "swell_dir", "wind_kn", "wind_from", "wind_dir", "offshore", "tide", "tide_trend", "drops_to": {"label", "hour"}|null, "above_comfort", "hours": [{"hour", "rating"}]}]}], "message": null|"…"}` — the same ratings `/surf` sends as text
 - `GET /api/fly` → `{"sites": [{"id", "name", "elevation", "days": [{"date", "flyable", "hours": [{"hour", "ok"}], …flyable: "start", "end", "flyable_hours", "wind_kn", "wind_from", "wind_dir", "gust_kn", "thermals", "base_m", "headroom_m"; not: "blockers": ["…"]}]}], "message": null|"…"}`
 - `GET /api/upcoming` → `{"items": ["…"]}` ; `GET /api/status` → `{"text": "…"}`
-- `GET /api/usage` → `{"month": "2026-10", "spent": 10.87, "budget": 40, "by_kind": [{"kind", "usd"}]}`
-- `GET /api/site?days=7` → `{"text": "…"}` or `{"text": null, "message": "not configured"}`
+- `GET /api/usage` → `{"month": "2026-10", "spent": 10.87, "budget": 40, "projected": 33.7, "by_kind": [{"kind", "usd"}], "history": [{"month", "usd"}]}` — `projected` is a straight-line month-end estimate; `history` is up to 6 month totals from `usage.yaml`, oldest first, ending with this month
+- `GET /api/site?days=7` (1–90) → `{"text": "…", "data": {…}}` or `{"text": null, "message": "not configured"}`. `data`: `{"days", "people", "views", "resume", "chess_people", "spacetime_people", "by_ref": [{"key", "people"}], "by_day": [{"key": "2026-10-21", "people", "n"}] (every UTC day of the window, zeros filled), "pages"|"sources"|"countries"|"devices": [{"key", "people", "n"}] (largest first), "engagement": {"games", "moves", "engine_s", "sources", "exports"}|null, "company": [{"ref", "first_seen", "pages": ["/…"], "resume", "chess", "spacetime", "city", "country", "session", "recording": url|null}]}` — `people` are unique visitors, `n` the page views behind them. With no visitors the lists are empty.
 
 ### Planning
 - `GET /api/plan` → latest plan `{"date", "text", "options": [{"index": 0, "title": "…", "summary": "…"}]}`
@@ -115,7 +120,7 @@ The status site grows into the app that can replace Telegram. One address
 - `GET /api/places/{id}` → `{"id", "name", "kind", "path", "description", "facts", "checklist", "my_notes", "children": [...], "card_text": "…"}`
 - `GET /api/wishlist` → `{"entries": [{"id", "place", "status", "type", "date", "research", "why"}]}`
 - `POST /api/wishlist` `{"place": "…"}` → `{"cards": [want card]}`
-- `GET /api/rankings?category=` → `{"categories": [...], "lists": {"<category>": [{"tier", "items": ["…"]}]}}`
+- `GET /api/rankings?category=` → see "Rankings" under As built
 - `POST /api/research` `{"place": "…"}` / `{"kind": "explore"|"trip"|"backfill", "arg": "…"}` → `{"message": "…", "cards": [...]}`
 
 ### Review, disciplines, undo
@@ -155,7 +160,7 @@ is false when the answer couldn't be applied (the card is gone either way).
 
 | kind | title | actions |
 |---|---|---|
-| `goal_slip`, `itinerary`, `correction` | the same question Telegram asks | `confirm`, `cancel` |
+| `goal_slip`, `itinerary`, `correction` | the confirm question for that change | `confirm`, `cancel` |
 | `chat_proposal` | the proposal's summary | `confirm`, `cancel` |
 | `discipline_fix` | "Not Tow foil? Tap what it was." | one per alternative (`id` = discipline id, `label` = its name), `cancel` (keep) |
 | `discipline_add` | "New discipline: X, under Y. Add it?" | `active`, `want`, `cancel` |
@@ -167,10 +172,51 @@ is false when the answer couldn't be applied (the card is gone either way).
 
 `style` is only sent when set. Ripple cards are made from
 `research/proposals/*.yaml` whenever `GET /api/cards` or `GET /api/home`
-runs, and disappear once answered on either client. A logged note with
+runs, and disappear once answered. A logged note with
 unlinked place names, or a location change, starts a background place
-lookup, as on Telegram; its `place` cards show up later in `GET /api/cards`
-(poll it, e.g. on focus). Chat's "rank" jobs have no web card yet.
+lookup; its `place` cards show up later in `GET /api/cards`
+(poll it, e.g. on focus), with one "Places to confirm" notification.
+
+Kind `rank`: title "Rank X?", `detail` = category, `data` = `{"place",
+"category", "name"}`, actions `liked`, `fine`, `disliked`, `skip`. It comes with a logged note that mentions an unranked place of a
+rankable kind (at most 2) and from chat's "rank" job. The app
+turns a tier tap into the head-to-head flow (`POST /api/rankings/session`
+with `"card"`); answered through `/api/cards` instead, a tier places the
+place mid-tier ("too close to call" from the start). A card may carry
+`data` (only rank cards do).
+
+### Rankings (since 2026-10-24)
+- `GET /api/rankings?category=` →
+  ```json
+  {"categories": ["food", "surf", …], "tiers": [{"id": "liked", "label": "Liked it"}, …],
+   "kinds": {"food": ["food"], "outdoors": ["hike", "viewpoint", "beach"], …},
+   "counts": {"food": 8, "surf": 2, …},
+   "lists": {"food": [{"tier": "liked", "label": "Liked it",
+                       "items": [{"id", "name", "kind", "path", "region", "rank": 1, "score": 10.0}]}, …]}}
+  ```
+  Every tier is listed, empty ones too; `rank` counts across tiers, best
+  first; `lists` holds only `category` when one is given.
+- **The flow is stateless.** The client carries the insertion's bounds; the
+  server re-checks them against the tier as it is now, so a restart or a
+  second tab never strands a flow. rankings.yaml is written once, when the
+  slot is found (one commit).
+  - `POST /api/rankings/session` `{"place": id, "tier": "liked|fine|disliked", "category"?: …, "card"?: card id}`
+    starts (re-ranking takes the place out first). `category` defaults to
+    the one for the place's kind (400 `not_rankable` otherwise); `card`
+    closes that rank card.
+  - `POST /api/rankings/session/next` `{...state, "answer": "better|worse|tie"}` — `better` means
+    the new place beat `other`; `tie` stops and takes the midpoint.
+  - Both answer either a comparison
+    `{"done": false, "state": {"place", "category", "tier", "lo", "hi"}, "place": {…}, "other": {…}, "left": 3}`
+    (`left` = at most this many more) or the result
+    `{"done": true, "place", "category", "tier", "index", "line": "#2 of 9 food · 9.2", "message"}`.
+  - 409 `stale` when the bounds no longer fit the tier (start again).
+- `POST /api/rankings/move` `{"category", "item": id, "tier", "index"}` — a manual reorder or
+  a move between tiers; `index` is the slot in `tier` (0 = best) counted
+  without the item, clamped → `{"ok": true, "tier", "index", "line"}`.
+- `POST /api/rankings/remove` `{"category", "item"}` → `{"ok": true, "message"}`; 404 if it wasn't ranked.
+- Errors besides the usual: 400 `bad_tier`, `bad_category`, `not_rankable`; 404 `not_found` (place);
+  500 `commit_failed` (nothing changed in git).
 
 ### Shapes
 - `GET /api/home`: `where` is null when no location is known; `next` is at
@@ -180,14 +226,15 @@ lookup, as on Telegram; its `place` cards show up later in `GET /api/cards`
 - `GET /api/journal`: `location` is the day's `location` frontmatter or null;
   the range is capped at 366 days.
 - `GET /api/journal/{date}`: 404 when there's no entry.
-- `GET /api/brief`: the latest brief built by either client since the
-  server started (briefs aren't saved to the vault) → `{"date": null,
-  "text": null}` before the first. `POST /api/brief` adds it to the web
-  chat's context, as `/plan`, `/ripple` and `/review` do.
+- `GET /api/brief`: the latest brief, scheduled or made here; every brief
+  is saved to `briefs/YYYY-MM-DD.md`, so it survives a restart → `{"date": null,
+  "text": null}` before the first. The brief (scheduled or `POST /api/brief`) joins the web
+  chat's context, as plans, ripples and reviews do.
 - `GET /api/plan`: `{"date": null, "text": null, "options": []}` with no plan;
   `options` only for a plan made since the server started (the markdown
   can't be turned back into options). `POST /api/plan` with no workable
-  option returns the planner's `text` and empty `options`/`cards`.
+  option returns the planner's `text` and empty `options`/`cards`. `GET`
+  also returns `"cards"`: the open `plan` card (e.g. the Sunday plan's).
 - `GET /api/review`: `{"week": null, "text": null}` with none; `POST` → 404
   `nothing_to_review` for an empty week.
 - `POST /api/research {"place"}` → `{"message": dossier text, "cards": []}`;

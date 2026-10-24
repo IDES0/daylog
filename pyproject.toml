@@ -1,10 +1,10 @@
 [project]
 name = "daylog"
 version = "0.1.0"
-description = "Personal Telegram bot: voice journaling, goal tracking, morning brief."
+description = "Personal journal and assistant: voice notes to quantified, place-linked facts, in a web app."
 requires-python = ">=3.11"
 dependencies = [
-    "python-telegram-bot[job-queue]>=21.0",
+    "apscheduler>=3.10,<4",
     "faster-whisper>=1.0",
     "anthropic>=0.40",
     "ruamel.yaml>=0.18",
@@ -46,7 +46,7 @@ strict = true
 files = ["src", "tests"]
 
 [[tool.mypy.overrides]]
-module = ["faster_whisper.*", "feedparser.*", "ruamel.*"]
+module = ["apscheduler.*", "faster_whisper.*", "feedparser.*", "ruamel.*"]
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]

@@ -5,24 +5,18 @@ and hard-deadline confirmation all still apply) but now holds intentions
 only: places the user wants to go, each optionally linked to a place id,
 the goals it serves (`why`), and a research file. A new entry is queued
 for research (`research: queued`); the scheduled morning routine picks the
-queue up for free, or /want's "Research now" button runs it immediately
+queue up for free, or the web app's "Research now" runs it immediately
 against the API budget.
 """
 
 from __future__ import annotations
 
-import asyncio
 import logging
-from datetime import datetime
 from typing import Any
-
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
-from telegram.ext import ContextTypes
 
 from daylog import itinerary, llm, research_flow
 from daylog.places import PlaceIndex
-from daylog.tg import allowed_user_id, chunks, is_authorized, tz, vault
-from daylog.vault import Vault, VaultError
+from daylog.vault import Vault
 
 logger = logging.getLogger(__name__)
 
@@ -84,7 +78,7 @@ def format_wishlist(itinerary_data: Any, index: PlaceIndex) -> str:
             f"- {e.get('place', e['id'])} [{e.get('status')}]{why}{when_bit}\n"
             f"  {where + ' · ' if where else ''}research: {research}{dossier}"
         )
-    return "\n".join(lines) if lines else "Wishlist is empty — /want <place> to add one."
+    return "\n".join(lines) if lines else "Wishlist is empty — add a place in Trips → Wishlist."
 
 
 def add_wish(v: Vault, query: str, today: Any) -> tuple[Any, bool]:
@@ -142,71 +136,3 @@ def research_entry(v: Vault, entry_id: str, place_id: str | None, name: str) -> 
         entry["dossier"] = path
         v.write_itinerary(data, f"itinerary: researched {entry.get('place')}")
     return path, text
-
-
-async def want_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """/want <place> — add a destination to the wishlist and queue research on it."""
-    if not is_authorized(update):
-        return
-    message = update.message
-    assert message is not None
-    query = " ".join(context.args or []).strip()
-    if not query:
-        await message.reply_text("Usage: /want <place>, e.g. /want Mentawai")
-        return
-    v = vault()
-    try:
-        entry, created = add_wish(v, query, datetime.now(tz()).date())
-    except VaultError:
-        logger.exception("want failed for %s", query)
-        await message.reply_text("Saving failed — check bot logs.")
-        return
-    keyboard = InlineKeyboardMarkup(
-        [
-            [InlineKeyboardButton("Research now", callback_data=f"want:now:{entry['id']}")],
-            [
-                InlineKeyboardButton(
-                    "Leave it for the morning routine", callback_data="want:later:x"
-                )
-            ],
-        ]
-    )
-    await message.reply_text(want_message(entry, created), reply_markup=keyboard)
-
-
-async def handle_want_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    if not is_authorized(update):
-        return
-    query = update.callback_query
-    assert query is not None and query.data is not None
-    await query.answer()
-    _, action, entry_id = query.data.split(":", 2)
-    if action == "later":
-        await query.edit_message_text("Queued — tomorrow's morning routine will research it.")
-        return
-    v = vault()
-    target = research_target(v, entry_id)
-    if isinstance(target, str):
-        await query.edit_message_text(target)
-        return
-    place_id, name = target
-    await query.edit_message_text(f"Researching {name}...")
-    try:
-        path, text = await asyncio.to_thread(research_entry, v, entry_id, place_id, name)
-    except Exception:
-        logger.exception("dossier failed for %s", name)
-        await query.edit_message_text(f"Research on {name} failed — still queued.")
-        return
-    for chunk in chunks(f"{text}\n\n(saved to {path})"):
-        await context.bot.send_message(chat_id=allowed_user_id(), text=chunk)
-
-
-async def wishlist_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    if not is_authorized(update):
-        return
-    message = update.message
-    assert message is not None
-    v = vault()
-    text = format_wishlist(v.read_itinerary(), PlaceIndex(v.read_places()))
-    for chunk in chunks(text):
-        await message.reply_text(chunk)

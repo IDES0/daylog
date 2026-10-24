@@ -71,8 +71,8 @@ plan still holds: seasons, events, prices, visa, transport. Update the
 relevant `research/decisions/*.md`, and flag anything that should change the
 plan. If the plan is out of date against the journal (or a journal
 `decisions` entry has no proposal yet) and nothing for it is pending in
-`research/proposals/`, propose the fixes; you never apply them, the bot
-shows the proposal after the brief and the user taps:
+`research/proposals/`, propose the fixes; you never apply them, the app
+shows the proposal as a card and the user taps:
 1. `research/decisions/<today>-<slug>.md`: what the decision fixes (new
    constraints), what it changes item by item (blocked / moved / at risk /
    helped, with ids and dates), ways to keep pursuing each affected goal

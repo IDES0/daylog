@@ -23,7 +23,7 @@ from typing import Any
 from urllib.parse import parse_qs, urlsplit
 
 from daylog import calendar_feed, daily, dashboard, health, web
-from daylog.tg import tz
+from daylog.runtime import tz
 from daylog.vault import Vault
 from daylog.webapp import api as webapi
 
@@ -95,6 +95,12 @@ def _make_handler(
     guard = web.LoginGuard(password) if password and site else None
     # One API per server too: it holds the open cards and the web chat.
     api = (app or webapi.Api()) if site else None
+    if api is not None and app is None:
+        # Web notes a restart interrupted are logged now (see webapp/jobs.py).
+        try:
+            api.resume()
+        except Exception:
+            logger.exception("couldn't resume spooled web notes")
 
     class Handler(BaseHTTPRequestHandler):
         web_api = api
@@ -274,8 +280,11 @@ def _make_handler(
     return Handler
 
 
-def start() -> None:
-    """Start the server in a background thread, if configured.
+def start(app: webapi.Api | None = None) -> ThreadingHTTPServer | None:
+    """Start the server in a background thread, if configured; returns it.
+
+    `app` is the web app's API (its card store and chat), shared with the
+    scheduler so a scheduled plan's card shows up in the app.
 
     Opt-in per feature: CALENDAR_FEED_SECRET enables the feed,
     STATUS_PASSWORD enables the status site at / with its password line
@@ -292,14 +301,15 @@ def start() -> None:
         "on",
     )
     if not view_secret and not health_secret and not site:
-        logger.info("no web feature configured — web server not started")
-        return
+        logger.warning("no web feature configured — web server not started")
+        return None
 
     handler = _make_handler(
         f"/calendar/{view_secret}.ics" if view_secret else None,
         f"/health/{health_secret}" if health_secret else None,
         site,
         password,
+        app,
     )
     port = int(os.environ.get("PORT", "8080"))
     server = ThreadingHTTPServer(("0.0.0.0", port), handler)
@@ -313,3 +323,4 @@ def start() -> None:
         "on" if password else "off",
         "on" if health_secret else "off",
     )
+    return server

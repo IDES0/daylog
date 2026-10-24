@@ -8,8 +8,8 @@ proposing — each proposal becomes a confirm card the user taps, the same
 rule as research. The one exception is a note on a known place (the
 user's own words about it), which is written straight away.
 
-Pure apart from the API call and the Vault passed in: the Telegram side
-(chat_flow.py) owns history, cards, and sending.
+Pure apart from the API call and the Vault passed in: the web app
+(webapp/chat_store.py, webapp/api.py) owns history and cards.
 """
 
 from __future__ import annotations

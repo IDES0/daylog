@@ -110,7 +110,7 @@ def apply_slips(
 
 
 def apply_confirmed_slip(goals: list[Any], slip: PendingSlip, on: date) -> None:
-    """Apply a hard-goal slip after the user has confirmed it in Telegram."""
+    """Apply a hard-goal slip after the user has confirmed it."""
     goal = find_goal(goals, slip.goal_id)
     if goal is None:
         return

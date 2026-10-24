@@ -12,7 +12,7 @@ from typing import Any
 import pytest
 
 from daylog import calendar_server, chat, daily, extract, journal_service, web
-from daylog.tg import tz
+from daylog.runtime import tz
 from daylog.vault import Vault
 from daylog.webapp import api as webapi
 from daylog.webapp.cards import CardStore, Outcome, UnknownAction
@@ -379,3 +379,26 @@ def test_only_a_failed_job_runs_again() -> None:
     assert bad.status == "failed" and bad.view()["result"]["message"] == "boom"
     retry, new = jobs.submit("b", "voice", lambda: (200, {}))
     assert new and retry is not bad  # a failure may run again
+
+
+# -- reports ----------------------------------------------------------------------------
+
+
+def test_usage_and_site_reports(app: App, monkeypatch: pytest.MonkeyPatch) -> None:
+    status, body = _json(app, "GET", "/api/usage")
+    assert status == 200 and {"spent", "budget", "projected", "by_kind", "history"} <= set(body)
+    monkeypatch.delenv("POSTHOG_PERSONAL_API_KEY", raising=False)
+    assert _json(app, "GET", "/api/site")[1] == {"text": None, "message": "not configured"}
+    monkeypatch.setenv("POSTHOG_PERSONAL_API_KEY", "k")
+    monkeypatch.setenv("POSTHOG_PROJECT_ID", "1")
+    seen: list[int] = []
+    data = {"days": 30, "people": 0, "resume": 0}
+
+    def fake_data(days: int) -> dict[str, Any]:
+        seen.append(days)
+        return data
+
+    monkeypatch.setattr(webapi.analytics, "fetch_report_data", fake_data)
+    status, body = _json(app, "GET", "/api/site?days=30")
+    assert status == 200 and seen == [30]
+    assert body == {"text": "Site, last 30 days: no visitors.", "data": data}

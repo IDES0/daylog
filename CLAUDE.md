@@ -1,8 +1,9 @@
 # daylog
 
-Personal Telegram bot in two halves: a journal that turns voice notes into
+Personal app in two halves: a journal that turns voice notes into
 quantified, place-linked facts, and an assistant that researches, plans and
-reviews on top of them.
+reviews on top of them. The web app (an installable PWA) is the only
+interface; Telegram was retired on 2026-10-24.
 
 - What exists and how to run it: `README.md`
 - Why it's built this way, the rules and the decision log: `docs/DESIGN.md`
@@ -10,23 +11,25 @@ reviews on top of them.
 
 ## Non-negotiables
 - No database. Vault is plain markdown + YAML files.
-- Telegram and the web app are equal clients. The web surface: the
-  calendar feed (secret path), the status site (one address on its own
-  domain: a guest view, and behind one password line the web app,
-  installable as a PWA), and one inlet for the phone's daily health numbers
-  (secret path). The web app writes only behind the session + `X-Daylog`
-  CSRF header, through the same service functions and confirm cards as
-  Telegram (docs/web-api.md); every `/api/*` handler checks the session first.
-- The bot never contacts anyone on its own. It may draft a message, and
-  send it only after the user taps Confirm on the exact text and recipient.
+- The web app is the one interface. The web surface: the calendar feed
+  (secret path), the status site (one address on its own domain: a guest
+  view, and behind one password line the web app, installable as a PWA),
+  and one inlet for the phone's daily health numbers (secret path). The web
+  app writes only behind the session + `X-Daylog` CSRF header, through the
+  service functions and confirm cards (docs/web-api.md).
+- Every `/api/*` handler checks the session first.
+- The app never contacts anyone but the user. Notifications (Web Push) go
+  only to the user's own devices, one per event. It may draft a message to
+  someone else, and send it only after the user taps Confirm on the exact
+  text and recipient.
 - vault.py is the ONLY module that touches the filesystem or git.
-- Every Telegram handler checks user id against TELEGRAM_ALLOWED_USER_ID first.
 - Hard dates never move without a Confirm; inferred facts are confirmed
   before they're written.
 
 ## Stack
-Python 3.11+, uv, python-telegram-bot v21+ (async), faster-whisper,
-anthropic SDK, ruamel.yaml, httpx. Git via subprocess. Deployed on Railway.
+Python 3.11+, uv, APScheduler (the scheduled jobs), faster-whisper,
+anthropic SDK, ruamel.yaml, httpx, pywebpush. Git via subprocess. Deployed
+on Railway; entrypoint `python -m daylog.app`.
 
 ## Conventions
 - ruff for lint/format, mypy clean, type hints everywhere

@@ -17,7 +17,7 @@ the morning brief as one card, and records what the user chose.
     plan_draft: research/proposals/2026-10-16-nasco-plan.md   # optional
     status: pending            # applied | reviewed | skipped, set by the bot
 
-Pure: no vault or Telegram access here.
+Pure: no vault access here.
 """
 
 from __future__ import annotations

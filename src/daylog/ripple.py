@@ -207,7 +207,7 @@ _EFFECT_LABELS = {
 
 
 def render(ripple: Ripple, made_on: date, heading: str = "#") -> str:
-    """Markdown for the decision file and the Telegram message."""
+    """Markdown for the decision file and the app."""
     lines = [f"{heading} Decision: {ripple.decision}", f"_{made_on.isoformat()}_", ""]
     if ripple.fixes:
         lines += ["**What it fixes**", *[f"- {f}" for f in ripple.fixes], ""]

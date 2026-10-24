@@ -1,9 +1,9 @@
 """Confirm cards for the web app, held in server memory.
 
 Anything that would change the vault after an inference comes back as a
-card, never applied directly — the same rule as Telegram's buttons. A card
-carries the callable that applies its answer (built on the same functions
-Telegram's callbacks call), lives for 24 hours, and is answered once: it
+card, never applied directly. A card carries the callable that applies its
+answer (built on the service functions), lives for 24 hours, and is answered
+once: it
 leaves the store before its answer runs, so a double tap can't apply twice.
 
 Single user, so one store per server; thread-safe because the HTTP server
@@ -33,6 +33,7 @@ KINDS = (
     "place",
     "want",
     "research",
+    "rank",
 )
 
 
@@ -70,15 +71,21 @@ class Card:
     # Cards made from something in the vault (a proposal file) carry its key,
     # so the same thing isn't carded twice.
     key: str | None = None
+    # What a client needs to act on the card itself (a rank card's place and
+    # category, so the app can open the ranking flow); sent only when set.
+    data: dict[str, Any] | None = None
 
     def to_json(self) -> dict[str, Any]:
-        return {
+        out: dict[str, Any] = {
             "id": self.id,
             "kind": self.kind,
             "title": self.title,
             "detail": self.detail,
             "actions": self.actions,
         }
+        if self.data:
+            out["data"] = self.data
+        return out
 
 
 class UnknownAction(ValueError):
@@ -100,6 +107,7 @@ class CardStore:
         detail: str = "",
         actions: list[dict[str, str]] | None = None,
         key: str | None = None,
+        data: dict[str, Any] | None = None,
         now: float | None = None,
     ) -> Card:
         assert kind in KINDS, kind
@@ -112,6 +120,7 @@ class CardStore:
             apply=apply,
             created=time.time() if now is None else now,
             key=key,
+            data=data,
         )
         with self._lock:
             if key is not None:
@@ -130,6 +139,11 @@ class CardStore:
         with self._lock:
             self._purge(time.time() if now is None else now)
             return list(self._cards.values())
+
+    def discard(self, card_id: str) -> bool:
+        """Close a card without applying it (it was acted on another way)."""
+        with self._lock:
+            return self._cards.pop(card_id, None) is not None
 
     def card_keys(self) -> set[str]:
         with self._lock:

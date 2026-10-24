@@ -5,7 +5,7 @@ from zoneinfo import ZoneInfo
 
 import pytest
 
-from daylog import bot
+from daylog import journal_service, services
 from daylog.sources import marine, wind
 
 from .place_fixtures import tree
@@ -22,7 +22,7 @@ def test_fetch_marine_forecast_combines_current_and_curated_surf_spots(
     monkeypatch.setattr(marine, "fetch_forecast", _fake_forecast)
 
     current = {"place": "Kuta, Lombok, ID", "lat": -8.8948, "lon": 116.2832}
-    result = bot._fetch_marine_forecast(current, _PLACES, ZoneInfo("Asia/Makassar"))
+    result = services.fetch_marine_forecast(current, _PLACES, ZoneInfo("Asia/Makassar"))
 
     assert result is not None
     assert "Kuta, Lombok, ID:\nforecast for -8.8948,116.2832" in result
@@ -30,8 +30,8 @@ def test_fetch_marine_forecast_combines_current_and_curated_surf_spots(
 
 
 def test_fetch_marine_forecast_none_without_coordinates() -> None:
-    assert bot._fetch_marine_forecast(None, _PLACES, ZoneInfo("UTC")) is None
-    assert bot._fetch_marine_forecast({"place": "x"}, _PLACES, ZoneInfo("UTC")) is None
+    assert services.fetch_marine_forecast(None, _PLACES, ZoneInfo("UTC")) is None
+    assert services.fetch_marine_forecast({"place": "x"}, _PLACES, ZoneInfo("UTC")) is None
 
 
 def test_fetch_marine_forecast_uses_the_place_when_the_stay_has_no_coordinates(
@@ -40,11 +40,11 @@ def test_fetch_marine_forecast_uses_the_place_when_the_stay_has_no_coordinates(
     monkeypatch.setattr(marine, "fetch_forecast", lambda lat, lon, tz, days=5: f"{lat},{lon}")
     places = [{**p, "lat": -8.72, "lon": 115.17} if p["id"] == "kuta-bali" else p for p in _PLACES]
     current = {"place": "Kuta, Bali, ID", "place_id": "kuta-bali"}
-    result = bot._fetch_marine_forecast(current, places, ZoneInfo("Asia/Makassar"))
+    result = services.fetch_marine_forecast(current, places, ZoneInfo("Asia/Makassar"))
     assert result == "Kuta, Bali, ID:\n-8.72,115.17\n\nAirport Rights:\n-8.757,115.16"
 
     # No coordinates anywhere up the tree: the region's spots still get a forecast.
-    result = bot._fetch_marine_forecast(current, _PLACES, ZoneInfo("Asia/Makassar"))
+    result = services.fetch_marine_forecast(current, _PLACES, ZoneInfo("Asia/Makassar"))
     assert result == "Airport Rights:\n-8.757,115.16"
 
 
@@ -57,7 +57,7 @@ def test_fetch_wind_forecast_combines_current_and_curated_wind_spots(
     monkeypatch.setattr(wind, "fetch_forecast", _fake_forecast)
 
     current = {"place": "Kuta, Lombok, ID", "lat": -8.8948, "lon": 116.2832}
-    result = bot._fetch_wind_forecast(current, _PLACES, ZoneInfo("Asia/Makassar"))
+    result = services.fetch_wind_forecast(current, _PLACES, ZoneInfo("Asia/Makassar"))
 
     assert result is not None
     assert "Kuta, Lombok, ID:\nwind for -8.8948,116.2832" in result
@@ -66,7 +66,7 @@ def test_fetch_wind_forecast_combines_current_and_curated_wind_spots(
 
 
 def test_fetch_wind_forecast_none_without_coordinates() -> None:
-    assert bot._fetch_wind_forecast(None, _PLACES, ZoneInfo("UTC")) is None
+    assert services.fetch_wind_forecast(None, _PLACES, ZoneInfo("UTC")) is None
 
 
 _TODAY = date(2026, 8, 21)
@@ -77,7 +77,7 @@ _EXISTING_FRONTMATTER = {
 
 
 def test_resolve_corrections_valid_reference() -> None:
-    resolved = bot._resolve_corrections(
+    resolved = journal_service.resolve_corrections(
         _EXISTING_FRONTMATTER,
         [{"field": "skipped", "index": 0, "reason": "went after all"}],
         _TODAY,
@@ -92,7 +92,7 @@ def test_resolve_corrections_valid_reference() -> None:
 
 
 def test_resolve_corrections_describes_activity() -> None:
-    resolved = bot._resolve_corrections(
+    resolved = journal_service.resolve_corrections(
         _EXISTING_FRONTMATTER, [{"field": "activities", "index": 0}], _TODAY
     )
 
@@ -101,21 +101,21 @@ def test_resolve_corrections_describes_activity() -> None:
 
 
 def test_resolve_corrections_out_of_range_dropped() -> None:
-    resolved = bot._resolve_corrections(
+    resolved = journal_service.resolve_corrections(
         _EXISTING_FRONTMATTER, [{"field": "skipped", "index": 5}], _TODAY
     )
     assert resolved == []
 
 
 def test_resolve_corrections_unsupported_field_dropped() -> None:
-    resolved = bot._resolve_corrections(
+    resolved = journal_service.resolve_corrections(
         _EXISTING_FRONTMATTER, [{"field": "goal_progress", "index": 0}], _TODAY
     )
     assert resolved == []
 
 
 def test_resolve_corrections_no_existing_entry_dropped() -> None:
-    resolved = bot._resolve_corrections(None, [{"field": "skipped", "index": 0}], _TODAY)
+    resolved = journal_service.resolve_corrections(None, [{"field": "skipped", "index": 0}], _TODAY)
     assert resolved == []
 
 
@@ -133,7 +133,7 @@ def test_upcoming_items_sorted_earliest_first() -> None:
         {"id": "visa", "place": "Indonesia exit", "type": "hard", "deadline": date(2026, 9, 20)},
     ]
 
-    lines = bot._upcoming_items(goals_data, itinerary_data, today=date(2026, 9, 1))
+    lines = services.upcoming_items(goals_data, itinerary_data, today=date(2026, 9, 1))
 
     assert lines == [
         "2026-09-15: Surf — target",
@@ -145,7 +145,7 @@ def test_upcoming_items_sorted_earliest_first() -> None:
 def test_upcoming_items_flags_overdue() -> None:
     goals_data = [{"id": "jobs", "title": "Jobs", "type": "hard", "deadline": date(2026, 8, 1)}]
 
-    lines = bot._upcoming_items(goals_data, [], today=date(2026, 9, 1))
+    lines = services.upcoming_items(goals_data, [], today=date(2026, 9, 1))
 
     assert lines == ["2026-08-01: Jobs — deadline (overdue)"]
 
@@ -162,32 +162,16 @@ def test_upcoming_items_skips_done_and_dropped() -> None:
         },
     ]
 
-    assert bot._upcoming_items(goals_data, [], today=date(2026, 9, 1)) == []
+    assert services.upcoming_items(goals_data, [], today=date(2026, 9, 1)) == []
 
 
 def test_upcoming_items_skips_undated_entries() -> None:
     goals_data = [{"id": "a", "title": "A", "type": "soft", "status": "active"}]
-    assert bot._upcoming_items(goals_data, [], today=date(2026, 9, 1)) == []
-
-
-def test_format_short_date() -> None:
-    assert bot._format_short_date(date(2026, 9, 8)) == "Sep 8"
-
-
-def test_backdate_options_labels_today_and_yesterday_by_name() -> None:
-    options = bot._backdate_options(date(2026, 9, 9), days=3)
-
-    assert options[0] == (date(2026, 9, 9), "Today (Sep 9)")
-    assert options[1] == (date(2026, 9, 8), "Yesterday (Sep 8)")
-    assert options[2] == (date(2026, 9, 7), "Monday (Sep 7)")
-
-
-def test_backdate_options_length_matches_days() -> None:
-    assert len(bot._backdate_options(date(2026, 9, 9), days=7)) == 7
+    assert services.upcoming_items(goals_data, [], today=date(2026, 9, 1)) == []
 
 
 def test_resolve_other_day_notes_valid() -> None:
-    resolved = bot._resolve_other_day_notes(
+    resolved = journal_service.resolve_other_day_notes(
         [
             {
                 "date": "2026-09-08",
@@ -204,39 +188,20 @@ def test_resolve_other_day_notes_valid() -> None:
 
 
 def test_resolve_other_day_notes_drops_missing_summary() -> None:
-    assert bot._resolve_other_day_notes([{"date": "2026-09-08"}]) == []
+    assert journal_service.resolve_other_day_notes([{"date": "2026-09-08"}]) == []
 
 
 def test_resolve_other_day_notes_drops_missing_date() -> None:
-    assert bot._resolve_other_day_notes([{"summary": "x"}]) == []
+    assert journal_service.resolve_other_day_notes([{"summary": "x"}]) == []
 
 
 def test_resolve_other_day_notes_drops_invalid_date() -> None:
-    assert bot._resolve_other_day_notes([{"date": "not-a-date", "summary": "x"}]) == []
+    assert journal_service.resolve_other_day_notes([{"date": "not-a-date", "summary": "x"}]) == []
 
 
 def test_resolve_other_day_notes_only_keeps_known_fact_fields() -> None:
-    resolved = bot._resolve_other_day_notes(
+    resolved = journal_service.resolve_other_day_notes(
         [{"date": "2026-09-08", "summary": "x", "goal_progress": [{"goal_id": "g", "delta": 1}]}]
     )
 
     assert resolved[0].facts == {}
-
-
-def test_every_menu_button_is_routed() -> None:
-    """Each button on both keyboards either runs a command or is handled inline."""
-    from daylog import chat_flow
-
-    inline = {chat_flow.BTN_LOG, chat_flow.BTN_MORE, chat_flow.BTN_BACK}
-    labels = {
-        label
-        for keyboard in (chat_flow.MENU, chat_flow.MORE_MENU)
-        for row in keyboard.keyboard
-        for label in (button.text for button in row)
-    }
-    assert labels == inline | set(bot._button_commands())
-
-
-def test_slash_list_is_short_and_every_entry_has_a_handler() -> None:
-    names = [name for name, _ in bot.MENU_COMMANDS]
-    assert len(names) <= 8 and len(set(names)) == len(names)
