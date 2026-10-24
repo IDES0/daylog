@@ -101,8 +101,8 @@ The status site grows into the app that can replace Telegram. One address
 - `GET /api/surf` → `{"spots": [{"id", "name", "days": [{"date", "label", "rating", "start", "end", "faces": [lo, hi], "period", "swell_dir", "wind_kn", "wind_from", "wind_dir", "offshore", "tide", "tide_trend", "drops_to": {"label", "hour"}|null, "above_comfort", "hours": [{"hour", "rating"}]}]}], "message": null|"…"}` — the same ratings `/surf` sends as text
 - `GET /api/fly` → `{"sites": [{"id", "name", "elevation", "days": [{"date", "flyable", "hours": [{"hour", "ok"}], …flyable: "start", "end", "flyable_hours", "wind_kn", "wind_from", "wind_dir", "gust_kn", "thermals", "base_m", "headroom_m"; not: "blockers": ["…"]}]}], "message": null|"…"}`
 - `GET /api/upcoming` → `{"items": ["…"]}` ; `GET /api/status` → `{"text": "…"}`
-- `GET /api/usage` → `{"month": "2026-10", "spent": 10.87, "budget": 40, "by_kind": [{"kind", "usd"}]}`
-- `GET /api/site?days=7` → `{"text": "…"}` or `{"text": null, "message": "not configured"}`
+- `GET /api/usage` → `{"month": "2026-10", "spent": 10.87, "budget": 40, "projected": 33.7, "by_kind": [{"kind", "usd"}], "history": [{"month", "usd"}]}` — `projected` is a straight-line month-end estimate; `history` is up to 6 month totals from `usage.yaml`, oldest first, ending with this month
+- `GET /api/site?days=7` (1–90) → `{"text": "…", "data": {…}}` or `{"text": null, "message": "not configured"}`. `data`: `{"days", "people", "views", "resume", "chess_people", "spacetime_people", "by_ref": [{"key", "people"}], "by_day": [{"key": "2026-10-21", "people", "n"}] (every UTC day of the window, zeros filled), "pages"|"sources"|"countries"|"devices": [{"key", "people", "n"}] (largest first), "engagement": {"games", "moves", "engine_s", "sources", "exports"}|null, "company": [{"ref", "first_seen", "pages": ["/…"], "resume", "chess", "spacetime", "city", "country", "session", "recording": url|null}]}` — `people` are unique visitors, `n` the page views behind them. With no visitors the lists are empty.
 
 ### Planning
 - `GET /api/plan` → latest plan `{"date", "text", "options": [{"index": 0, "title": "…", "summary": "…"}]}`

@@ -535,10 +535,51 @@ body.kb .composer { bottom: 0; padding-bottom: var(--s2); }
 .status.bad { color: var(--danger); background: var(--danger-soft); }
 .cond-foot { font-size: 12px; margin-top: var(--s3); }
 .big-num { font: 500 28px/1 var(--serif); }
-.meter { height: 8px; margin: var(--s3) 0 var(--s4); background: var(--surface-2); border-radius: 4px; overflow: hidden; }
-.meter > div { height: 100%; background: var(--accent); border-radius: 4px; }
-.meter > div.over { background: var(--danger); }
-.spend > li { gap: var(--s3); }
-.spend > li > span:first-child { flex: 0 0 34%; }
-.kv-bar { flex: 1; height: 6px; background: var(--surface-2); border-radius: 3px; overflow: hidden; }
-.kv-bar i { display: block; height: 100%; background: var(--bar); border-radius: 3px; }
+
+/* ---------- reports: API spend, site ---------- */
+
+.rep-top { display: flex; align-items: center; justify-content: space-between; gap: var(--s2); flex-wrap: wrap; margin-bottom: var(--s4); }
+.rep-range button { padding: 0 10px; font-size: 12.5px; }
+.rep { container-type: inline-size; }
+.rep-hero { display: flex; align-items: baseline; justify-content: space-between; gap: var(--s3); }
+.rep-hero .big-num { font-size: 34px; letter-spacing: -.01em; }
+.rep-hero .muted { font-size: 15px; }
+.rep-meter { position: relative; height: 10px; margin: var(--s3) 0 var(--s2); background: var(--accent-soft); border-radius: 5px; }
+.rep-meter > div { height: 100%; background: var(--accent); border-radius: 5px; min-width: 4px; }
+.rep-meter > div.over { background: var(--danger); }
+/* projected month-end: a 2px tick standing just proud of the track */
+.rep-meter > i { position: absolute; top: -3px; bottom: -3px; width: 2px; margin-left: -1px; border-radius: 1px; background: var(--text); opacity: .55; }
+.rep-pace { font-size: 13.5px; }
+.rep-pace .status { padding: 3px 8px; font-size: 12.5px; }
+.rep-sec { margin-top: var(--s5); }
+.rep-h { display: flex; align-items: baseline; justify-content: space-between; gap: var(--s2); margin-bottom: var(--s2); }
+.rep-h h3 { font: 500 10.5px/1.2 var(--mono); color: var(--faint); text-transform: uppercase; letter-spacing: .07em; }
+.rep-bars { margin-top: 0; }
+.rep-bars .hbar { padding: 4px 0; grid-template-columns: minmax(96px, 42%) 1fr auto; }
+.rep-tiles .tile b { font-variant-numeric: lining-nums; }
+
+/* column chart: readout line, plot, two-end axis */
+.rep-read { font-size: 13px; color: var(--muted); min-height: 1.55em; margin-bottom: var(--s2); }
+.rep-cols { display: flex; align-items: stretch; gap: var(--gap, 2px); height: 96px; border-bottom: 1px solid var(--line-strong); padding-top: 18px; }
+.rep-col { flex: 1 1 0; min-width: 0; display: flex; align-items: flex-end; justify-content: center; border-radius: 4px 4px 0 0; cursor: default; outline-offset: 0; }
+.rep-col.on { background: var(--surface-2); }
+.rep-col i { position: relative; display: block; width: 100%; max-width: 24px; background: var(--bar); border-radius: 4px 4px 0 0; }
+.rep-col i.ctx { background: color-mix(in srgb, var(--faint) 38%, var(--surface)); }
+.rep-col.on i { filter: brightness(1.12); }
+.rep-col i b { position: absolute; bottom: 100%; left: 50%; transform: translateX(-50%); padding-bottom: 3px; font: 500 11px/1 var(--mono); color: var(--muted); white-space: nowrap; }
+.rep-axis { display: flex; justify-content: space-between; gap: var(--s2); margin-top: 5px; font: 10.5px/1.3 var(--mono); color: var(--faint); font-variant-numeric: tabular-nums; }
+.rep-axis.per { gap: var(--gap, 2px); }
+.rep-axis.per span { flex: 1 1 0; min-width: 0; text-align: center; }
+
+.rep-grid { display: grid; grid-template-columns: minmax(0, 1fr); column-gap: var(--s5); }
+@container (min-width: 520px) { .rep-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+.rep-eng { display: grid; gap: 6px; font-size: 14px; }
+.rep-eng > div { display: flex; gap: var(--s2); align-items: baseline; flex-wrap: wrap; }
+.rep-eng b { font-weight: 600; min-width: 84px; }
+.rep-co > li { padding: var(--s3) 0; }
+.rep-co b { font-weight: 600; }
+.rep-co .row .mono, .rep-h .mono { font-size: 12px; }
+.rep-co-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; margin-top: 4px; font-size: 13.5px; }
+.rep-co-meta .chip { height: 22px; padding: 0 8px; font-size: 12px; }
+.rep-pages { margin-top: 4px; font-size: 11.5px; overflow-wrap: anywhere; }
+.rep-refresh { margin: var(--s4) 0 -8px -12px; }

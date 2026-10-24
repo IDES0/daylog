@@ -14,7 +14,8 @@ from __future__ import annotations
 
 import logging
 import os
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
+from datetime import UTC, date, datetime, timedelta
 from typing import Any
 
 import httpx
@@ -253,13 +254,19 @@ def record_day(
 
 # -- /site: the deeper read ---------------------------------------------------
 
+# (data key, title in the text report, HogQL expression, row limit)
 _SECTIONS = (
-    ("By day", "toString(toDate(timestamp))", 31),
-    ("Top pages", "properties.$pathname", 10),
-    ("Came from", "ifNull(nullIf(domain(toString(properties.$referrer)), ''), '(direct)')", 8),
-    ("Countries", "ifNull(toString(properties.$geoip_country_code), '?')", 8),
-    ("Devices", "ifNull(toString(properties.$device_type), '?')", 5),
+    ("pages", "Top pages", "properties.$pathname", 10),
+    (
+        "sources",
+        "Came from",
+        "ifNull(nullIf(domain(toString(properties.$referrer)), ''), '(direct)')",
+        8,
+    ),
+    ("countries", "Countries", "ifNull(toString(properties.$geoip_country_code), '?')", 8),
+    ("devices", "Devices", "ifNull(toString(properties.$device_type), '?')", 5),
 )
+_DAY = "toString(toDate(timestamp))"
 
 
 def engagement_hogql(days: int) -> str:
@@ -273,36 +280,111 @@ def engagement_hogql(days: int) -> str:
     )
 
 
-def fetch_report(days: int, client: httpx.Client | None = None) -> str:
+def _rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return [
+        {
+            "key": str(r.get("key") or "?"),
+            "people": int(r.get("people") or 0),
+            "n": int(r.get("n") or 0),
+        }
+        for r in rows
+    ]
+
+
+def _engagement(row: dict[str, Any]) -> dict[str, Any] | None:
+    if not any(row.get(k) for k in ("games", "moves", "sources", "exports")):
+        return None
+    engine = row.get("engine_s")
+    # avgIf is NaN when nothing loaded, and NaN != NaN.
+    seconds = None
+    if isinstance(engine, int | float) and engine == engine and engine:
+        seconds = round(float(engine), 1)
+    return {
+        "games": int(row.get("games") or 0),
+        "moves": int(row.get("moves") or 0),
+        "engine_s": seconds,
+        "sources": int(row.get("sources") or 0),
+        "exports": int(row.get("exports") or 0),
+    }
+
+
+def _by_day(rows: list[dict[str, Any]], days: int, today: date) -> list[dict[str, Any]]:
+    """Every UTC day of the window, oldest first, zero where nobody came.
+
+    The window starts mid-day `days` days ago, so that partial first day is
+    only kept when it has visitors.
+    """
+    seen = {r["key"]: r for r in _rows(rows)}
+    keys = [(today - timedelta(days=i)).isoformat() for i in range(days, -1, -1)]
+    if keys[0] not in seen:
+        keys = keys[1:]
+    return [seen.get(k) or {"key": k, "people": 0, "n": 0} for k in sorted({*keys, *seen})]
+
+
+def fetch_report_data(
+    days: int, client: httpx.Client | None = None, today: date | None = None
+) -> dict[str, Any]:
+    """The /site numbers as data: totals, visitors by day, top lists, company refs.
+
+    Counts are people, with `n` the page views (or events) behind them.
+    """
     days = max(1, min(int(days), MAX_REPORT_DAYS))
+    today = today or datetime.now(UTC).date()
     summary = summarize(
         query(totals_hogql(days), client), query(breakdown_hogql(_REF, days, limit=20), client)
     )
+    data: dict[str, Any] = {
+        "days": days,
+        **{k: summary[k] for k in ("people", "views", "resume")},
+        "chess_people": summary["chess_people"],
+        "spacetime_people": summary["spacetime_people"],
+        "by_ref": [{"key": k, "people": n} for k, n in summary["by_ref"].items()],
+        "by_day": [],
+        **{key: [] for key, *_ in _SECTIONS},
+        "engagement": None,
+        "company": [],
+    }
     if not summary["people"] and not summary["resume"]:
+        return data
+    data["by_day"] = _by_day(query(breakdown_hogql(_DAY, days, days + 1), client), days, today)
+    for key, _title, expr, limit in _SECTIONS:
+        data[key] = _rows(query(breakdown_hogql(expr, days, limit), client))
+    data["engagement"] = _engagement((query(engagement_hogql(days), client) or [{}])[0])
+    data["company"] = [
+        {**asdict(v), "recording": recording_url(v.session) if v.session else None}
+        for v in visits(query(visits_hogql(days), client))
+    ]
+    return data
+
+
+def format_report(data: dict[str, Any]) -> str:
+    days = data["days"]
+    if not data["people"] and not data["resume"]:
         return f"Site, last {days} days: no visitors."
+    summary = {**data, "by_ref": {r["key"]: r["people"] for r in data["by_ref"]}}
     lines = [f"Site, last {days} days", *_headline(summary)]
-    for title, expr, limit in _SECTIONS:
-        rows = query(breakdown_hogql(expr, days, limit), client)
-        if title == "By day":
-            rows.sort(key=lambda r: str(r.get("key")))
+    sections = [("By day", [r for r in data["by_day"] if r["people"] or r["n"]])]
+    sections += [(title, data[key]) for key, title, *_ in _SECTIONS]
+    for title, rows in sections:
         if rows:
             lines.append(f"\n{title}")
-            lines += [f"  {r.get('key') or '?'}: {r.get('people')} ({r.get('n')})" for r in rows]
-    eng = (query(engagement_hogql(days), client) or [{}])[0]
-    if any(eng.get(k) for k in ("games", "moves", "sources", "exports")):
-        engine = eng.get("engine_s")
+            lines += [f"  {r['key']}: {r['people']} ({r['n']})" for r in rows]
+    eng = data["engagement"]
+    if eng:
+        engine = eng["engine_s"]
         lines.append("\nEngagement")
         lines.append(
-            f"  chess: {eng.get('games') or 0} games, {eng.get('moves') or 0} moves"
-            # avgIf is NaN when nothing loaded, and NaN != NaN.
-            + (f", engine loads in {engine:.1f} s" if engine == engine and engine else "")
+            f"  chess: {eng['games']} games, {eng['moves']} moves"
+            + (f", engine loads in {engine:.1f} s" if engine else "")
         )
-        lines.append(
-            f"  spacetime: {eng.get('sources') or 0} sources, {eng.get('exports') or 0} exports"
-        )
-    company = visits(query(visits_hogql(days), client))
+        lines.append(f"  spacetime: {eng['sources']} sources, {eng['exports']} exports")
+    company = [Visit(**{k: v for k, v in c.items() if k != "recording"}) for c in data["company"]]
     if company:
         lines.append("\nCompany refs")
         lines += [f"{v.first_seen} {format_visit(v)[2:]}" for v in company]
     lines.append("\n(people, with page views or events in brackets)")
     return "\n".join(line for line in lines if line)
+
+
+def fetch_report(days: int, client: httpx.Client | None = None) -> str:
+    return format_report(fetch_report_data(days, client))
