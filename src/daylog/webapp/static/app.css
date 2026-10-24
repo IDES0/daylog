@@ -464,6 +464,12 @@ body.kb .composer { bottom: 0; padding-bottom: var(--s2); }
 .dlabel { fill: var(--text); paint-order: stroke; stroke: var(--bg); stroke-width: 3px; stroke-linejoin: round; pointer-events: none; font-family: var(--sans); }
 .dlabel.locked { fill: var(--faint); }
 .dlabel.root { font-family: var(--serif); font-weight: 500; }
+.dhub, .dme { font-family: var(--serif); font-weight: 500; text-anchor: middle; pointer-events: none; }
+.dhub { fill: #fff; }
+.disc-styles { white-space: nowrap; }
+.disc-styles button { border: 0; background: none; padding: 2px 4px; font: inherit; color: var(--faint); cursor: pointer; text-decoration: underline dotted; text-underline-offset: 3px; }
+.disc-styles button[aria-pressed="true"] { color: var(--text); text-decoration: none; font-weight: 600; }
+.dme { fill: var(--bg); }
 .glyph { display: inline-block; width: 12px; height: 12px; border-radius: 50%; margin-right: 6px; vertical-align: -1px; border: 2px solid var(--muted); }
 .glyph.full { background: var(--muted); }
 .glyph.ready { border-style: dashed; }
