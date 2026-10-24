@@ -534,6 +534,11 @@ details.fold[open] > summary .chev { transform: rotate(90deg); }
 details.fold[open] .fold-line { display: none; }
 .fold-body { padding: var(--s2) 0 0 30px; font-size: 14.5px; }
 details.notes-fold, details.key { margin-top: var(--s2); }
+/* You → Goals folded to one line */
+details.goals-fold > summary { list-style: none; cursor: pointer; display: flex; justify-content: space-between; align-items: center; min-height: var(--tap); gap: var(--s3); }
+details.goals-fold > summary::-webkit-details-marker { display: none; }
+details.goals-fold > summary .muted { font-size: 14px; }
+details.goals-fold[open] > summary { margin-bottom: var(--s2); border-bottom: 1px solid var(--line); }
 details.notes-fold > summary, details.key > summary { cursor: pointer; font: 500 12px var(--mono); color: var(--faint); text-transform: uppercase; letter-spacing: .06em; min-height: 28px; display: inline-flex; align-items: center; }
 details.notes-fold > summary::-webkit-details-marker, details.key > summary::-webkit-details-marker { display: none; }
 details.notes-fold > summary::before, details.key > summary::before { content: "▸"; margin-right: 6px; transition: transform .15s; display: inline-block; }

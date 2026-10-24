@@ -666,6 +666,28 @@ function renderGoals(body, goals, detail) {
   })));
 }
 
+// You → Goals is reference (Home already shows progress), so it starts folded
+// to one line; the choice is remembered on this device.
+const GOALS_OPEN_KEY = "daylog.youGoalsOpen";
+function renderFoldedGoals(body, goals) {
+  fill(body);
+  const list = goals || [];
+  if (!list.length) { renderGoals(body, list, true); return; }
+  const moved = list.filter(g => g.slips).length;
+  const line = [`${list.length} goal${list.length === 1 ? "" : "s"}`, moved ? `${moved} moved` : ""].filter(Boolean).join(" · ");
+  const inner = h("div");
+  renderGoals(inner, list, true);
+  let open = false;
+  try { open = localStorage.getItem(GOALS_OPEN_KEY) === "1"; } catch { /* private mode */ }
+  const fold = h("details.goals-fold", { open: open || null }, h("summary", h("span", line), h("span.muted", "Show")), inner);
+  fold.addEventListener("toggle", () => {
+    fold.querySelector("summary .muted").textContent = fold.open ? "Hide" : "Show";
+    try { localStorage.setItem(GOALS_OPEN_KEY, fold.open ? "1" : "0"); } catch { /* private mode */ }
+  });
+  if (open) fold.querySelector("summary .muted").textContent = "Hide";
+  body.append(fold);
+}
+
 function renderNext(body, next) {
   fill(body);
   if (!next || !next.length) { body.append(empty("Nothing dated on the itinerary.", "Mention a plan in a note or ask the assistant to add a leg.")); return; }
@@ -1470,7 +1492,7 @@ function initYou() {
   fill(goals.body, skeleton());
   fill(miles.body, skeleton());
   const fromHome = force => getHome(force).then(d => {
-    renderGoals(goals.body, d.goals, true);
+    renderFoldedGoals(goals.body, d.goals);
     renderMilestones(miles.body, d.milestones, 5);
   }, e => { fill(goals.body, errorBox(e, () => fromHome(true))); fill(miles.body); });
   fromHome(false);
@@ -1897,7 +1919,7 @@ function initRankings(body) {
     const d = RK.data;
     const counts = d.counts || {};
     fill(tabs, seg((d.categories || []).map(c => [c, h("span", words(c), counts[c] ? h("small.rk-count", counts[c]) : null)]),
-      RK.cat, v => { RK.cat = v; try { localStorage.setItem("daylog.rankCat", v); } catch {} draw(); }, "Category"));
+      RK.cat, v => { RK.cat = v; try { localStorage.setItem("daylog.rankCat", v); } catch {} draw(); }, "Category", true));
     fill(box, rankTiers(d, RK.cat));
   };
   RK.reload = (cat) => {
