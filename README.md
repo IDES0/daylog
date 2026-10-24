@@ -212,10 +212,12 @@ contract is [`docs/web-api.md`](docs/web-api.md).
 - Endpoints: `me`, `home`, `map`, `calendar`, `journal`, `journal/{date}`,
   `log`, `voice`, `reconcile`, `chat` (+ `chat/reset`), `brief`, `surf`,
   `fly`, `upcoming`, `status`, `usage`, `site`, `plan`, `ripple`, `trail`,
-  `places`, `places/{id}`, `wishlist`, `rankings`, `research`, `review`,
+  `places`, `places/{id}`, `wishlist`, `rankings` (+ `rankings/session`,
+  `rankings/session/next`, `rankings/move`, `rankings/remove`), `research`, `review`,
   `disciplines`, `changes` (+ `changes/{sha}/revert`), `cards`.
 - The frontend is plain HTML/CSS/JS in `src/daylog/webapp/static/`, shipped
-  as package data. The head-to-head ranking flow has no web version yet.
+  as package data. Rankings (tiers, head-to-heads, drag to reorder) live in
+  the You tab; a note that mentions an unranked place offers a Rank card.
 
 ### Notifications
 What the app does on its own arrives as a Web Push notification on the
@@ -268,8 +270,9 @@ src/daylog/
   daily.py         The 4am day cutoff, end-of-day reconcile, the weekly
                    review.
   reconcile.py     Rebuilds a multi-note day in one pass.
-  rankings.py      Beli-style tiers + binary insertion; rank_flow.py: which
-                   places in an entry can be ranked, the list as text.
+  rankings.py      Beli-style tiers + binary insertion, moves, the after-a-
+                   note prompt (pure); rank_flow.py: which places in an
+                   entry can be ranked, the list as text.
   llm.py           Pricing, monthly spend ledger (usage.yaml), budget
                    caps, and streamed calls for long requests.
   research.py      Web-search agent: resolve place names, map a region,

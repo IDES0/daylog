@@ -299,7 +299,7 @@ function okMsg(text) { return h("div.ok-msg", icon("check"), h("span", text)); }
 const KIND = {
   goal_slip: "Goal date", itinerary: "Itinerary", correction: "Correction", chat_proposal: "Proposed change",
   discipline_fix: "Discipline", discipline_add: "New discipline", ripple: "Ripple", plan: "Plan",
-  place: "Place", want: "Wishlist", research: "Research",
+  place: "Place", want: "Wishlist", research: "Research", rank: "Rank",
 };
 
 function cardView(card) {
@@ -312,13 +312,30 @@ function cardView(card) {
     btns, result);
   const actions = card.actions && card.actions.length ? card.actions
     : [{ id: "confirm", label: "Confirm", style: "primary" }, { id: "cancel", label: "Cancel" }];
+  // A rank card's tier buttons open the head-to-head flow instead.
+  const ranks = card.kind === "rank" && card.data && card.data.place;
   for (const a of actions) {
     const cls = a.style === "primary" ? ".primary" : a.style === "danger" ? ".danger" : "";
-    btns.append(h("button.btn" + cls, { type: "button", onclick: e => answerCard(card, a, el, e.currentTarget) }, a.label || a.id));
+    const go = ranks && a.id !== "skip"
+      ? () => rankFlow({ id: card.data.place, name: card.data.name, category: card.data.category }, { tier: a.id, card })
+      : e => answerCard(card, a, el, e.currentTarget);
+    btns.append(h("button.btn" + cls, { type: "button", onclick: go }, a.label || a.id));
   }
   if (!S.cardEls.has(card.id)) S.cardEls.set(card.id, new Set());
   S.cardEls.get(card.id).add(el);
   return el;
+}
+
+// A card answered some other way (a rank card taken into the ranking flow).
+function cardDone(card, message) {
+  for (const c of S.cardEls.get(card.id) || []) {
+    c.querySelector(".btns")?.remove();
+    c.classList.add("done");
+    c.querySelector(".result").replaceChildren(okMsg(message));
+  }
+  S.cardEls.delete(card.id);
+  S.open = S.open.filter(c => c.id !== card.id);
+  setBadge(S.open.length);
 }
 
 function cardList(cards) {
@@ -645,8 +662,30 @@ function renderGoals(body, goals, detail) {
       detail ? h("div.chips", { style: { "margin-top": "8px" } },
         g.type === "hard" ? h("span.chip.warn", "hard date") : null,
         g.discipline ? h("span.chip.accent", words(g.discipline)) : null) : null,
-      detail && g.notes ? h("div", { style: { "margin-top": "8px", "font-size": "14px", color: "var(--muted)" } }, md(g.notes)) : null);
+      detail && g.notes ? h("details.notes-fold", h("summary", "Notes"), md(g.notes)) : null);
   })));
+}
+
+// You → Goals is reference (Home already shows progress), so it starts folded
+// to one line; the choice is remembered on this device.
+const GOALS_OPEN_KEY = "daylog.youGoalsOpen";
+function renderFoldedGoals(body, goals) {
+  fill(body);
+  const list = goals || [];
+  if (!list.length) { renderGoals(body, list, true); return; }
+  const moved = list.filter(g => g.slips).length;
+  const line = [`${list.length} goal${list.length === 1 ? "" : "s"}`, moved ? `${moved} moved` : ""].filter(Boolean).join(" · ");
+  const inner = h("div");
+  renderGoals(inner, list, true);
+  let open = false;
+  try { open = localStorage.getItem(GOALS_OPEN_KEY) === "1"; } catch { /* private mode */ }
+  const fold = h("details.goals-fold", { open: open || null }, h("summary", h("span", line), h("span.muted", "Show")), inner);
+  fold.addEventListener("toggle", () => {
+    fold.querySelector("summary .muted").textContent = fold.open ? "Hide" : "Show";
+    try { localStorage.setItem(GOALS_OPEN_KEY, fold.open ? "1" : "0"); } catch { /* private mode */ }
+  });
+  if (open) fold.querySelector("summary .muted").textContent = "Hide";
+  body.append(fold);
 }
 
 function renderNext(body, next) {
@@ -662,7 +701,11 @@ function renderMilestones(body, miles, limit) {
   fill(body);
   const list = [...(miles || [])].sort((a, b) => String(b.date).localeCompare(String(a.date)));
   if (!list.length) { body.append(empty("None yet.", "Firsts and bests you mention (a PB, a course passed) land here.")); return; }
-  body.append(h("ul.list", list.slice(0, limit || list.length).map(m => li(m.what, short(m.date)))));
+  const ul = h("ul.list", list.slice(0, limit || list.length).map(m => li(m.what, short(m.date))));
+  body.append(ul);
+  if (limit && list.length > limit) {
+    body.append(h("button.btn.ghost.more", { type: "button", onclick: e => { fill(ul, list.map(m => li(m.what, short(m.date)))); e.currentTarget.remove(); } }, `Show all ${list.length}`));
+  }
 }
 
 // ---- brief
@@ -1432,23 +1475,25 @@ function initTrail(c) {
 
 function initYou() {
   const root = $("#you");
+  // Phone order = usefulness; on desktop the wider left column takes goals and rankings.
   const disc = card(1, "Disciplines", { cls: "wide" });
-  const review = card(2, "Weekly review");
-  const goals = card(3, "Goals");
-  const reports = card(4, "Reports");
-  const ranks = card(5, "Rankings");
-  const miles = card(6, "Milestones");
+  const goals = card(2, "Goals");
+  const rankBtn = h("button.btn.primary.sm", { type: "button", onclick: () => rankFlow(null) }, icon("plus"), "Rank a place");
+  const ranks = card(3, "Rankings", { action: rankBtn });
+  const miles = card(4, "Milestones");
+  const review = card(5, "Weekly review");
+  const reports = card(6, "Reports");
   const changes = card(7, "Recent changes");
   const account = card(8, "Session");
-  fill(root, h("div.grid", disc, h("div.col", review, goals, ranks), h("div.col", reports, miles, changes, account)));
+  fill(root, h("div.grid", disc, h("div.col", goals, ranks), h("div.col", miles, review, reports, changes, account)));
 
   initDisciplines(disc);
   load(review.body, () => api("/api/review"), d => renderReview(review.body, d));
   fill(goals.body, skeleton());
   fill(miles.body, skeleton());
   const fromHome = force => getHome(force).then(d => {
-    renderGoals(goals.body, d.goals, true);
-    renderMilestones(miles.body, d.milestones);
+    renderFoldedGoals(goals.body, d.goals);
+    renderMilestones(miles.body, d.milestones, 5);
   }, e => { fill(goals.body, errorBox(e, () => fromHome(true))); fill(miles.body); });
   fromHome(false);
   initReports(reports);
@@ -1456,7 +1501,7 @@ function initYou() {
   loadChanges(changes.body);
   const notify = h("div", { style: { "margin-top": "12px" } });
   account.body.append(
-    h("p.muted", { style: { "font-size": "14px" } }, `Signed in on this device${S.tz ? ` · times in ${S.tz}` : ""}.`),
+    h("div.chips", h("span.chip.accent", "Signed in"), S.tz ? h("span.chip", S.tz) : null),
     notify,
     h("form", { method: "post", action: "/logout", style: { "margin-top": "12px" } }, h("button.btn", { type: "submit" }, "Sign out")));
   initNotifications(notify);
@@ -1501,16 +1546,21 @@ function b64urlBytes(s) {
 function renderReview(body, d) {
   fill(body);
   const out = h("div");
-  const btn = h("button.btn" + (d && d.text ? "" : ".primary"), { type: "button" }, icon("spark"), "Write this week's review");
+  const btn = h("button.btn" + (d && d.text ? ".ghost" : ".primary"), { type: "button" }, icon("spark"), d && d.text ? "Write this week's" : "Write this week's review");
   btn.addEventListener("click", () => runSlow({
     target: out, button: btn, label: "Writing the weekly review…", hint: "About a minute.",
     call: () => post("/api/review"), render: r => renderReview(body, r),
   }));
   if (d && d.text) {
-    if (d.week) body.append(h("div.faint.mono", { style: { "font-size": "12px", "margin-bottom": "10px" } }, `Week of ${short(d.week) || d.week}`));
-    body.append(clamped(md(d.text), 700));
-  } else body.append(empty("No review yet.", "Reviews are written on Sundays; you can write this week's now."));
-  body.append(out, h("div.btns", { style: { "margin-top": "12px" } }, btn));
+    // Collapsed: the week and its first line; the full text on a tap.
+    const first = String(d.text).split("\n").map(l => l.replace(/^[#>*\-\s]+/, "").replace(/\*\*/g, "").trim()).find(l => l && !/^week/i.test(l)) || "";
+    body.append(h("details.fold",
+      h("summary", icon("chev", "chev"), h("div",
+        h("div.fold-title", d.week ? `Week of ${short(d.week) || d.week}` : "Latest review"),
+        first ? h("div.fold-line", first) : null)),
+      h("div.fold-body", md(d.text))));
+  } else body.append(empty("No review yet.", "Written on Sundays."));
+  body.append(out, h("div.btns", { style: { "margin-top": "8px" } }, btn));
 }
 
 // ---- disciplines (ported from dashboard.py _DISC_JS)
@@ -1535,8 +1585,9 @@ function initDisciplines(c) {
     const roots = (d.nodes || []).filter(n => !n.parent);
     fill(legend, 
       h("div.legend", roots.map(r => h("span", h("i", { style: { background: `var(--root-${(d.slots || {})[r.id] || 1})` } }), r.name))),
-      h("div.legend", h("span", h("i.glyph.full"), "Pursuing"), h("span", h("i.glyph"), "Not started"),
-        h("span", h("i.glyph.ready"), "Want, ready"), h("span", h("i.glyph.locked"), "Locked"), h("span", h("i.glyph.line"), "Also counts under")));
+      h("details.key", h("summary", "Key"),
+        h("div.legend", h("span", h("i.glyph.full"), "Pursuing"), h("span", h("i.glyph"), "Not started"),
+          h("span", h("i.glyph.ready"), "Want, ready"), h("span", h("i.glyph.locked"), "Locked"), h("span", h("i.glyph.line"), "Also counts under"))));
     if (!(d.nodes || []).length) { content.append(empty("No disciplines yet.", "Sports you log join the graph once confirmed.")); return; }
     draw();
   }, "block");
@@ -1855,32 +1906,273 @@ function initReports(c) {
 
 // ---- rankings
 
+// Category tabs → tiers → a numbered list, best first. Reorder by dragging the
+// handle (pointer events, so touch works), or the ⋯ sheet (up/down, tier, remove).
+
+const RK = { data: null, cat: null, reload: null };
+const TIER_ICON = { liked: "👍", fine: "😐", disliked: "👎" };
+
 function initRankings(body) {
-  let current = null, data = null;
-  const chips = h("div");
-  const box = h("div", { style: { "margin-top": "12px" } });
-  const render = () => {
-    const tiers = (data.lists || {})[current];
-    fill(box);
-    if (!tiers) {
-      load(box, () => api(`/api/rankings?category=${encodeURIComponent(current)}`), d => {
-        data.lists = { ...(data.lists || {}), ...(d.lists || {}) };
-        render();
-      });
-      return;
-    }
-    if (!tiers.length) { box.append(empty(null, "Nothing ranked in this category yet.")); return; }
-    box.append(h("div", tiers.map(t => h("div.tier", h("b", t.tier), h("div", (t.items || []).join(" · "))))));
+  const tabs = h("div.rk-tabs");
+  const box = h("div");
+  const draw = () => {
+    const d = RK.data;
+    const counts = d.counts || {};
+    fill(tabs, seg((d.categories || []).map(c => [c, h("span", words(c), counts[c] ? h("small.rk-count", counts[c]) : null)]),
+      RK.cat, v => { RK.cat = v; try { localStorage.setItem("daylog.rankCat", v); } catch {} draw(); }, "Category", true));
+    fill(box, rankTiers(d, RK.cat));
+  };
+  RK.reload = (cat) => {
+    if (cat) RK.cat = cat;
+    return api("/api/rankings").then(d => { RK.data = d; draw(); }, e => fill(box, errorBox(e, () => RK.reload())));
   };
   load(box, () => api("/api/rankings"), d => {
-    data = d;
-    const cats = d.categories || Object.keys(d.lists || {});
-    if (!cats.length) { box.append(empty("Nothing ranked yet.", "Rank places you've been to build tiers.")); return; }
-    current = cats[0];
-    fill(chips, seg(cats.map(c => [c, words(c)]), current, v => { current = v; render(); }, "Category", true));
-    render();
+    RK.data = d;
+    let saved = null;
+    try { saved = localStorage.getItem("daylog.rankCat"); } catch {}
+    const cats = d.categories || [];
+    RK.cat = cats.includes(saved) ? saved : (cats.find(c => (d.counts || {})[c]) || cats[0]);
+    draw();
   });
-  body.append(chips, box);
+  body.append(tabs, box);
+}
+
+function rankTiers(d, cat) {
+  const tiers = (d.lists || {})[cat] || [];
+  const total = tiers.reduce((n, t) => n + t.items.length, 0);
+  if (!total) {
+    return h("div.rk-empty", empty(`No ${words(cat)} ranked yet.`, "Rank somewhere you've been."),
+      h("button.btn", { type: "button", onclick: () => rankFlow(null, { category: cat }) }, icon("plus"), `Rank ${words(cat)}`));
+  }
+  const wrap = h("div.rk", { "data-cat": cat });
+  for (const t of tiers) {
+    wrap.append(h("section.rk-tier", { "data-tier": t.tier },
+      h("div.rk-tier-head", h("i.rk-dot"), h("span", t.label), h("span.rk-n", t.items.length || "")),
+      h("ol.rk-list", { "data-tier": t.tier },
+        t.items.length ? t.items.map(it => rankItem(cat, t.tier, it)) : h("li.rk-hole", "Drag here"))));
+  }
+  return wrap;
+}
+
+function rankItem(cat, tier, it) {
+  const handle = h("button.rk-handle", { type: "button", "aria-label": `Reorder ${it.name}. Arrow keys move it.` },
+    h("span", { "aria-hidden": "true" }, "⋮⋮"));
+  const more = h("button.icon-btn.rk-more", { type: "button", "aria-label": `Options for ${it.name}`, onclick: () => rankSheet(cat, tier, it) },
+    h("span", { "aria-hidden": "true" }, "⋯"));
+  const el = h("li.rk-item", { "data-id": it.id },
+    handle,
+    h("span.rk-rank.num", it.rank),
+    h("button.rk-name", { type: "button", onclick: () => placeSheet(it.id, it.name) },
+      h("span.rk-title", it.name),
+      it.region ? h("span.rk-sub", it.region) : null),
+    it.score != null ? h("span.rk-score.num", Number(it.score).toFixed(1)) : null,
+    more);
+  dragHandle(handle, el, cat);
+  handle.addEventListener("keydown", e => {
+    if (e.key !== "ArrowUp" && e.key !== "ArrowDown") return;
+    e.preventDefault();
+    stepItem(cat, it.id, e.key === "ArrowUp" ? -1 : 1, true);
+  });
+  return el;
+}
+
+// Where an item is: its tier and index (in the tier, without itself).
+function rankSlot(cat, id) {
+  const tiers = (RK.data.lists || {})[cat] || [];
+  for (const t of tiers) {
+    const i = t.items.findIndex(x => x.id === id);
+    if (i >= 0) return { tier: t.tier, index: i, tiers };
+  }
+  return null;
+}
+
+// One step up or down, across tier edges.
+function stepItem(cat, id, dir, refocus) {
+  const at = rankSlot(cat, id);
+  if (!at) return;
+  const ti = at.tiers.findIndex(t => t.tier === at.tier);
+  const n = at.tiers[ti].items.length;
+  let tier = at.tier, index = at.index + dir;
+  if (index < 0) {
+    if (ti === 0) return;
+    tier = at.tiers[ti - 1].tier; index = at.tiers[ti - 1].items.length;
+  } else if (index > n - 1) {
+    if (ti === at.tiers.length - 1) return;
+    tier = at.tiers[ti + 1].tier; index = 0;
+  }
+  moveItem(cat, id, tier, index, refocus);
+}
+
+async function moveItem(cat, id, tier, index, refocus) {
+  try {
+    await post("/api/rankings/move", { category: cat, item: id, tier, index }, NORMAL);
+    await RK.reload();
+    announce("Moved.");
+    if (refocus) $(`.rk-item[data-id="${CSS.escape(id)}"] .rk-handle`)?.focus();
+  } catch (e) {
+    announce(e.message || "Couldn't move it.");
+    RK.reload();
+  }
+}
+
+// Pointer drag on the handle: a floating copy follows the finger, a line shows
+// where it lands, and the list scrolls near the screen edges.
+function dragHandle(handle, el, cat) {
+  handle.addEventListener("pointerdown", e => {
+    if (e.button !== 0) return;
+    e.preventDefault();
+    handle.setPointerCapture(e.pointerId);
+    const box = el.getBoundingClientRect();
+    const dy = e.clientY - box.top;
+    const ghost = el.cloneNode(true);
+    ghost.classList.add("rk-ghost");
+    Object.assign(ghost.style, { width: `${box.width}px`, left: `${box.left}px`, top: `${box.top}px` });
+    ghost.style.setProperty("--tc", getComputedStyle(el).getPropertyValue("--tc"));
+    document.body.append(ghost);
+    el.classList.add("rk-dragging");
+    const line = h("li.rk-line", { "aria-hidden": "true" });
+    let y = e.clientY, target = null, raf = 0;
+    const place = () => {
+      const tiers = [...el.closest(".rk").querySelectorAll(".rk-tier")];
+      let sec = tiers.find(s => { const r = s.getBoundingClientRect(); return y < r.bottom; }) || tiers[tiers.length - 1];
+      const list = sec.querySelector(".rk-list");
+      const items = [...list.querySelectorAll(".rk-item")].filter(x => x !== el);
+      let index = items.findIndex(x => { const r = x.getBoundingClientRect(); return y < r.top + r.height / 2; });
+      if (index < 0) index = items.length;
+      if (items[index]) list.insertBefore(line, items[index]); else list.append(line);
+      target = { tier: sec.dataset.tier, index };
+    };
+    const tick = () => {
+      const edge = 72, bottom = innerHeight - (coarse.matches ? 90 : 20);
+      if (y < edge) window.scrollBy(0, -Math.ceil((edge - y) / 6));
+      else if (y > bottom - edge) window.scrollBy(0, Math.ceil((y - bottom + edge) / 6));
+      ghost.style.top = `${y - dy}px`;
+      place();
+      raf = requestAnimationFrame(tick);
+    };
+    const move = ev => { y = ev.clientY; };
+    const end = ev => {
+      cancelAnimationFrame(raf);
+      handle.removeEventListener("pointermove", move);
+      handle.removeEventListener("pointerup", end);
+      handle.removeEventListener("pointercancel", end);
+      ghost.remove();
+      line.remove();
+      el.classList.remove("rk-dragging");
+      const from = rankSlot(cat, el.dataset.id);
+      if (ev.type === "pointerup" && target && from && (from.tier !== target.tier || from.index !== target.index)) {
+        // Show it where it was dropped right away; the reload renumbers.
+        const list = el.closest(".rk").querySelector(`.rk-list[data-tier="${target.tier}"]`);
+        const items = [...list.querySelectorAll(".rk-item")].filter(x => x !== el);
+        list.querySelector(".rk-hole")?.remove();
+        if (items[target.index]) list.insertBefore(el, items[target.index]); else list.append(el);
+        moveItem(cat, el.dataset.id, target.tier, target.index);
+      }
+    };
+    handle.addEventListener("pointermove", move);
+    handle.addEventListener("pointerup", end);
+    handle.addEventListener("pointercancel", end);
+    raf = requestAnimationFrame(tick);
+  });
+}
+
+// The accessible way to do everything a drag does, plus re-rank and remove.
+function rankSheet(cat, tier, it) {
+  if (!rankSlot(cat, it.id)) return;
+  const res = h("div");
+  const act = (label, fn, cls = "") => h("button.btn" + cls, { type: "button", onclick: fn }, label);
+  const close = fn => () => { sheet.close(); fn(); };
+  const tiers = (RK.data.tiers || []);
+  const body = h("div.stack-lg",
+    h("div.chips", h("span.chip.accent", `#${it.rank} ${words(cat)}`), it.score != null ? h("span.chip", Number(it.score).toFixed(1)) : null,
+      it.region ? h("span.chip", it.region) : null),
+    h("div.btns",
+      act("Move up", close(() => stepItem(cat, it.id, -1))),
+      act("Move down", close(() => stepItem(cat, it.id, 1)))),
+    h("div", h("div.label", { style: { "margin-bottom": "8px" } }, "Tier"),
+      h("div.btns", tiers.filter(t => t.id !== tier).map(t => act(`${TIER_ICON[t.id] || ""} ${t.label}`, close(() => moveItem(cat, it.id, t.id, 0)))))),
+    h("div.btns",
+      act("Rank again", () => rankFlow({ id: it.id, name: it.name, category: cat }), ".primary"),
+      act("Remove", async e => {
+        e.currentTarget.disabled = true;
+        try {
+          const r = await post("/api/rankings/remove", { category: cat, item: it.id }, NORMAL);
+          sheet.close(); announce(r.message || "Removed."); RK.reload();
+        } catch (err) { fill(res, errorBox(err)); e.currentTarget.disabled = false; }
+      }, ".danger")),
+    res);
+  openSheet(it.name, body);
+}
+
+// Rank a place: pick it (search) → tier → "which was better?" until it's placed.
+// The server holds nothing between steps: each answer carries the bounds.
+function rankFlow(place, opts = {}) {
+  const body = openSheet(place ? `Rank ${place.name}` : "Rank a place", h("div"));
+  const done = (r) => {
+    fill(body, h("div.stack-lg",
+      okMsg(r.message || "Ranked."),
+      h("div.btns", h("button.btn.primary", { type: "button", onclick: () => sheet.close() }, "Done"))));
+    announce(r.message || "Ranked.");
+    if (RK.reload) RK.reload(r.category);
+  };
+  const step = r => {
+    if (r.done) { done(r); return; }
+    const pick = answer => () => send(() => post("/api/rankings/session/next", { ...r.state, answer }, NORMAL));
+    const opt = (p, answer) => h("button.rk-choice", { type: "button", onclick: pick(answer) },
+      h("b", p.name), p.region ? h("span", p.region) : null);
+    fill(body, h("div.stack-lg",
+      h("div.row.between", h("h3.rk-q", "Which was better?"),
+        h("span.faint.mono.rk-left", r.left > 1 ? `≤ ${r.left} more` : "last one")),
+      h("div.rk-choices", opt(r.place, "better"), h("div.rk-vs", "or"), opt(r.other, "worse")),
+      h("button.btn.ghost.block", { type: "button", onclick: pick("tie") }, "Too close to call")));
+  };
+  const send = async call => {
+    const keep = [...body.children];
+    body.querySelectorAll("button").forEach(b => { b.disabled = true; });
+    try { step(await call()); } catch (e) {
+      if (e.status === 409) { fill(body, errorBox(e), h("div.btns", h("button.btn", { type: "button", onclick: () => tierStep(place) }, "Start again"))); return; }
+      fill(body, ...keep, errorBox(e));
+      body.querySelectorAll("button").forEach(b => { b.disabled = false; });
+    }
+  };
+  const start = (p, tier) => send(() => post("/api/rankings/session", { place: p.id, tier, category: p.category || undefined, card: opts.card ? opts.card.id : undefined }, NORMAL)
+    .then(r => { if (opts.card) { cardDone(opts.card, `Ranking ${p.name}…`); opts.card = null; } return r; }));
+  const tierStep = p => {
+    place = p;
+    $("#sheet-title").textContent = `Rank ${p.name}`;
+    const tiers = (RK.data && RK.data.tiers) || [{ id: "liked", label: "Liked it" }, { id: "fine", label: "Fine" }, { id: "disliked", label: "Didn't like it" }];
+    fill(body, h("div.stack-lg",
+      h("h3.rk-q", `How was ${p.name}?`),
+      h("div.rk-tiers", tiers.map(t => h("button.rk-tierbtn", { type: "button", "data-tier": t.id, onclick: () => start(p, t.id) },
+        h("span", { "aria-hidden": "true" }, TIER_ICON[t.id] || ""), t.label)))));
+  };
+  const searchStep = () => {
+    const kinds = (RK.data && RK.data.kinds) || {};
+    const catOf = k => Object.keys(kinds).find(c => kinds[c].includes(k));
+    const input = h("input.input", { type: "search", placeholder: "Search places", "aria-label": "Search places", autocomplete: "off", enterkeyhint: "search" });
+    const results = h("div.rk-results", { "aria-live": "polite" });
+    let timer = 0, seq = 0;
+    const search = () => {
+      const q = input.value.trim();
+      const mine = ++seq;
+      if (q.length < 2) { fill(results); return; }
+      fill(results, skeleton());
+      api(`/api/places?q=${encodeURIComponent(q)}`).then(d => {
+        if (mine !== seq) return;
+        const list = (d.results || []).map(p => ({ ...p, category: catOf(p.kind) })).filter(p => p.category);
+        fill(results, list.length
+          ? h("ul.list", list.map(p => h("li", { style: { padding: "0" } }, h("button.li-btn", { type: "button", onclick: () => opts.tier ? start(p, opts.tier) : tierStep(p) },
+            h("div", { style: { padding: "10px 0" } }, h("div.li-main", h("span", p.name), h("span.li-right", words(p.category))), sub(p.path))))))
+          : empty(null, `No rankable place matches “${q}”.`));
+      }, e => { if (mine === seq) fill(results, errorBox(e, search)); });
+    };
+    input.addEventListener("input", () => { clearTimeout(timer); timer = setTimeout(search, 250); });
+    fill(body, input, results);
+    setTimeout(() => input.focus(), 60);
+  };
+  if (!place) searchStep();
+  else if (opts.tier) { tierStep(place); start(place, opts.tier); }
+  else tierStep(place);
 }
 
 // ---- recent changes with undo
@@ -1889,8 +2181,8 @@ function loadChanges(body) {
   load(body, () => api("/api/changes"), d => {
     const list = d.changes || [];
     if (!list.length) { body.append(empty(null, "No recent changes.")); return; }
-    body.append(h("p.muted", { style: { "font-size": "13.5px", "margin-bottom": "8px" } }, "What daylog wrote to the vault. Undo reverts one change."),
-      h("ul.list", list.map(ch => {
+    const SHOWN = 5;
+    const ul = h("ul.list.changes", list.map((ch, i) => {
         const res = h("div");
         const btn = h("button.btn.ghost.danger", { type: "button", "aria-label": `Undo: ${ch.subject}` }, icon("undo"), "Undo");
         btn.addEventListener("click", async () => {
@@ -1901,8 +2193,12 @@ function loadChanges(body) {
             render: r => { res.append(okMsg(r.message || "Reverted.")); S.homeStale = true; setTimeout(() => loadChanges(body), 1800); },
           });
         });
-        return h("li", h("div.change", h("code", String(ch.sha).slice(0, 7)), h("span.subj", ch.subject), btn), res);
-      })));
+        return h("li", { hidden: i >= SHOWN }, h("div.change", h("span.subj", ch.subject), btn), res);
+      }));
+    body.append(ul);
+    if (list.length > SHOWN) {
+      body.append(h("button.btn.ghost.more", { type: "button", onclick: e => { ul.querySelectorAll("li[hidden]").forEach(x => { x.hidden = false; }); e.currentTarget.remove(); } }, `Show ${list.length - SHOWN} more`));
+    }
   });
 }
 
