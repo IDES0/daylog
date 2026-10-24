@@ -1,25 +1,19 @@
-"""Telegram side of the planner: /plan, option buttons, applying a choice.
+"""The planner's vault side: its context, saving a plan, applying a choice.
 
-The plan is saved to plans/YYYY-MM-DD.md and added to the chat history,
-so "make option B a week shorter" in chat has the plan as context.
+The plan is saved to plans/YYYY-MM-DD.md and added to the assistant's
+history, so "make option B a week shorter" in chat has the plan as context.
 Choosing an option applies its legs as planned itinerary windows and
 records the choice in the plan file (the brief reads the latest one).
 """
 
 from __future__ import annotations
 
-import asyncio
 import logging
 import threading
 from datetime import date, datetime, timedelta
-from typing import Any
-
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
-from telegram.ext import ContextTypes
 
 from daylog import (
     brief,
-    chat_flow,
     disciplines,
     goals,
     itinerary,
@@ -29,12 +23,10 @@ from daylog import (
     wishlist_flow,
 )
 from daylog.places import PlaceIndex
-from daylog.tg import allowed_user_id, chunks, is_authorized, tz, vault
 from daylog.vault import Vault, VaultError
 
 logger = logging.getLogger(__name__)
 
-_PLANS_KEY = "plans"
 PLAN_ESTIMATE_USD = 0.60
 
 
@@ -98,102 +90,6 @@ def build_context(v: Vault, now: datetime) -> str:
         f"Last 30 days:\n{trail_text}\n\n"
         f"Recent journal:\n{recent}\n\n"
         f"Wishlist with research:\n\n{chr(10).join(wish_blocks) or '(empty)'}"
-    )
-
-
-def _keyboard(plan_key: str, plan: planner.Plan) -> InlineKeyboardMarkup:
-    rows = [
-        [
-            InlineKeyboardButton(
-                f"Go with {chr(65 + i)}: {str(o.get('label'))[:30]}",
-                callback_data=f"plan:pick:{plan_key}:{i}",
-            )
-        ]
-        for i, o in enumerate(plan.options)
-    ]
-    rows.append(
-        [
-            InlineKeyboardButton(
-                "Not yet — I'll adjust in chat", callback_data=f"plan:hold:{plan_key}:0"
-            )
-        ]
-    )
-    return InlineKeyboardMarkup(rows)
-
-
-async def make_plan(context: ContextTypes.DEFAULT_TYPE, chat_id: int) -> None:
-    v = vault()
-    if not llm.can_spend(v, PLAN_ESTIMATE_USD):
-        await context.bot.send_message(
-            chat_id=chat_id, text="Monthly budget reached — no planning run."
-        )
-        return
-    now = datetime.now(tz())
-    await context.bot.send_message(
-        chat_id=chat_id, text="Planning the next few weeks — a minute or two..."
-    )
-    try:
-        plan, text, path = await asyncio.to_thread(generate, v, now)
-    except Exception:
-        logger.exception("planner failed")
-        await context.bot.send_message(chat_id=chat_id, text="Planning failed — check bot logs.")
-        return
-    if not plan.options:
-        await context.bot.send_message(chat_id=chat_id, text=plan.situation)
-        return
-    plan_key = now.strftime("%Y%m%d%H%M")
-    context.bot_data.setdefault(_PLANS_KEY, {})[plan_key] = {"plan": plan, "path": path}
-    chat_flow.remember(context, "The bot sent a travel plan", text)
-    parts = chunks(text)
-    for chunk in parts[:-1]:
-        await context.bot.send_message(chat_id=chat_id, text=chunk)
-    await context.bot.send_message(
-        chat_id=chat_id, text=parts[-1], reply_markup=_keyboard(plan_key, plan)
-    )
-
-
-async def plan_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    if not is_authorized(update):
-        return
-    message = update.message
-    assert message is not None
-    await make_plan(context, message.chat_id)
-
-
-async def handle_plan_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    if not is_authorized(update):
-        return
-    query = update.callback_query
-    assert query is not None and query.data is not None
-    await query.answer()
-    _, action, plan_key, idx = query.data.split(":", 3)
-    stored: dict[str, Any] | None = context.bot_data.get(_PLANS_KEY, {}).get(plan_key)
-    if stored is None:
-        await query.edit_message_reply_markup(reply_markup=None)
-        await context.bot.send_message(
-            chat_id=allowed_user_id(), text="That plan expired (the bot restarted) — /plan again."
-        )
-        return
-    if action == "hold":
-        await query.edit_message_reply_markup(reply_markup=None)
-        await context.bot.send_message(
-            chat_id=allowed_user_id(), text="Held. Tell me what to change and I'll rework it."
-        )
-        return
-    plan: planner.Plan = stored["plan"]
-    try:
-        label, applied = choose(vault(), plan, stored["path"], int(idx), datetime.now(tz()).date())
-    except VaultError:
-        logger.exception("applying plan failed")
-        await context.bot.send_message(
-            chat_id=allowed_user_id(), text="Saving failed — check bot logs."
-        )
-        return
-    context.bot_data[_PLANS_KEY].pop(plan_key, None)
-    await query.edit_message_reply_markup(reply_markup=None)
-    await context.bot.send_message(
-        chat_id=allowed_user_id(),
-        text=f"Going with {label}. Planned:\n" + "\n".join(f"- {a}" for a in applied),
     )
 
 

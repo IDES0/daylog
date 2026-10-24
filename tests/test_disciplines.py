@@ -221,7 +221,6 @@ def test_rebuild_drops_new_discipline_proposals() -> None:
 
 
 def test_prepare_pulls_out_new_sports_and_narrows_vague_ones(vault: Vault) -> None:
-    from daylog import discipline_flow
 
     graph = _graph()
     facts: dict[str, Any] = {
@@ -231,7 +230,7 @@ def test_prepare_pulls_out_new_sports_and_narrows_vague_ones(vault: Vault) -> No
             {"type": "kite", "new_discipline_parents": ["water"]},
         ]
     }
-    guesses, proposals = discipline_flow.prepare(
+    guesses, proposals = disciplines.prepare(
         vault, graph, facts, date(2026, 10, 15), _places(), None
     )
     assert [(p.node_id, p.name, p.parents) for p in proposals] == [

@@ -5,7 +5,7 @@ is what anyone at the address sees: the status summary plus a map of where
 the itinerary goes next, styled like the travel map on the personal site
 (which shows where I've been). The private view, behind the password line
 (see web.py), adds the journal and the rest. Both are read-only: nothing is
-stored, and Telegram stays the only place to change anything.
+stored; changes happen in the web app behind the session.
 
 The only script is the map (d3 from a CDN) and the service-worker hook; the
 lists render without it.

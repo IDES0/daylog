@@ -5,9 +5,10 @@ Before any handler runs: the session (401 signed_out), then for anything
 but GET the CSRF rule (header `X-Daylog: 1`, and an Origin, when sent,
 equal to the host; 403 otherwise). No CORS headers are ever sent.
 
-Writes go through the same service functions as Telegram, and anything
-inferred comes back as a confirm card (cards.py), never applied directly.
-The bot still never contacts anyone: nothing here sends a message.
+Writes go through the service functions (journal_service, services, the
+*_flow modules), and anything inferred comes back as a confirm card
+(cards.py), never applied directly. The app never contacts anyone but the
+user: the only thing sent from here is a notification to their own devices.
 
 Never log request bodies, passwords or transcripts.
 """
@@ -56,7 +57,7 @@ from daylog import (
 )
 from daylog.disciplines import Graph
 from daylog.places import PlaceIndex
-from daylog.tg import tz
+from daylog.runtime import tz
 from daylog.vault import CorrectionConflictError, Vault, VaultError
 from daylog.webapp.cards import Card, CardStore, Outcome, UnknownAction, action
 from daylog.webapp.chat_store import ChatStore
@@ -806,9 +807,13 @@ class Api:
         )
 
     def _mentions_in_background(self, days: list[date]) -> None:
-        _, findings = research_flow.lookup_mentions(self._vault(), days)
-        if findings is not None:
-            self._place_cards(findings, days)
+        v = self._vault()
+        _, findings = research_flow.lookup_mentions(v, days)
+        if findings is not None and self._place_cards(findings, days):
+            # The app may be closed by now: one notification for the batch.
+            n = len(findings.new_places)
+            body = f"{n} new place{'s' * (n != 1)} from your note. Add or skip."
+            push.send(v, "Places to confirm", body, "/#/home")
 
     def _research_job_card(self, job: dict[str, Any]) -> Card | None:
         kind = job.get("job")
@@ -818,7 +823,7 @@ class Api:
         elif kind == "dossier" and name:
             title = f"Research {name} now? (API budget, a minute or two)"
         else:
-            # Ranking is a Telegram flow for now; nothing to confirm here.
+            # Ranking from chat has no card yet; nothing to confirm here.
             return None
 
         def apply(answer: str) -> Outcome:
@@ -926,6 +931,11 @@ class Api:
 
         return self.cards.add("chat_proposal", summary, apply)
 
+    def waiting_decisions(self, v: Vault) -> int:
+        """Card every pending proposal now; how many are waiting."""
+        self._sync_proposals(v)
+        return sum(1 for k in self.cards.card_keys() if k.startswith("proposal:"))
+
     def open_cards(self, req: Request, m: re.Match[str]) -> Reply:
         self._sync_proposals(self._vault())
         return 200, {"cards": self._cards(self.cards.open())}
@@ -975,7 +985,7 @@ class Api:
     # -- daily tools ------------------------------------------------------------------------
 
     def brief(self, req: Request, m: re.Match[str]) -> Reply:
-        last = services.last_brief()
+        last = services.last_brief(self._vault())
         if last is None:
             return 200, {"date": None, "text": None}
         return 200, {"date": last.date.isoformat(), "text": last.text}
@@ -1048,6 +1058,8 @@ class Api:
             "date": path.rsplit("/", 1)[-1][:10],
             "text": v.read_text(path),
             "options": self._options(plan_flow.recent_plan(path)),
+            # The weekly job's plan leaves its 'Which option?' card open.
+            "cards": self._cards([c for c in self.cards.open() if c.kind == "plan"]),
         }
 
     def make_plan(self, req: Request, m: re.Match[str]) -> Reply:
@@ -1063,6 +1075,16 @@ class Api:
                 "cards": [],
             }
         self.chat.remember("The app made a travel plan", text)
+        card = self.plan_card(plan, path)
+        return 200, {
+            "date": now.date().isoformat(),
+            "text": text,
+            "options": self._options(plan),
+            "cards": self._cards([card]),
+        }
+
+    def plan_card(self, plan: Any, path: str) -> Card:
+        """The 'Which option?' card for a saved plan (also made by the weekly job)."""
 
         def apply(answer: str) -> Outcome:
             if answer == "hold":
@@ -1076,7 +1098,7 @@ class Api:
                 return Outcome("Saving failed — check the logs.", ok=False)
             return Outcome(f"Going with {label}. Planned:\n" + "\n".join(f"- {a}" for a in applied))
 
-        card = self.cards.add(
+        return self.cards.add(
             "plan",
             "Which option?",
             apply,
@@ -1090,12 +1112,6 @@ class Api:
             ]
             + [action("hold", "Not yet — I'll adjust in chat")],
         )
-        return 200, {
-            "date": now.date().isoformat(),
-            "text": text,
-            "options": self._options(plan),
-            "cards": self._cards([card]),
-        }
 
     def ripple(self, req: Request, m: re.Match[str]) -> Reply:
         decision = _text_field(self._json(req), "decision", limit=2000)

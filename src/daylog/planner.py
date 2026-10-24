@@ -147,7 +147,7 @@ def run(context: str, *, max_searches: int = 8, client: anthropic.Anthropic | No
 
 
 def render(plan: Plan, made_on: date) -> str:
-    """Markdown for plans/YYYY-MM-DD.md and for the Telegram message."""
+    """Markdown for plans/YYYY-MM-DD.md and for the app."""
     lines = [f"# Plan — {made_on.isoformat()}", "", plan.situation, ""]
     for i, option in enumerate(plan.options):
         star = " (recommended)" if i == plan.recommended else ""

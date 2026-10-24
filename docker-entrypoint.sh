@@ -1,5 +1,5 @@
 #!/bin/sh
-# Railway entrypoint: prepares SSH + the vault clone, then runs the bot.
+# Railway entrypoint: prepares SSH + the vault clone, then runs the app.
 #
 # The container filesystem is ephemeral unless VAULT_PATH is on a mounted
 # volume. If it's not, every restart re-clones the vault fresh — fine for
@@ -8,7 +8,7 @@
 # instead of retried. Mount a volume at VAULT_PATH in Railway to avoid that.
 #
 # On every boot, this also fast-forwards the existing clone onto the
-# remote before doing anything else. The bot itself never does this —
+# remote before doing anything else. The app itself never does this —
 # vault.py only talks to the remote reactively, fetching/rebasing when its
 # own push gets rejected — so a change made directly on the remote (e.g. a
 # manual data repair pushed from elsewhere) would otherwise sit invisible
@@ -95,4 +95,4 @@ else
     git clone "$VAULT_REPO_URL" "$VAULT_PATH"
 fi
 
-exec uv run python -m daylog.bot
+exec uv run python -m daylog.app

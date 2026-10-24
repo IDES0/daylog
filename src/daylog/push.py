@@ -1,11 +1,13 @@
 """Notifications on the user's own phone, through the installed web app.
 
-The morning brief arrives on the lock screen as a short notification; a tap
-opens the app on Home. Web Push (iOS 16.4+ for a Home Screen app): the app
+Everything the app does on its own (the morning brief, decisions waiting, the
+weekly review and plan, new places to confirm, a corrected goal total) arrives
+on the lock screen as one short notification per event; a tap
+opens the app where it is. Web Push (iOS 16.4+ for a Home Screen app): the app
 subscribes once, the subscription is kept in the vault (push.yaml), and the
 server signs each push with its VAPID key (VAPID_PRIVATE_KEY /
 VAPID_PUBLIC_KEY, see README). Pushes only ever go to the user's own devices —
-this is the same channel as the bot's Telegram messages, not contacting anyone.
+the app never contacts anyone but the user.
 """
 
 from __future__ import annotations

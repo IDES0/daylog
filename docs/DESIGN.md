@@ -24,23 +24,25 @@ The ledger is the foundation; the assistant is only as good as its grounding.
 
 - **No database.** The vault is plain markdown and YAML in a private git
   repo. `vault.py` is the only module that touches the filesystem or git.
-- **Telegram and the web app are equal clients.** The web surface: the
-  calendar feed (secret path), the status site (one address on its own
-  domain: a guest view, and the web app once one password line is
-  answered), and one inlet for the phone's daily health numbers (secret
-  path). The web app writes only behind the session and a CSRF header,
-  through the same service functions and confirm cards as Telegram. The
-  status site installs as a home-screen app.
-- **The bot never contacts anyone on its own.** It may draft a message, and
-  send it only after the user taps Confirm on the exact text and recipient.
+- **The web app is the one interface.** The web surface: the calendar feed
+  (secret path), the status site (one address on its own domain: a guest
+  view, and the web app once one password line is answered), and one inlet
+  for the phone's daily health numbers (secret path). The web app writes
+  only behind the session and a CSRF header, through the service functions
+  and confirm cards. The status site installs as a home-screen app. What the
+  app does on its own (the brief, the review, a plan, decisions and places
+  waiting) is left in the app and announced by one notification per event.
+- **The app never contacts anyone but the user.** Notifications go only to
+  the user's own devices. It may draft a message to someone else, and send
+  it only after the user taps Confirm on the exact text and recipient.
   (Sending isn't built; today it only drafts.) The research routines stay
   read-only for email.
-- **Every handler checks the Telegram user id first.** On the web, the
-  app and every `/api/*` call need the session cookie the password line
-  sets, and every write also the `X-Daylog: 1` header with a same-host
-  Origin; the health inlet has its own secret.
+- **Every `/api/*` handler checks the session first.** The app and every
+  `/api/*` call need the session cookie the password line sets, and every
+  write also the `X-Daylog: 1` header with a same-host Origin; the health
+  inlet and the calendar feed have their own secrets.
 - **Hard dates never move silently.** A hard goal or itinerary date changes
-  only after a Confirm (a Telegram button or a web card). Soft dates move freely and record every
+  only after a Confirm card. Soft dates move freely and record every
   move in `slip_history`; a goal that has slipped four times is the signal.
 - **Inferred facts are confirmed before they're written.** Research and
   chat propose; a confirm card applies. Notes on known places are written
@@ -103,23 +105,25 @@ The ledger is the foundation; the assistant is only as good as its grounding.
 
 ## Where the work runs
 
-- **The bot (Railway)**: journaling, chat, brief, reconcile, weekly review,
-  planner. Models and prices are in `llm.py`, with a monthly budget and a
-  per-run research cap. Long calls stream.
+- **The app (Railway)**: one process (`python -m daylog.app`) runs the web
+  server (journaling, chat, research, planner on request) and the scheduler
+  (brief, reconcile, weekly review + plan). Models and prices are in
+  `llm.py`, with a monthly budget and a per-run research cap. Long calls
+  stream.
 - **Cloud routines (Claude Code, on the user's plan)**: a daily research
   run before the brief and a weekly deep dive. They write under `research/`
   and may enrich existing places; they never create places or touch the
   journal. Changes to the itinerary, goals or plan they only propose, as
-  `research/proposals/*.yaml`; the bot shows each after the brief as one
-  card and the user's tap applies it. Their prompts live in the routine
+  `research/proposals/*.yaml`; the app shows each as one card (the brief's
+  notification says how many wait) and the user's tap applies it. Their prompts live in the routine
   config; `docs/research-routine-prompt.md` and
   `docs/research-weekly-prompt.md` are the copies to edit and paste.
 - **PostHog (read-only)**: the brief ends with a Site block for the last
-  24 hours, and `/site [days]` gives the deeper breakdown on demand.
+  24 hours, and `GET /api/site` gives the deeper breakdown on demand.
   Read-only personal key; no polling.
 - **Sessions in Claude Code**: one-off work (bulk imports, backfills, deep
   research, analysis of the export tables) is done here rather than through
-  the bot's paid API.
+  the app's paid API.
 
 ## Decisions
 
@@ -149,6 +153,7 @@ The ledger is the foundation; the assistant is only as good as its grounding.
 | 2026-10-17 | Speech-to-text gets a primer of the words the user says (Whisper's `initial_prompt`): `vocabulary` in profile.yaml first, then the current region's places, then the active sports, capped at ~700 characters. Before transcription, not after, because transcripts are kept verbatim — it's the only point a name can be heard right. Extraction also gets the user's list and writes those spellings in the facts. Prompted by NASCO → "Lasco", foiling → "forling", heelside → "hillside". Skate joins the disciplines (skateboarding and surfskating, under Earth and Body) |
 | 2026-10-20 | Nothing spends money on its own over a passing mention. After a note, unlinked place names are only matched against known places (free); a web lookup for a new place runs only when asked (/backfill, the assistant), at most 3 searches, once per mention (`place_lookup` stamps it), never for a description ("…next to Savaya"). Prompted by ~$4 of automatic lookups on 2026-10-18 for one 1am shisha bar, run twice at once by two notes about the same day. The brief gets room to write after thinking (32k, effort medium) after two days of briefs lost to max_tokens; the server's TZ follows where the user lives |
 | 2026-10-24 | The morning brief also arrives as a lock-screen notification through the installed web app (Web Push, iOS 16.4+): the app subscribes on a tap, the subscription lives in the vault (`push.yaml`), the server signs pushes with its VAPID keys, and only the scheduled brief notifies (a manual /brief doesn't). It's the user's own channel, like Telegram, so "never contacts anyone" holds. Web notes also keep the transcript when logging fails, with Try again |
+| 2026-10-24 | Telegram is retired; the web app is the only interface. The user wants one interface, and a Railway env-var breach on 2026-10-21 left the bot token possibly exposed: with no bot, the token is harmless (revoke it with @BotFather anyway). `python -m daylog.app` runs the web server and an APScheduler clock (local `TZ`) for the brief, reconcile and the weekly review + plan. Every message the bot used to send becomes something in the app plus one notification per event: the brief (saved to `briefs/YYYY-MM-DD.md`, so it survives a restart), "N decisions waiting", the weekly review (it says when the budget skipped the plan), the weekly plan (its option card in the card store), new places from a note, a corrected goal total, a failed job. Commands without a screen (/explore, /trip, /backfill) stay on `POST /api/research` and the assistant. The `*_flow.py` modules keep their names and only their pure functions; `bot.py`, `tg.py`, `discipline_flow.py`, `dateparse.py` and python-telegram-bot are gone |
 
 ## Not built
 
@@ -178,9 +183,8 @@ breaks its terms).
   the weekly plan on demand or fortnightly.
 - **Notes survive a deploy.** Background note jobs live in memory; persist
   the upload so a restart mid-note doesn't lose it.
-- **Telegram error handler.** Transient "Bad Gateway" errors log as
-  unhandled exceptions every night; handle and log them in one line.
-- **Rankings on the web.** The head-to-head ranking flow is Telegram-only.
+- **Rankings on the web.** The head-to-head ranking flow left with
+  Telegram; the app shows rankings but can't add one yet.
 
 ## Working rule for new features
 

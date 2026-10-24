@@ -1,9 +1,9 @@
 """Confirm cards for the web app, held in server memory.
 
 Anything that would change the vault after an inference comes back as a
-card, never applied directly — the same rule as Telegram's buttons. A card
-carries the callable that applies its answer (built on the same functions
-Telegram's callbacks call), lives for 24 hours, and is answered once: it
+card, never applied directly. A card carries the callable that applies its
+answer (built on the service functions), lives for 24 hours, and is answered
+once: it
 leaves the store before its answer runs, so a double tap can't apply twice.
 
 Single user, so one store per server; thread-safe because the HTTP server

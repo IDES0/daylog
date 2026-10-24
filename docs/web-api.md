@@ -1,14 +1,16 @@
 # daylog web app — API contract
 
-The status site grows into the app that can replace Telegram. One address
+The status site is the app, and the only interface (Telegram was retired on
+2026-10-24). One address
 (`status.johnalexborkowski.com`), two faces:
 
 - **Guest** (no session): the existing read-only guest page, unchanged in
   substance (`GET /` without a session still renders `dashboard.render`).
 - **App** (session cookie set by the password line): `GET /` serves the app
   shell (`index.html`), which loads `/app.css` and `/app.js` and talks to the
-  JSON API below. Telegram keeps working in parallel; both call the same
-  service functions, so a note logged on either lands identically.
+  JSON API below, which calls the service functions. What the scheduler
+  does on its own (brief, review, plan, decisions waiting) is left here and
+  announced by one Web Push notification per event (README, Notifications).
 
 ## Rules every endpoint follows
 
@@ -27,8 +29,8 @@ The status site grows into the app that can replace Telegram. One address
   plain blocking requests; the client shows progress and uses a 180 s
   timeout. Nothing is streamed in the prototype.
 - **Confirmations.** Anything that would change the vault after an inference
-  comes back as a **card**, never applied directly — the same rule as
-  Telegram (`docs/DESIGN.md`). A card is:
+  comes back as a **card**, never applied directly (see
+  `docs/DESIGN.md`). A card is:
 
   ```json
   {"id": "c_8f2…", "kind": "goal_slip|itinerary|correction|chat_proposal|discipline_fix|discipline_add|ripple|plan|place|want|research",
@@ -70,7 +72,7 @@ The status site grows into the app that can replace Telegram. One address
 - `GET /api/journal?from=YYYY-MM-DD&to=YYYY-MM-DD` → `{"days": [{"date", "summary", "activities", "meals", "felt", "milestones", "location", "notes": <count of ### HH:MM notes>}]}` (default: last 14 days, newest first)
 - `GET /api/journal/{date}` → one day incl. `"transcript"` (verbatim).
 - `POST /api/log` `{"text": "…", "date": "YYYY-MM-DD"|null}` → runs the same
-  pipeline as a Telegram note →
+  pipeline as a voice note →
   ```json
   {"date": "2026-10-16", "summary": "…", "notes": ["Updated current location to …", "Foiling → logged as Tow foil (the default)."],
    "cards": [ ...goal_slip / itinerary / correction / discipline_fix / discipline_add / ripple... ]}
@@ -155,7 +157,7 @@ is false when the answer couldn't be applied (the card is gone either way).
 
 | kind | title | actions |
 |---|---|---|
-| `goal_slip`, `itinerary`, `correction` | the same question Telegram asks | `confirm`, `cancel` |
+| `goal_slip`, `itinerary`, `correction` | the confirm question for that change | `confirm`, `cancel` |
 | `chat_proposal` | the proposal's summary | `confirm`, `cancel` |
 | `discipline_fix` | "Not Tow foil? Tap what it was." | one per alternative (`id` = discipline id, `label` = its name), `cancel` (keep) |
 | `discipline_add` | "New discipline: X, under Y. Add it?" | `active`, `want`, `cancel` |
@@ -167,10 +169,10 @@ is false when the answer couldn't be applied (the card is gone either way).
 
 `style` is only sent when set. Ripple cards are made from
 `research/proposals/*.yaml` whenever `GET /api/cards` or `GET /api/home`
-runs, and disappear once answered on either client. A logged note with
+runs, and disappear once answered. A logged note with
 unlinked place names, or a location change, starts a background place
-lookup, as on Telegram; its `place` cards show up later in `GET /api/cards`
-(poll it, e.g. on focus). Chat's "rank" jobs have no web card yet.
+lookup; its `place` cards show up later in `GET /api/cards`
+(poll it, e.g. on focus), with one "Places to confirm" notification. Chat's "rank" jobs have no web card yet.
 
 ### Shapes
 - `GET /api/home`: `where` is null when no location is known; `next` is at
@@ -180,14 +182,15 @@ lookup, as on Telegram; its `place` cards show up later in `GET /api/cards`
 - `GET /api/journal`: `location` is the day's `location` frontmatter or null;
   the range is capped at 366 days.
 - `GET /api/journal/{date}`: 404 when there's no entry.
-- `GET /api/brief`: the latest brief built by either client since the
-  server started (briefs aren't saved to the vault) → `{"date": null,
-  "text": null}` before the first. `POST /api/brief` adds it to the web
-  chat's context, as `/plan`, `/ripple` and `/review` do.
+- `GET /api/brief`: the latest brief, scheduled or made here; every brief
+  is saved to `briefs/YYYY-MM-DD.md`, so it survives a restart → `{"date": null,
+  "text": null}` before the first. The brief (scheduled or `POST /api/brief`) joins the web
+  chat's context, as plans, ripples and reviews do.
 - `GET /api/plan`: `{"date": null, "text": null, "options": []}` with no plan;
   `options` only for a plan made since the server started (the markdown
   can't be turned back into options). `POST /api/plan` with no workable
-  option returns the planner's `text` and empty `options`/`cards`.
+  option returns the planner's `text` and empty `options`/`cards`. `GET`
+  also returns `"cards"`: the open `plan` card (e.g. the Sunday plan's).
 - `GET /api/review`: `{"week": null, "text": null}` with none; `POST` → 404
   `nothing_to_review` for an empty week.
 - `POST /api/research {"place"}` → `{"message": dossier text, "cards": []}`;

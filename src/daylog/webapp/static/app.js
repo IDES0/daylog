@@ -1,4 +1,4 @@
-// daylog web app: the dashboard that can replace the Telegram bot.
+// daylog web app: the one interface to the journal and the assistant.
 // Plain ES module, no build step. Talks to the JSON API in docs/web-api.md.
 // Server text is only ever inserted as text nodes (see md()), never as HTML.
 
@@ -805,7 +805,7 @@ function initLog() {
   const ta = h("textarea.textarea", { id: "log-text", rows: 3, placeholder: "Surfed Uluwatu at dawn, 2 hours, shoulder-high. Nasi campur for lunch…", "aria-label": "Note text" });
   const logBtn = h("button.btn.primary", { type: "submit" }, "Log it");
   const form = h("form", { onsubmit: e => { e.preventDefault(); logText(ta, logBtn); } }, ta,
-    h("div.compose-row", h("span.faint", { style: { "font-size": "12.5px" } }, "Same pipeline as a Telegram note."), logBtn));
+    h("div.compose-row", h("span.faint", { style: { "font-size": "12.5px" } }, "Same pipeline as a voice note."), logBtn));
   ta.addEventListener("keydown", e => { if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) { e.preventDefault(); logText(ta, logBtn); } });
 
   note.body.append(picker, hint, h("div.recorder", recBtn, time, recHint, cancel), h("div.or", "or type it"), form);
@@ -1456,7 +1456,7 @@ function initYou() {
   loadChanges(changes.body);
   const notify = h("div", { style: { "margin-top": "12px" } });
   account.body.append(
-    h("p.muted", { style: { "font-size": "14px" } }, `Signed in on this device${S.tz ? ` · times in ${S.tz}` : ""}. Telegram keeps working alongside.`),
+    h("p.muted", { style: { "font-size": "14px" } }, `Signed in on this device${S.tz ? ` · times in ${S.tz}` : ""}.`),
     notify,
     h("form", { method: "post", action: "/logout", style: { "margin-top": "12px" } }, h("button.btn", { type: "submit" }, "Sign out")));
   initNotifications(notify);
@@ -1875,7 +1875,7 @@ function initRankings(body) {
   load(box, () => api("/api/rankings"), d => {
     data = d;
     const cats = d.categories || Object.keys(d.lists || {});
-    if (!cats.length) { box.append(empty("Nothing ranked yet.", "Rank places you've been (/rank in Telegram) to build tiers.")); return; }
+    if (!cats.length) { box.append(empty("Nothing ranked yet.", "Rank places you've been to build tiers.")); return; }
     current = cats[0];
     fill(chips, seg(cats.map(c => [c, words(c)]), current, v => { current = v; render(); }, "Category", true));
     render();

@@ -1,39 +1,31 @@
-"""Telegram side of research: run jobs in the background, confirm before writing.
+"""Research's vault side: link what's known, confirm before writing anything new.
 
 Matches to places already in the tree are linked straight away (and the
 spoken name added as an alias, so it matches directly next time). New
-places are proposals: each gets a confirm card, and nothing lands in the
-places tree until the user taps Add. Adding a place also links the
-journal items that mentioned it, then offers to rank it.
+places are proposals: each becomes a confirm card in the web app, and
+nothing lands in the places tree until the user taps Add. Adding a place
+also links the journal items that mentioned it.
 
-Research calls take tens of seconds, so they run in a worker thread
-(`asyncio.to_thread`) off the event loop, and every entry point checks
-the monthly budget first.
+Every paid entry point checks the monthly budget first.
 """
 
 from __future__ import annotations
 
-import asyncio
 import contextlib
 import logging
 import re
 import threading
-import uuid
 from dataclasses import dataclass
-from datetime import date, datetime, timedelta
+from datetime import date, datetime
 from typing import Any
 
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Message, Update
-from telegram.ext import ContextTypes
-
-from daylog import brief, goals, llm, rank_flow, rankings, research, trail
+from daylog import brief, goals, llm, research, trail
 from daylog.places import PlaceIndex
-from daylog.tg import allowed_user_id, chunks, is_authorized, tz, vault
-from daylog.vault import Vault, VaultError
+from daylog.runtime import tz
+from daylog.vault import Vault
 
 logger = logging.getLogger(__name__)
 
-_BATCH_KEY = "research_batches"
 SPOT_KINDS = ("surf_spot", "wind_spot", "dive_site", "hike", "viewpoint", "beach")
 # Fewer known spots than this in a region the user just arrived in triggers
 # an 'arrive' research run.
@@ -204,16 +196,6 @@ def new_batch(findings: research.Findings, days: list[date]) -> dict[str, Any]:
     }
 
 
-def _new_batch(
-    context: ContextTypes.DEFAULT_TYPE, findings: research.Findings, days: list[date]
-) -> str:
-    batch_id = uuid.uuid4().hex[:10]
-    # bot_data, not user_data: batches are created from background jobs with
-    # no user context, and this is a single-user bot anyway.
-    context.bot_data.setdefault(_BATCH_KEY, {})[batch_id] = new_batch(findings, days)
-    return batch_id
-
-
 def bulk_lines(index: PlaceIndex, findings: research.Findings) -> list[str]:
     by_ref = {str(q.get("ref")): str(q["name"]) for q in findings.new_places}
     return [
@@ -233,112 +215,6 @@ def card_text(index: PlaceIndex, batch: dict[str, Any], i: int) -> str:
     return f"📍 New place: {line}{mention}{desc}{fact_lines}"
 
 
-def _card_keyboard(batch_id: str, i: int) -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(
-        [
-            [
-                InlineKeyboardButton("Add", callback_data=f"place:add:{batch_id}:{i}"),
-                InlineKeyboardButton("Skip", callback_data=f"place:skip:{batch_id}:{i}"),
-            ]
-        ]
-    )
-
-
-async def send_cards(
-    context: ContextTypes.DEFAULT_TYPE,
-    chat_id: int,
-    findings: research.Findings,
-    days: list[date],
-    headline: str,
-    bulk: bool = False,
-) -> None:
-    """One card per proposal — or, for a big `bulk` batch, one Add-all card."""
-    v = vault()
-    index = PlaceIndex(v.read_places())
-    text = headline
-    if findings.summary:
-        text += f"\n\n{findings.summary}"
-    if not findings.new_places:
-        await context.bot.send_message(chat_id=chat_id, text=text)
-        return
-    batch_id = _new_batch(context, findings, days)
-    store = context.bot_data[_BATCH_KEY][batch_id]
-    if bulk and len(findings.new_places) > 3:
-        lines = bulk_lines(index, findings)
-        keyboard = InlineKeyboardMarkup(
-            [
-                [
-                    InlineKeyboardButton("Add all", callback_data=f"place:addall:{batch_id}:0"),
-                    InlineKeyboardButton("Review each", callback_data=f"place:review:{batch_id}:0"),
-                ],
-                [InlineKeyboardButton("Skip all", callback_data=f"place:skipall:{batch_id}:0")],
-            ]
-        )
-        for chunk in chunks(text + "\n\n" + "\n".join(lines)):
-            await context.bot.send_message(chat_id=chat_id, text=chunk, reply_markup=keyboard)
-        return
-    await context.bot.send_message(chat_id=chat_id, text=text)
-    for i in range(len(findings.new_places)):
-        await context.bot.send_message(
-            chat_id=chat_id,
-            text=card_text(index, store, i),
-            reply_markup=_card_keyboard(batch_id, i),
-        )
-
-
-async def handle_place_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    if not is_authorized(update):
-        return
-    query = update.callback_query
-    assert query is not None and query.data is not None
-    await query.answer()
-    _, action, batch_id, idx = query.data.split(":", 3)
-    store = context.bot_data.get(_BATCH_KEY, {})
-    batch = store.get(batch_id)
-    if batch is None:
-        await query.edit_message_text("These suggestions expired (the bot restarted).")
-        return
-    i = int(idx)
-    v = vault()
-
-    if action in ("skip", "skipall"):
-        what = "all" if action == "skipall" else batch["proposals"][i]["name"]
-        await query.edit_message_text(f"Skipped {what}.")
-        return
-    if action == "review":
-        await query.edit_message_text("Reviewing one by one:")
-        index = PlaceIndex(v.read_places())
-        for j in range(len(batch["proposals"])):
-            await context.bot.send_message(
-                chat_id=allowed_user_id(),
-                text=card_text(index, batch, j),
-                reply_markup=_card_keyboard(batch_id, j),
-            )
-        return
-
-    indexes = list(range(len(batch["proposals"]))) if action == "addall" else [i]
-    try:
-        new_ids = add_proposals(v, batch, indexes)
-    except VaultError:
-        logger.exception("adding places failed")
-        await query.edit_message_text("Saving failed — check bot logs. Nothing was added.")
-        return
-    index = PlaceIndex(v.read_places())
-    names = ", ".join(index.path_name(pid) for pid in new_ids) or "already added"
-    await query.edit_message_text(f"Added: {names}")
-
-    # Offer to rank anything rankable the user has actually been to.
-    if query.message is not None and isinstance(query.message, Message):
-        current = v.read_yaml(rank_flow.RANKINGS_FILE, {})
-        journal = v.read_journal_range(date(2000, 1, 1), datetime.now(tz()).date())
-        visited = trail.visits({d: e.frontmatter for d, e in journal.items()})
-        candidates = [(pid, index.by_id[pid].get("kind")) for pid in new_ids if pid in visited]
-        for pid, category in rankings.unranked(current, candidates)[:2]:
-            await rank_flow.ask_to_rank(
-                query.message, context, pid, category, str(index.by_id[pid].get("name"))
-            )
-
-
 # -- jobs ---------------------------------------------------------------------------
 
 
@@ -347,19 +223,6 @@ def _where(v: Vault, index: PlaceIndex) -> tuple[Any | None, str]:
     node = index.current_place(current)
     label = index.path_name(node["id"]) if node else (current or {}).get("place", "unknown")
     return node, str(label)
-
-
-async def resolve_days(
-    context: ContextTypes.DEFAULT_TYPE, chat_id: int, days: list[date], quiet: bool = True
-) -> None:
-    """Resolve every unlinked place mention in `days`. Quiet: no message if nothing to do."""
-    v = vault()
-    headline, findings = await asyncio.to_thread(lookup_mentions, v, days, quiet)
-    if findings is None:
-        if headline:
-            await context.bot.send_message(chat_id=chat_id, text=headline)
-        return
-    await send_cards(context, chat_id, findings, days, headline or "")
 
 
 def lookup_mentions(
@@ -425,26 +288,6 @@ def lookup_mentions(
     return headline, findings
 
 
-async def arrive(context: ContextTypes.DEFAULT_TYPE, chat_id: int, force: bool = False) -> None:
-    """Research the region the user is in, if it's thinly known (or `force`)."""
-    v = vault()
-    job = plan_arrive(v, force)
-    if job is None:
-        return
-    await context.bot.send_message(
-        chat_id=chat_id, text=f"Researching what's around {job.where}..."
-    )
-    findings = await asyncio.to_thread(run_job, v, job)
-    await send_cards(
-        context,
-        chat_id,
-        findings,
-        [],
-        f"Around {job.where}: {len(findings.new_places)} places found.",
-        bulk=True,
-    )
-
-
 @dataclass
 class Job:
     """A research run worked out but not started: what it's about and its prompt."""
@@ -484,22 +327,6 @@ def run_job(v: Vault, job: Job) -> research.Findings:
     findings = research.run(job.job, job.index, job.focus, max_searches=job.max_searches)
     llm.flush(v)
     return findings
-
-
-async def trip_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """/trip — reconstruct the stops of the most recent multi-day trip."""
-    if not is_authorized(update):
-        return
-    message = update.message
-    assert message is not None
-    v = vault()
-    job = plan_trip(v, datetime.now(tz()).date())
-    if isinstance(job, str):
-        await message.reply_text(job)
-        return
-    await message.reply_text(job.started)
-    headline, findings = await asyncio.to_thread(run_trip, v, job)
-    await send_cards(context, message.chat_id, findings, job.days, headline)
 
 
 @dataclass
@@ -547,29 +374,6 @@ def run_trip(v: Vault, job: TripJob) -> tuple[str, research.Findings]:
     return headline, findings
 
 
-async def backfill_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """/backfill [days] — resolve unlinked place names across recent entries (default 30)."""
-    if not is_authorized(update):
-        return
-    message = update.message
-    assert message is not None
-    args = context.args or []
-    n = int(args[0]) if args and args[0].isdigit() else 30
-    today = datetime.now(tz()).date()
-    days = [today - timedelta(days=i) for i in range(n)]
-    await message.reply_text(f"Checking the last {n} days for unlinked places...")
-    await resolve_days(context, message.chat_id, days, quiet=False)
-
-
-async def explore_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """/explore — research the spots around where you are now."""
-    if not is_authorized(update):
-        return
-    message = update.message
-    assert message is not None
-    await arrive(context, message.chat_id, force=True)
-
-
 def dossier_context(v: Vault, index: PlaceIndex) -> str:
     _, where = _where(v, index)
     goal_lines = [f"- {g['title']} ({g['type']})" for g in goals.active_summary(v.read_goals())]
@@ -598,11 +402,6 @@ def dossier_now(v: Vault, place_id: str | None, place_name: str) -> tuple[str, s
     return path, text
 
 
-async def write_dossier(v: Vault, place_id: str | None, place_name: str) -> tuple[str, str]:
-    """Research and save a dossier off the event loop. Returns (vault path, markdown)."""
-    return await asyncio.to_thread(dossier_now, v, place_id, place_name)
-
-
 def place_target(v: Vault, query: str) -> tuple[str | None, str]:
     """(place id or None, the name to research) for what the user typed."""
     index = PlaceIndex(v.read_places())
@@ -613,39 +412,3 @@ def place_target(v: Vault, query: str) -> tuple[str | None, str]:
 
 def research_slug(name: str) -> str:
     return re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-") or "place"
-
-
-async def research_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """/research <place> — write a research file on a place now (uses the API budget)."""
-    if not is_authorized(update):
-        return
-    message = update.message
-    assert message is not None
-    query = " ".join(context.args or []).strip()
-    if not query:
-        await message.reply_text("Usage: /research <place>, e.g. /research Mentawai")
-        return
-    v = vault()
-    if not llm.can_spend(v, RUN_ESTIMATE_USD):
-        await message.reply_text(
-            "Monthly research budget reached — the morning routine still runs."
-        )
-        return
-    place_id, name = place_target(v, query)
-    await message.reply_text(f"Researching {name} — this takes a minute or two...")
-    try:
-        path, text = await write_dossier(v, place_id, name)
-    except Exception:
-        logger.exception("dossier failed for %s", name)
-        await message.reply_text("Research failed — check bot logs.")
-        return
-    for chunk in chunks(f"{text}\n\n(saved to {path})"):
-        await message.reply_text(chunk)
-
-
-async def usage_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    if not is_authorized(update):
-        return
-    message = update.message
-    assert message is not None
-    await message.reply_text(llm.format_usage(vault()))

@@ -12,7 +12,7 @@ from typing import Any
 import pytest
 
 from daylog import calendar_server, chat, daily, extract, journal_service, web
-from daylog.tg import tz
+from daylog.runtime import tz
 from daylog.vault import Vault
 from daylog.webapp import api as webapi
 from daylog.webapp.cards import CardStore, Outcome, UnknownAction

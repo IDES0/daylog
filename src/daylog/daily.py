@@ -1,24 +1,19 @@
-"""Scheduled and on-demand day-level jobs: end-of-day reconcile, the day cutoff.
+"""Day-level work: end-of-day reconcile, the day cutoff, the weekly review.
 
 The logical day ends at DAY_CUTOFF_HOUR (default 4am), not midnight — a
 voice note at 1am about the night out belongs to the day that's ending.
-The reconcile job runs at the cutoff for the day that just ended, and
-also catches up on any recent multi-note day it missed (the bot was down,
-or a late note arrived after a reconcile).
+The scheduler (scheduler.py) reconciles at the cutoff the day that just
+ended, and also catches up on any recent multi-note day it missed (the
+app was down, or a late note arrived after a reconcile).
 """
 
 from __future__ import annotations
 
-import asyncio
 import logging
 import os
 from datetime import date, datetime, timedelta
 
-from telegram import Update
-from telegram.ext import ContextTypes
-
 from daylog import brief, disciplines, goals, itinerary, llm, reconcile, review
-from daylog.tg import allowed_user_id, chunks, is_authorized, tz, vault
 from daylog.vault import Vault, VaultError
 
 logger = logging.getLogger(__name__)
@@ -70,10 +65,9 @@ def run_reconcile(v: Vault, day: date, force: bool = False) -> str:
     return f"{day.isoformat()} reconciled ({reconcile.note_count(entry)} notes).{adjusted}"
 
 
-async def reconcile_job(context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Runs at the day cutoff: the day that just ended, plus any recent misses."""
-    v = vault()
-    today = logical_day(datetime.now(tz()))
+def reconcile_recent(v: Vault, today: date) -> list[str]:
+    """Reconcile the days before `today` (up to CATCH_UP_DAYS back) that need it.
+    Returns one outcome line per day reconciled; a failed day is logged and skipped."""
     outcomes = []
     for offset in range(1, CATCH_UP_DAYS + 1):
         day = today - timedelta(days=offset)
@@ -85,34 +79,7 @@ async def reconcile_job(context: ContextTypes.DEFAULT_TYPE) -> None:
         except Exception:
             logger.exception("reconcile failed for %s", day)
     llm.flush(v)
-    # Quiet unless something changed that the user would want to know about.
-    notable = [o for o in outcomes if "corrected" in o]
-    if notable:
-        await context.bot.send_message(chat_id=allowed_user_id(), text="\n".join(notable))
-
-
-async def reconcile_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """/reconcile [YYYY-MM-DD] — rebuild a day from all its notes now."""
-    if not is_authorized(update):
-        return
-    message = update.message
-    assert message is not None
-    args = context.args or []
-    day = logical_day(datetime.now(tz()))
-    if args:
-        try:
-            day = date.fromisoformat(args[0])
-        except ValueError:
-            await message.reply_text("Usage: /reconcile or /reconcile 2026-09-25")
-            return
-    await message.reply_text(f"Reconciling {day.isoformat()}...")
-    try:
-        outcome = run_reconcile(vault(), day, force=True)
-    except Exception:
-        logger.exception("manual reconcile failed for %s", day)
-        await message.reply_text("Reconcile failed — check bot logs. Nothing was changed.")
-        return
-    await message.reply_text(outcome)
+    return outcomes
 
 
 # -- weekly review ----------------------------------------------------------
@@ -124,33 +91,6 @@ def review_hour() -> int:
 
 def weekly_plan_enabled() -> bool:
     return os.environ.get("WEEKLY_PLAN", "1") not in ("0", "false", "no")
-
-
-async def send_weekly_review(
-    context: ContextTypes.DEFAULT_TYPE, chat_id: int, any_day: date
-) -> None:
-    from daylog import chat_flow, plan_flow
-
-    v = vault()
-    try:
-        written = await asyncio.to_thread(write_review, v, any_day)
-    except Exception:
-        logger.exception("weekly review failed")
-        await context.bot.send_message(
-            chat_id=chat_id, text="Weekly review failed — check bot logs."
-        )
-        return
-    if written is None:
-        await context.bot.send_message(
-            chat_id=chat_id, text="No journal entries this week to review."
-        )
-        return
-    label, start, end, text = written
-    for chunk in chunks(f"Week {label} ({start.isoformat()} → {end.isoformat()})\n\n{text}"):
-        await context.bot.send_message(chat_id=chat_id, text=chunk)
-    chat_flow.remember(context, "The bot sent the weekly review", text)
-    if weekly_plan_enabled() and llm.can_spend(v, plan_flow.PLAN_ESTIMATE_USD):
-        await plan_flow.make_plan(context, chat_id)
 
 
 def write_review(v: Vault, any_day: date) -> tuple[str, date, date, str] | None:
@@ -192,17 +132,3 @@ def write_review(v: Vault, any_day: date) -> tuple[str, date, date, str] | None:
     except VaultError:
         logger.exception("saving review failed")
     return label, start, end, text
-
-
-async def weekly_review_job(context: ContextTypes.DEFAULT_TYPE) -> None:
-    await send_weekly_review(context, allowed_user_id(), logical_day(datetime.now(tz())))
-
-
-async def review_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """/review — this week's review now (Monday-Sunday so far)."""
-    if not is_authorized(update):
-        return
-    message = update.message
-    assert message is not None
-    await message.reply_text("Writing this week's review...")
-    await send_weekly_review(context, message.chat_id, logical_day(datetime.now(tz())))

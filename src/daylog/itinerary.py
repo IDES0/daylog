@@ -202,7 +202,7 @@ def apply_itinerary_changes(
 
 
 def apply_confirmed_change(itinerary: list[Any], change: PendingChange, on: date) -> None:
-    """Apply a hard itinerary change after the user confirms it in Telegram."""
+    """Apply a hard itinerary change after the user confirms it."""
     entry = find_entry(itinerary, change.id)
     if entry is None:
         entry = {"id": change.id, "place": change.place, "type": "hard"}
