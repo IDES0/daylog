@@ -410,7 +410,7 @@ speedwing:
 |---|---|
 | Home | Today, the morning brief (and "make one now"), surf and fly conditions (rated, no LLM cost), the last 7 days, the week, goals, what's next, milestones, and the cards waiting on you |
 | Log | Record or type a note for today (before `DAY_CUTOFF_HOUR`, yesterday) or a picked day; recent days, each with a reconcile button |
-| Assistant | The chat (vault tools + web search); changes it proposes come back as confirm cards, research it offers runs only on a tap |
+| Assistant | The chat (vault tools + web search); changes it proposes come back as confirm cards, research it offers runs only on a tap. `/help` lists the slash shortcuts (`/reconcile`, `/research`, `/explore`, `/trip`, `/backfill`, `/new`), which run without a model call |
 | Trips | The map of next legs, the plan (2-3 dated route options to pick from), "What changed?" (trace a decision through itinerary, goals and plan now, instead of waiting for the morning research run), places, the wishlist (with "research now"), where you've been |
 | You | Disciplines, the weekly review (and "write it now"), goals, reports (API spend, site analytics), rankings, milestones, recent changes (undo one), the session and notifications |
 

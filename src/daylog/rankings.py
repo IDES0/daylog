@@ -26,7 +26,6 @@ CATEGORIES: dict[str, tuple[str, ...]] = {
     "food": ("food",),
     "surf": ("surf_spot",),
     "dive": ("dive_site",),
-    "stay": ("stay",),
     "outdoors": ("hike", "viewpoint", "beach"),
     "nightlife": ("venue",),
     "flying": ("fly_site",),
