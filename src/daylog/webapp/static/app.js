@@ -1636,29 +1636,205 @@ function initDisciplines(c) {
   reload();
 }
 
+// Three looks, picked under the graph and remembered on this device:
+// constellation (element hubs around Me, branch width = sessions, cross-links
+// only on a tap), classic (the first radial tree) and petals (a sunburst, each
+// slice as wide as its sessions).
+const DISC_STYLES = [
+  ["constellation", "Constellation", "Dot size and branch width are all-time sessions.", () => drawConstellation],
+  ["classic", "Classic", "Size is all-time sessions.", () => drawDisc],
+  ["petals", "Petals", "Slice width is all-time sessions.", () => drawPetals],
+];
+const DISC_STYLE_KEY = "daylog.discStyle";
+
 function drawDiscCard(content, GD) {
   if (!window.d3) { content.append(errorBox({ message: "The graph library didn't load. Switch to List." })); return; }
+  let style = "constellation";
+  try { style = localStorage.getItem(DISC_STYLE_KEY) || style; } catch { /* private mode */ }
+  const pick = DISC_STYLES.find(x => x[0] === style) || DISC_STYLES[0];
   const box = h("div.viz.disc");
-  content.append(box, h("p.cal-key", "Size is all-time sessions. Tap a sport for its numbers, a root to zoom in."));
-  drawDisc(box, GD);
+  const styles = h("span.disc-styles", "Style ", ...DISC_STYLES.map(([id, label]) => h("button", {
+    type: "button", "aria-pressed": String(id === pick[0]),
+    onclick: () => { try { localStorage.setItem(DISC_STYLE_KEY, id); } catch { /* private mode */ } fill(content); drawDiscCard(content, GD); },
+  }, label)));
+  content.append(box, h("p.cal-key", `${pick[2]} Tap a sport for its numbers, an element to zoom in. `, styles));
+  pick[3]()(box, GD);
 }
 
-function drawDisc(box, GD) {
-  const d3 = window.d3;
-  const S0 = 1000, R = 320, R0 = 90;
+// The parts both looks share: the svg with zoom and its buttons, and the tooltip.
+function discFrame(box, label) {
+  const d3 = window.d3, S0 = 1000;
   const svg = d3.create("svg").attr("viewBox", `${-S0 / 2} ${-S0 / 2} ${S0} ${S0}`).attr("role", "img")
-    .attr("aria-label", "The discipline graph: sports under their roots, sized by sessions")
-    .style("height", "min(92vw, 680px)");
+    .attr("aria-label", label).style("height", "min(92vw, 680px)");
   const g = svg.append("g");
   const tip = h("div.tip");
-  const btn = (name, label, fn) => h("button", { type: "button", "aria-label": label, onclick: fn }, icon(name));
+  const zoom = d3.zoom().scaleExtent([1, 8]).on("zoom", e => g.attr("transform", e.transform));
+  const btn = (name, text, fn) => h("button", { type: "button", "aria-label": text, onclick: fn }, icon(name));
   fill(box, svg.node(), tip, h("div.viz-tools",
     btn("plus", "Zoom in", () => svg.transition().call(zoom.scaleBy, 1.6)),
     btn("minus", "Zoom out", () => svg.transition().call(zoom.scaleBy, 1 / 1.6)),
     btn("fit", "Fit", () => svg.transition().call(zoom.transform, d3.zoomIdentity))));
   box.querySelectorAll(".viz-tools svg").forEach(s => { s.style.cssText = "width:18px;height:18px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round"; });
+  svg.call(zoom);
+  // Labels read at ~11px whatever the card's width.
+  const shown = Math.min(box.clientWidth || 600, Math.min(window.innerWidth * 0.92, 680));
+  const fs = Math.max(13, Math.min(22, 11 * S0 / shown));
+  const zoomTo = (pts, padd = 130) => {
+    const [x0, x1] = d3.extent(pts, p => p[0]), [y0, y1] = d3.extent(pts, p => p[1]);
+    const k = Math.min(8, S0 / Math.max(x1 - x0 + 2 * padd, y1 - y0 + 2 * padd));
+    svg.transition().duration(400).call(zoom.transform, d3.zoomIdentity.scale(k).translate(-(x0 + x1) / 2, -(y0 + y1) / 2));
+  };
+  return { svg, g, tip, fs, zoomTo };
+}
 
+function discTip(box, tip, GD, byId) {
+  const show = (evt, d) => {
+    const n = d.data, r = box.getBoundingClientRect();
+    const kids = [h("div", n.name)];
+    const path = d.ancestors().slice(1, -1).reverse().map(a => a.data.name);
+    if (path.length) kids.push(h("small", path.join(" › ") + ((n.also || []).length ? " · also " + n.also.map(p => byId.get(p)?.name || p).join(", ") : "")));
+    if (n.state) kids.push(h("small", STATES[n.state] || n.state));
+    kids.push(h("small", `${n.recent} in ${GD.days} days${n.recent_hours ? ` · ${n.recent_hours}h` : ""} · ${n.total} all-time${n.last ? ` · last ${short(n.last)}` : ""}`));
+    (n.goals || []).forEach(t => kids.push(h("small", "Goal: " + t)));
+    if ((n.needs || []).length) kids.push(h("small", "Needs: " + n.needs.join(", ")));
+    fill(tip, ...kids);
+    tip.style.left = `${Math.min(Math.max(evt.clientX - r.left, 110), r.width - 110)}px`;
+    tip.style.top = `${Math.max(evt.clientY - r.top, 90)}px`;
+    tip.style.opacity = 1;
+  };
+  const hide = () => { tip.style.opacity = 0; };
+  return { show, hide };
+}
+
+// Me at the centre, the elements as solid hubs on a ring around it, sports on
+// the rim. Dots and branches grow with sessions; a sport's other parents are
+// drawn only while it's tapped or hovered, so the picture stays calm.
+function drawConstellation(box, GD) {
+  const d3 = window.d3;
+  const R = 300, R1 = 110;
+  const { svg, g, tip, fs, zoomTo } = discFrame(box, "The discipline graph: your sports under Earth, Water, Body and Air, all from you");
   const byId = new Map(GD.nodes.map(n => [n.id, n]));
+  const { show, hide } = discTip(box, tip, GD, byId);
+  const rows = [{ id: "_", parent: null }, ...GD.nodes.map(n => ({ ...n, parent: n.parent && byId.has(n.parent) ? n.parent : "_" }))];
+  let tree;
+  try { tree = d3.stratify().id(d => d.id).parentId(d => d.parent)(rows); }
+  catch { fill(box, errorBox({ message: "The graph has a loop or a missing parent; use the List view." })); return; }
+  d3.cluster().size([2 * Math.PI, R]).separation((a, b) => (a.parent === b.parent ? 1 : 1.7))(tree);
+  const ring = (R - R1) / Math.max(1, tree.height - 1);
+  tree.each(d => { d.y = d.depth === 0 ? 0 : d.height === 0 ? R : R1 + (d.depth - 1) * ring; });
+  const at = new Map(); tree.each(d => at.set(d.id, d));
+  const xy = d => [Math.sin(d.x) * d.y, -Math.cos(d.x) * d.y];
+  const colour = id => `var(--root-${(GD.slots || {})[id] || 1})`;
+  const filled = n => n.state === "active" || n.state == null;
+  const dashed = n => n.state === "ready" || n.state === "locked";
+  const sessions = d => (d.data && d.data.total) || 0;
+  const radius = d => d.depth === 1 ? 34 : d.height > 0 ? 12 : sessions(d) ? Math.min(22, 7 + Math.sqrt(sessions(d)) * 2.3) : 6.5;
+
+  g.append("g").selectAll("path").data(tree.links()).join("path")
+    .attr("class", "dlink").attr("stroke-linecap", "round")
+    .attr("stroke", l => colour(l.source.id === "_" ? l.target.id : l.target.data.root))
+    .attr("stroke-width", l => 1.5 + Math.sqrt(sessions(l.target)) * 1.3)
+    .attr("opacity", l => sessions(l.target) ? 0.55 : 0.22)
+    .attr("d", d3.linkRadial().angle(d => d.x).radius(d => d.y));
+  const also = g.append("g");
+  const focus = (e, d) => {
+    show(e, d);
+    also.selectAll("path").data((d.data.also || []).filter(p => at.has(p))).join("path").attr("class", "dalso")
+      .attr("stroke-width", 2).attr("opacity", 0.9).attr("stroke", p => colour(byId.get(p).root))
+      .attr("d", p => { const [x1, y1] = xy(d), [x2, y2] = xy(at.get(p)); return `M${x1},${y1}Q${(x1 + x2) * 0.25},${(y1 + y2) * 0.25} ${x2},${y2}`; });
+  };
+  const blur = () => { hide(); also.selectAll("path").remove(); };
+
+  const sports = tree.descendants().filter(d => d.depth > 1);
+  g.append("g").selectAll("circle").data(sports).join("circle").attr("class", "dnode")
+    .attr("cx", d => xy(d)[0]).attr("cy", d => xy(d)[1]).attr("r", radius)
+    .attr("fill", d => filled(d.data) ? colour(d.data.root) : "var(--bg)")
+    .attr("stroke", d => filled(d.data) ? "var(--bg)" : d.data.state === "locked" ? "var(--faint)" : colour(d.data.root))
+    .attr("stroke-width", d => filled(d.data) ? 2 : 2.4)
+    .attr("stroke-dasharray", d => dashed(d.data) ? "4 3" : null);
+  // Bigger invisible hit targets than the dots.
+  g.append("g").selectAll("circle").data(sports).join("circle")
+    .attr("cx", d => xy(d)[0]).attr("cy", d => xy(d)[1]).attr("r", d => radius(d) + 8)
+    .attr("fill", "transparent").style("cursor", "pointer")
+    .on("pointerenter", focus).on("pointerleave", blur)
+    .on("click", (e, d) => { e.stopPropagation(); focus(e, d); });
+
+  const hubs = g.append("g").selectAll("g").data(tree.children || []).join("g")
+    .attr("class", "dnode").attr("transform", d => `translate(${xy(d)})`)
+    .on("pointerenter", show).on("pointerleave", hide)
+    .on("click", (e, d) => { e.stopPropagation(); show(e, d); zoomTo(d.descendants().map(xy)); });
+  hubs.append("circle").attr("r", 46).attr("fill", d => colour(d.id)).attr("opacity", 0.14);
+  hubs.append("circle").attr("r", 34).attr("fill", d => colour(d.id)).attr("stroke", "var(--bg)").attr("stroke-width", 3);
+  hubs.append("text").attr("class", "dhub").attr("font-size", Math.min(24, fs * 1.25)).attr("dy", "0.35em").text(d => d.data.name);
+  g.append("circle").attr("r", 30).attr("fill", "var(--text)");
+  g.append("text").attr("class", "dme").attr("font-size", Math.min(24, fs * 1.25)).attr("dy", "0.35em").text("Me");
+
+  g.append("g").selectAll("text").data(sports).join("text")
+    .attr("class", d => "dlabel" + (d.data.state === "locked" ? " locked" : ""))
+    .attr("font-size", fs).attr("stroke-width", fs * 0.28).attr("dy", "0.32em")
+    .attr("transform", d => {
+      if (d.height > 0) { const [x, y] = xy(d); return `translate(${x},${y - radius(d) - fs * 0.75})`; }
+      const flip = d.x >= Math.PI;
+      return `rotate(${d.x * 180 / Math.PI - 90}) translate(${d.y},0)` + (flip ? " rotate(180)" : "");
+    })
+    .attr("x", d => d.height > 0 ? 0 : (d.x < Math.PI ? 1 : -1) * (radius(d) + 6))
+    .attr("text-anchor", d => d.height > 0 ? "middle" : d.x < Math.PI ? "start" : "end")
+    // Long names are cut so the rim stays inside the card; the tooltip has them whole.
+    .text(d => d.data.name.length > 18 ? d.data.name.slice(0, 17) + "…" : d.data.name);
+  svg.on("click", blur);
+}
+
+// Me in the middle, the elements as the first ring, sports outside them; no
+// lines. A slice's width is its all-time sessions, with a sliver for ones not
+// done yet so they stay on the wheel.
+function drawPetals(box, GD) {
+  const d3 = window.d3;
+  const R = 470, R0 = 88;
+  const { svg, g, tip, fs, zoomTo } = discFrame(box, "The discipline graph as a wheel: your sports around you, sized by sessions");
+  const byId = new Map(GD.nodes.map(n => [n.id, n]));
+  const { show, hide } = discTip(box, tip, GD, byId);
+  const parents = new Set(GD.nodes.map(n => n.parent).filter(Boolean));
+  const rows = [{ id: "_", parent: null }, ...GD.nodes.map(n => ({ ...n, parent: n.parent && byId.has(n.parent) ? n.parent : "_" }))];
+  let root;
+  try { root = d3.stratify().id(d => d.id).parentId(d => d.parent)(rows); }
+  catch { fill(box, errorBox({ message: "The graph has a loop or a missing parent; use the List view." })); return; }
+  root.sum(d => d.id === "_" || parents.has(d.id) ? 0 : 0.6 + (d.total || 0)).sort((a, b) => b.value - a.value);
+  d3.partition().size([2 * Math.PI, R - R0])(root);
+  const band = (R - R0) / (root.height + 1);
+  const inner = d => R0 + d.y0 - band + 6, outer = d => R0 + d.y1 - band + 4;
+  const arc = d3.arc().startAngle(d => d.x0).endAngle(d => d.x1).padAngle(0.004).padRadius(R).innerRadius(inner).outerRadius(outer);
+  const colour = id => `var(--root-${(GD.slots || {})[id] || 1})`;
+  const shade = n => n.state == null ? 0.85 : n.state === "active" ? 1 : n.state === "locked" ? 0.16 : n.state === "ready" ? 0.45 : 0.3;
+  const parts = root.descendants().filter(d => d.depth > 0);
+  const centre = d => { const a = (d.x0 + d.x1) / 2, r = (inner(d) + outer(d)) / 2; return [Math.sin(a) * r, -Math.cos(a) * r]; };
+  g.append("g").selectAll("path").data(parts).join("path").attr("class", "dnode").attr("d", arc)
+    .attr("fill", d => colour(d.data.root || d.id)).attr("fill-opacity", d => d.depth === 1 ? 1 : shade(d.data))
+    .attr("stroke", "var(--bg)").attr("stroke-width", 1.5)
+    .on("pointerenter", show).on("pointerleave", hide)
+    .on("click", (e, d) => { e.stopPropagation(); show(e, d); if (d.depth === 1) zoomTo(d.descendants().map(centre), 60); });
+  g.append("circle").attr("r", R0 - 12).attr("fill", "var(--text)");
+  g.append("text").attr("class", "dme").attr("font-size", Math.min(30, fs * 1.5)).attr("dy", "0.35em").text("Me");
+  // Only names that fit their slice; the rest are a tap away.
+  const fits = d => (d.x1 - d.x0) * (inner(d) + outer(d)) / 2 > fs * 1.1;
+  g.append("g").selectAll("text").data(parts.filter(fits)).join("text")
+    .attr("class", d => d.depth === 1 ? "dhub" : "dlabel").attr("font-size", d => d.depth === 1 ? Math.min(26, fs * 1.3) : fs * 0.8)
+    .attr("stroke-width", d => d.depth === 1 ? 0 : fs * 0.22).attr("text-anchor", "middle").attr("dy", "0.35em")
+    .attr("transform", d => {
+      const a = (d.x0 + d.x1) / 2 * 180 / Math.PI, r = (inner(d) + outer(d)) / 2;
+      if (d.depth === 1) return `rotate(${a - 90}) translate(${r},0) rotate(${a < 180 ? 90 : -90})`;
+      return `rotate(${a - 90}) translate(${r},0) rotate(${a > 180 ? 180 : 0})`;
+    })
+    .text(d => d.data.name.length > 15 ? d.data.name.slice(0, 14) + "…" : d.data.name);
+  svg.on("click", hide);
+}
+
+// The first look: one radial tree, every link and cross-link drawn.
+function drawDisc(box, GD) {
+  const d3 = window.d3;
+  const R = 320, R0 = 90;
+  const { svg, g, tip, fs, zoomTo: zoomRoot } = discFrame(box, "The discipline graph: sports under their roots, sized by sessions");
+  const byId = new Map(GD.nodes.map(n => [n.id, n]));
+  const { show, hide } = discTip(box, tip, GD, byId);
   const rows = [{ id: "_", parent: null }, ...GD.nodes.map(n => ({ ...n, parent: n.parent && byId.has(n.parent) ? n.parent : "_" }))];
   let tree;
   try { tree = d3.stratify().id(d => d.id).parentId(d => d.parent)(rows); }
@@ -1672,10 +1848,6 @@ function drawDisc(box, GD) {
   const radius = n => n.parent === null ? 11 : n.total ? Math.min(14, 4 + Math.sqrt(n.total) * 1.6) : 4.5;
   const filled = n => n.state === "active" || n.state == null;
   const dashed = n => n.state === "ready" || n.state === "locked";
-
-  // Labels read at ~11px whatever the card's width.
-  const shown = Math.min(box.clientWidth || 600, Math.min(window.innerWidth * 0.92, 680));
-  const fs = Math.max(13, Math.min(22, 11 * S0 / shown));
 
   g.append("g").selectAll("path").data(tree.links()).join("path")
     .attr("class", l => "dlink" + (l.source.id === "_" ? " hub" : ""))
@@ -1722,31 +1894,8 @@ function drawDisc(box, GD) {
     .attr("text-anchor", d => d.height > 0 ? "middle" : d.x < Math.PI ? "start" : "end")
     .text(d => d.data.name);
 
-  function show(evt, d) {
-    const n = d.data, r = box.getBoundingClientRect();
-    const kids = [h("div", n.name)];
-    const path = d.ancestors().slice(1, -1).reverse().map(a => a.data.name);
-    if (path.length) kids.push(h("small", path.join(" › ") + ((n.also || []).length ? " · also " + n.also.map(p => byId.get(p)?.name || p).join(", ") : "")));
-    if (n.state) kids.push(h("small", STATES[n.state] || n.state));
-    kids.push(h("small", `${n.recent} in ${GD.days} days${n.recent_hours ? ` · ${n.recent_hours}h` : ""} · ${n.total} all-time${n.last ? ` · last ${short(n.last)}` : ""}`));
-    (n.goals || []).forEach(t => kids.push(h("small", "Goal: " + t)));
-    if ((n.needs || []).length) kids.push(h("small", "Needs: " + n.needs.join(", ")));
-    fill(tip, ...kids);
-    tip.style.left = `${Math.min(Math.max(evt.clientX - r.left, 110), r.width - 110)}px`;
-    tip.style.top = `${Math.max(evt.clientY - r.top, 90)}px`;
-    tip.style.opacity = 1;
-  }
-  function hide() { tip.style.opacity = 0; }
   svg.on("click", hide);
-
-  const zoom = d3.zoom().scaleExtent([1, 8]).on("zoom", e => g.attr("transform", e.transform));
-  svg.call(zoom);
-  function zoomTo(d) {
-    const pts = d.descendants().map(xy);
-    const [x0, x1] = d3.extent(pts, p => p[0]), [y0, y1] = d3.extent(pts, p => p[1]);
-    const padd = 130, k = Math.min(8, S0 / Math.max(x1 - x0 + 2 * padd, y1 - y0 + 2 * padd));
-    svg.transition().duration(400).call(zoom.transform, d3.zoomIdentity.scale(k).translate(-(x0 + x1) / 2, -(y0 + y1) / 2));
-  }
+  function zoomTo(d) { zoomRoot(d.descendants().map(xy)); }
 }
 
 function discList(GD) {
