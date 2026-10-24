@@ -1863,6 +1863,50 @@ function repCountry(code) {
 
 const repHead = (text, aside) => h("div.rep-h", h("h3", text), aside || null);
 
+// "2026-10-24T09:00" (already local) → "9 am"
+function repHour(key) {
+  const hr = Number(String(key).slice(11, 13));
+  return `${hr % 12 || 12} ${hr < 12 ? "am" : "pm"}`;
+}
+const repTime = s => { const t = new Date(String(s).replace(" ", "T")); return Number.isNaN(+t) ? null : t; };
+const repDur = s => s < 60 ? `${s} s` : s < 3600 ? `${Math.round(s / 60)} min` : `${Math.floor(s / 3600)} h ${Math.round((s % 3600) / 60)} min`;
+
+// One visit: a tappable row (where, when, how they came, what they tried)
+// that opens to the pages in order and the rest.
+function repVisit(v, sameDay) {
+  const t = repTime(v.start);
+  const at = !t ? "" : t.toLocaleString("en-US", sameDay
+    ? { hour: "numeric", minute: "2-digit" }
+    : { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
+  const where = [v.city, repCountry(v.country)].filter(x => x && x !== "Unknown").join(", ") || "Somewhere";
+  const did = ["resume", "chess", "spacetime"].filter(k => v[k]);
+  const play = [
+    v.chess ? `Chess: ${v.games || v.moves ? `${plural(v.games, "game")}, ${plural(v.moves, "move")}` : "opened"}` : null,
+    v.spacetime ? `Spacetime: ${v.sources || v.exports ? `${plural(v.sources, "source")}, ${plural(v.exports, "export")}` : "opened"}` : null,
+    v.resume ? `Resume: ${v.resume > 1 ? `${v.resume} downloads` : "downloaded"}` : null,
+  ].filter(Boolean);
+  const facts = [
+    v.region,
+    [v.browser, v.os].filter(Boolean).join(" on "),
+    v.seconds ? repDur(v.seconds) : null,
+    v.visits > 1 ? `${v.visits} visits` : null,
+    v.ref && v.source !== "(direct)" ? `via ${v.source}` : null,
+  ].filter(Boolean);
+  return h("details.fold.rep-v",
+    h("summary", icon("chev", "chev"), h("div.rep-v-main",
+      h("div.row.between", h("b", where), h("span.faint.mono", at)),
+      h("div.rep-co-meta",
+        v.ref ? h("span.chip.accent", v.ref) : h("span.muted", v.source === "(direct)" ? "direct" : v.source),
+        v.device ? h("span.muted", words(v.device).toLowerCase()) : null,
+        h("span.muted", plural(v.pages.length, "page")),
+        did.map(k => h("span.chip", k))))),
+    h("div.fold-body.rep-v-body",
+      v.pages.length ? h("ol.rep-path.mono", v.pages.map(p => h("li", p))) : null,
+      play.map(x => h("div", x)),
+      facts.length ? h("div.muted", facts.join(" · ")) : null,
+      v.recording ? h("a", { href: v.recording, target: "_blank", rel: "noopener" }, "Replay") : null));
+}
+
 // A single-series column chart. `cols`: [{label, value, read, hot}]; `read`
 // is the line the readout shows on hover/focus, `hot` marks the emphasised
 // column(s) when the rest are context. Columns are HTML, so they stretch.
@@ -1930,20 +1974,24 @@ function usageView(d) {
 
 function siteView(d) {
   const days = d.days;
-  if (!d.people && !d.resume) return h("div.rep", empty(null, `No visitors in the last ${plural(days, "day")}.`));
+  if (!d.people && !d.resume) return h("div.rep", empty(null, `No visitors in the last ${days === 1 ? "24 hours" : plural(days, "day")}.`));
   const tiles = h("div.tiles.rep-tiles",
     h("div.tile", h("b", num(d.people)), h("span", "Visitors")),
     h("div.tile", h("b", num(d.views)), h("span", "Page views")),
     h("div.tile", h("b", num(d.resume)), h("span", "Resume")));
 
-  const byDay = d.by_day || [];
+  // One day charts by local hour ("2026-10-24T09:00"), longer ranges by day.
+  const hourly = (d.by_hour || []).length > 0;
+  const byDay = hourly ? d.by_hour : d.by_day || [];
+  const when = hourly ? repHour : k => repDay(k);
+  const tick = hourly ? repHour : k => repDay(k, { month: "short", day: "numeric" });
   let peak = 0;
   byDay.forEach((r, i) => { if (r.people > byDay[peak].people) peak = i; });
   const total = byDay.reduce((s, r) => s + r.people, 0);
-  const axis = byDay.length ? [repDay(byDay[0].key, { month: "short", day: "numeric" }), repDay(byDay[byDay.length - 1].key, { month: "short", day: "numeric" })] : [];
-  const daily = byDay.length ? h("section.rep-sec", repHead("Visitors by day"), columns(
-    byDay.map(r => ({ value: r.people, read: `${repDay(r.key)}: ${plural(r.people, "visitor")}, ${plural(r.n, "view")}` })),
-    { idle: byDay[peak].people ? `Busiest ${repDay(byDay[peak].key)}, ${plural(byDay[peak].people, "visitor")}` : "No visitors", axis, label: `Visitors per day, ${total} in all`, peakLabel: peak })) : null;
+  const axis = byDay.length ? [tick(byDay[0].key), tick(byDay[byDay.length - 1].key)] : [];
+  const daily = byDay.length ? h("section.rep-sec", repHead(hourly ? "Visitors by hour" : "Visitors by day"), columns(
+    byDay.map(r => ({ value: r.people, read: `${when(r.key)}: ${plural(r.people, "visitor")}, ${plural(r.n, "view")}` })),
+    { idle: byDay[peak].people ? `Busiest ${when(byDay[peak].key)}, ${plural(byDay[peak].people, "visitor")}` : "No visitors", axis, label: `Visitors per ${hourly ? "hour" : "day"}, ${total} in all`, peakLabel: peak })) : null;
 
   const list = (title, rows, name) => rows && rows.length ? h("section.rep-sec", repHead(title),
     ranked(rows.map(r => ({ name: name ? name(r.key) : r.key, value: r.people, title: `${r.key}: ${plural(r.people, "person")} · ${r.n}` })), title)) : null;
@@ -1954,8 +2002,15 @@ function siteView(d) {
     h("div", h("b", "Chess"), h("span.muted", `${plural(e.games, "game")} · ${plural(e.moves, "move")}${e.engine_s ? ` · engine ${e.engine_s} s` : ""}`)),
     h("div", h("b", "Spacetime"), h("span.muted", `${plural(e.sources, "source")} · ${plural(e.exports, "export")}`)))) : null;
 
-  const company = (d.company || []).length ? h("section.rep-sec", repHead("Company refs", h("span.faint.mono", String(d.company.length))),
-    h("ul.list.rep-co", d.company.map(v => {
+  const visitors = d.visitors || [];
+  const visits = visitors.length ? h("section.rep-sec", repHead("Visits", h("span.faint.mono", visitors.length >= 50 ? "latest 50" : String(visitors.length))),
+    h("ul.list.rep-co", visitors.map(v => h("li", repVisit(v, hourly))))) : null;
+
+  // Company visits already in the list above aren't repeated; older ones are.
+  const listed = new Set(visitors.map(v => v.session));
+  const older = (d.company || []).filter(v => !listed.has(v.session));
+  const company = older.length ? h("section.rep-sec", repHead(visitors.length ? "Earlier company refs" : "Company refs", h("span.faint.mono", String(older.length))),
+    h("ul.list.rep-co", older.map(v => {
       const did = ["resume", "chess", "spacetime"].filter(k => v[k]);
       const where = [v.city, v.country && repCountry(v.country)].filter(Boolean).join(", ");
       return h("li",
@@ -1969,7 +2024,7 @@ function siteView(d) {
     }))) : null;
 
   return h("div.rep",
-    tiles, daily, company,
+    tiles, daily, visits, company,
     h("div.rep-grid",
       list("Top pages", d.pages),
       list("Came from", d.sources),
@@ -1983,7 +2038,7 @@ function initReports(c) {
   const box = h("div", { "aria-live": "polite" });
   const cache = {};
   let cur = "usage", siteDays = "7";
-  const rangeSeg = seg([["7", "7 d"], ["30", "30 d"], ["90", "90 d"]], siteDays, v => { siteDays = v; show("site"); }, "Site range");
+  const rangeSeg = seg([["1", "1 d"], ["7", "7 d"], ["30", "30 d"], ["90", "90 d"]], siteDays, v => { siteDays = v; show("site"); }, "Site range");
   rangeSeg.classList.add("rep-range");
   const show = (key, force) => {
     cur = key;

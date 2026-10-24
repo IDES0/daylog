@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 import json
-from datetime import date
+from datetime import UTC, date, datetime
 from typing import Any
+from zoneinfo import ZoneInfo
 
 import httpx
 import pytest
@@ -126,7 +127,7 @@ def test_report_reads_every_section() -> None:
                 "columns": ["games", "moves", "engine_s", "sources", "exports"],
                 "results": [[1, 14, 2.34, 0, 0]],
             },
-            "argMin": {
+            "GROUP BY person_id, ref": {
                 "columns": list(_row()),
                 "results": [list(_row().values())],
             },
@@ -155,7 +156,11 @@ def test_report_data_fills_days_and_shapes_lists() -> None:
                 "columns": ["key", "people", "n"],
                 "results": [["US", 2, 4], [None, 1, 1]],
             },
-            "argMin": {"columns": list(_row()), "results": [list(_row().values())]},
+            "GROUP BY person_id, ref": {
+                "columns": list(_row()),
+                "results": [list(_row().values())],
+            },
+            "session_replay_events": {"columns": ["session_id"], "results": [["s-123"]]},
         }
     )
     d = analytics.fetch_report_data(3, client, today=date(2026, 10, 9))
@@ -202,3 +207,132 @@ def test_query_errors_without_a_key_or_on_a_bad_status(monkeypatch: Any) -> None
     monkeypatch.delenv("POSTHOG_PERSONAL_API_KEY")
     with pytest.raises(analytics.AnalyticsError):
         analytics.query("SELECT 1")
+
+
+_TOTALS = {
+    "uniqIf(person_id, event = '$pageview') AS people": {
+        "columns": ["people", "views", "resume", "chess", "spacetime"],
+        "results": [[2, 5, 1, 1, 0]],
+    }
+}
+
+
+def _session(sid: str, start: str, person: str = "p1", **extra: Any) -> dict:
+    return {
+        "session": sid,
+        "person": person,
+        "start": start,
+        "seconds": 185,
+        "views": [
+            ["2026-10-24 09:03:00", "/chess"],
+            ["2026-10-24 09:01:00", "/"],
+            ["2026-10-24 09:02:00", "/resume"],
+            ["2026-10-24 09:02:30", "/resume"],
+        ],
+        "ref": "",
+        "source": "linkedin.com",
+        "city": "Austin",
+        "region": "Texas",
+        "country": "US",
+        "device": "Mobile",
+        "browser": "Safari",
+        "os": "iOS",
+        "resume": 1,
+        "chess": 3,
+        "chess_games": 1,
+        "chess_moves": 2,
+        "spacetime": 0,
+        "spacetime_sources": 0,
+        "spacetime_exports": 0,
+        **extra,
+    }
+
+
+def _sessions_body(*rows: dict) -> dict:
+    return {"columns": list(rows[0]), "results": [list(r.values()) for r in rows]}
+
+
+def test_sessions_put_pages_in_order_and_count_repeat_visits() -> None:
+    rows = [
+        _session("s-2", "2026-10-24T09:01:00Z"),
+        _session("s-1", "2026-10-23T20:00:00Z", source=None, views=None),
+        _session("s-0", "2026-10-23T19:00:00Z", person="p2"),
+        _session("", "2026-10-23T18:00:00Z"),
+    ]
+    listed = analytics.sessions(rows)
+    assert [s.session for s in listed] == ["s-2", "s-1", "s-0"]
+    assert listed[0].pages == ["/", "/resume", "/chess"]
+    assert (listed[0].games, listed[0].moves, listed[0].chess) == (1, 2, 3)
+    assert [s.visits for s in listed] == [2, 2, 1]
+    assert listed[1].pages == [] and listed[1].source == "(direct)"
+
+
+def test_sessions_query_is_latest_first_and_capped() -> None:
+    q = analytics.sessions_hogql(1)
+    assert "INTERVAL 1 DAY" in q and "distinct_id != 'claude-test'" in q
+    assert q.endswith(f"GROUP BY session ORDER BY start DESC LIMIT {analytics.MAX_SESSIONS}")
+
+
+def test_replay_lookup_only_sends_plain_ids() -> None:
+    q = analytics.recordings_hogql(["abc-1"])
+    assert "session_replay_events" in q and "'abc-1'" in q
+    seen: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request.read().decode())
+        return httpx.Response(200, json={"columns": ["session_id"], "results": [["abc-1"]]})
+
+    client = httpx.Client(transport=httpx.MockTransport(handler))
+    assert analytics._recorded(["abc-1", "x') OR 1=1 --"], client) == {"abc-1"}
+    assert "OR 1=1" not in seen[0]
+
+
+def test_one_day_report_charts_by_local_hour_and_lists_visits() -> None:
+    zone = ZoneInfo("America/Chicago")
+    client = _fake(
+        {
+            **_TOTALS,
+            "toStartOfHour(timestamp) AS key": {
+                "columns": ["key", "people", "n"],
+                "results": [["2026-10-24T14:00:00Z", 1, 3], ["2026-10-23T22:00:00Z", 1, 2]],
+            },
+            "GROUP BY session ORDER": _sessions_body(
+                _session("s-2", "2026-10-24T14:01:00Z", ref="acme"),
+                _session("s-1", "2026-10-23T22:00:00Z", person="p2"),
+            ),
+            "session_replay_events": {"columns": ["session_id"], "results": [["s-2"]]},
+        }
+    )
+    now = datetime(2026, 10, 24, 15, 20, tzinfo=UTC)
+    d = analytics.fetch_report_data(1, client, now=now, zone=zone)
+    assert d["by_day"] == []
+    hours = [r["key"] for r in d["by_hour"]]
+    # 24 local hours ending at 10:00 CDT; the empty partial first hour is dropped.
+    assert len(hours) == 24 and hours[0] == "2026-10-23T11:00" and hours[-1] == "2026-10-24T10:00"
+    busy = {r["key"]: r["people"] for r in d["by_hour"] if r["people"]}
+    assert busy == {"2026-10-23T17:00": 1, "2026-10-24T09:00": 1}
+    first, second = d["visitors"]
+    assert first["session"] == "s-2" and first["ref"] == "acme" and first["region"] == "Texas"
+    assert first["recording"].endswith("/replay/s-2") and second["recording"] is None
+    json.dumps(d)
+    text = analytics.format_report(d, zone)
+    assert text.startswith("Site, last 24 h\n")
+    assert "Latest visits (2)\n  Oct 24 09:01 Austin, US · mobile · acme · 3 pages" in text
+    assert "tried resume, chess · 3 min" in text
+
+
+def test_replay_links_fall_back_to_all_when_lookup_fails() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        hogql = request.read().decode()
+        if "session_replay_events" in hogql:
+            return httpx.Response(400, text="no such table")
+        if "AS people, countIf" in hogql:
+            return httpx.Response(200, json=_TOTALS[next(iter(_TOTALS))])
+        if "GROUP BY session" in hogql:
+            return httpx.Response(200, json=_sessions_body(_session("s-9", "2026-10-24T09:00Z")))
+        return httpx.Response(200, json={"columns": [], "results": []})
+
+    client = httpx.Client(transport=httpx.MockTransport(handler))
+    d = analytics.fetch_report_data(7, client, today=date(2026, 10, 24))
+    assert d["by_hour"] == [] and d["by_day"]
+    assert d["visitors"][0]["recording"].endswith("/replay/s-9")
