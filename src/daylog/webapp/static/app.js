@@ -1098,7 +1098,7 @@ function chatEmpty() {
   const ideas = ["What should I do this afternoon?", "How did my week go?", "Find a freediving coach near me", "Move Austin back a week"];
   fill(S.cList, h("div.chat-empty",
     h("h2", "Ask the assistant"),
-    h("p.muted", "It reads your journal, goals, itinerary and places, and can search the web. Anything it wants to change comes back as a card for you to confirm."),
+    h("p.muted", "It reads your journal, goals, itinerary and places, and can search the web. Anything it wants to change comes back as a card for you to confirm. Type /help for shortcuts."),
     h("div.suggest", ideas.map(q => h("button.btn", { type: "button", onclick: () => sendChat(q) }, q)))));
 }
 
@@ -1132,7 +1132,64 @@ function sendChat(raw) {
   askChat(text);
 }
 
+// Slash commands run here, not through the assistant: no model call, no cost
+// beyond what the action itself does.
+const CHAT_HELP = [
+  ["/help", "This list"],
+  ["/reconcile [date]", "Rebuild a day from its notes (default today; also 'yesterday')"],
+  ["/research <place>", "Look a place up and save what's found"],
+  ["/explore", "Suggest places near where you are"],
+  ["/trip", "Research the next trip on the itinerary"],
+  ["/backfill [days]", "Look up places named in recent notes (default 30)"],
+  ["/new", "Start a new chat"],
+];
+
+function chatCommand(text) {
+  const [cmd, ...rest] = text.slice(1).split(/\s+/);
+  const arg = rest.join(" ").trim();
+  const day = a => a === "yesterday" ? iso(new Date(new Date(`${todayIso()}T12:00`) - 864e5)) : (a || todayIso());
+  switch (cmd.toLowerCase()) {
+    case "help": case "commands":
+      return Promise.resolve({ reply: CHAT_HELP.map(([c, d]) => `\`${c}\` ${d}`).join("\n") + "\n\nAnything else goes to the assistant." });
+    case "new": case "reset":
+      resetChat();
+      return Promise.resolve(null);
+    case "reconcile": {
+      const date = day(arg.toLowerCase());
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return Promise.resolve({ reply: "Use a date like 2026-10-21, or 'yesterday'." });
+      S.homeStale = true;
+      return post("/api/reconcile", { date }).then(r => ({ reply: r.message || `Rebuilt ${date}.` }));
+    }
+    case "research":
+      if (!arg) return Promise.resolve({ reply: "Which place? `/research Las Flores`" });
+      return post("/api/research", { place: arg }).then(r => ({ reply: r.message || "Done.", cards: r.cards }));
+    case "explore": case "trip":
+      return post("/api/research", { kind: cmd.toLowerCase() }).then(r => ({ reply: r.message || "Done.", cards: r.cards }));
+    case "backfill":
+      return post("/api/research", { kind: "backfill", arg }).then(r => ({ reply: r.message || "Done.", cards: r.cards }));
+    default:
+      return Promise.resolve({ reply: `No /${cmd} command. Type /help.` });
+  }
+}
+
 function askChat(text) {
+  if (text.startsWith("/")) {
+    const pending = h("div.msg.assistant", { "aria-busy": "true" },
+      h("div.bubble", h("span.typing", { "aria-label": "Working" }, h("i"), h("i"), h("i"))));
+    S.cList.append(pending);
+    scrollChat(true);
+    chatBusy = true;
+    S.cSend.disabled = true;
+    chatCommand(text).then(r => {
+      if (!r) { pending.remove(); return; }
+      pending.replaceWith(msgView({ role: "assistant", text: r.reply, at: new Date().toISOString() }, { cards: r.cards }));
+      if (r.cards && r.cards.length) refreshOpenCards();
+    }, e => {
+      pending.removeAttribute("aria-busy");
+      fill(pending, errorBox(e, () => { pending.remove(); askChat(text); }));
+    }).finally(() => { chatBusy = false; S.cFit(); scrollChat(true); });
+    return;
+  }
   chatBusy = true;
   S.cSend.disabled = true;
   const status = h("span.mono", { style: { "font-size": "12px", color: "var(--faint)", "margin-left": "10px" } }, "0:00");

@@ -40,7 +40,7 @@ How you change things:
   to skip it otherwise.
 - `propose_focus_edit` changes what research and the brief centre on
   ("focus on rights technique this month", "less nightlife research").
-- `start_ranking` sends the rank buttons for a place.
+- `start_ranking` puts a "Rank X?" card in the app for a place.
 - The user can revert any change from Recent changes in the app (You tab).
 - `add_place_note` saves their own words about a known place straight
   away — use it when they tell you something worth remembering about a
