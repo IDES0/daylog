@@ -673,4 +673,10 @@ details.key .legend { margin: var(--s2) 0 0; }
 .rep-co-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; margin-top: 4px; font-size: 13.5px; }
 .rep-co-meta .chip { height: 22px; padding: 0 8px; font-size: 12px; }
 .rep-pages { margin-top: 4px; font-size: 11.5px; overflow-wrap: anywhere; }
+.rep-co > li:has(> details.rep-v) { padding: 0; }
+details.rep-v > summary { padding: var(--s2) 0; gap: var(--s2); }
+.rep-v-main { flex: 1; min-width: 0; }
+.rep-v-body { display: grid; gap: 4px; padding: 0 0 var(--s3) 26px; font-size: 13.5px; }
+.rep-path { margin: 0 0 4px; padding-left: 1.6em; font-size: 12px; color: var(--muted); overflow-wrap: anywhere; }
+.rep-path li { padding: 1px 0; }
 .rep-refresh { margin: var(--s4) 0 -8px -12px; }
