@@ -1,17 +1,16 @@
-"""Beli-style personal rankings: a tier, then a few head-to-head comparisons.
+"""Personal rankings: one ordered list per category, placed by head-to-heads.
 
-Pure logic. rankings.yaml holds one ordered list per category and tier,
-best first:
+Pure logic. rankings.yaml holds one list per category, best first:
 
-    food:
-      liked: [artisan-uluwatu, this-is-bali]
-      fine: [finns-beach-club]
-      disliked: []
+    food: [toshokan, uchiko, artisan-uluwatu]
 
-The order is the source of truth; a 0-10 score is derived from position
-(like Beli, a score is only meaningful relative to everything else you've
-ranked). A new place is placed by binary insertion within its tier, so
-ranking the 30th restaurant takes about five taps, not thirty.
+The order is the source of truth; a 1-10 score is derived from position, so
+a score only means something relative to everything else in that list. A
+new place is placed by binary insertion over the whole list, so ranking the
+100th restaurant takes about seven taps, not a hundred.
+
+Lists written before 2026-10-24 were split into liked/fine/disliked tiers;
+they read as one list in that order, and the next write flattens them.
 """
 
 from __future__ import annotations
@@ -31,10 +30,11 @@ CATEGORIES: dict[str, tuple[str, ...]] = {
     "flying": ("fly_site",),
 }
 
-TIERS = ("liked", "fine", "disliked")
+# The old tiered layout, best tier first (read only).
+_OLD_TIERS = ("liked", "fine", "disliked")
 
-# Score band per tier, as (low, high); position within the tier interpolates.
-_BANDS = {"liked": (6.7, 10.0), "fine": (3.4, 6.6), "disliked": (0.0, 3.3)}
+TOP_SCORE = 10.0
+BOTTOM_SCORE = 1.0
 
 
 def category_for(kind: str | None) -> str | None:
@@ -44,102 +44,96 @@ def category_for(kind: str | None) -> str | None:
     return None
 
 
-def tier_list(rankings: Any, category: str, tier: str) -> list[str]:
-    return list((rankings.get(category) or {}).get(tier) or [])
+def ranked(rankings: Any, category: str) -> list[str]:
+    """Place ids in `category`, best first."""
+    value = (rankings or {}).get(category)
+    if isinstance(value, dict):
+        return [str(p) for tier in _OLD_TIERS for p in (value.get(tier) or [])]
+    return [str(p) for p in (value or [])]
 
 
-def ranked(rankings: Any, category: str) -> list[tuple[str, str]]:
-    """(place_id, tier) best to worst across all tiers."""
-    return [(pid, tier) for tier in TIERS for pid in tier_list(rankings, category, tier)]
+def items(rankings: Any, category: str) -> Any:
+    """The live list for `category` inside `rankings`, created or flattened
+    from the old tiers as needed, for in-place edits (ruamel keeps comments)."""
+    value = rankings.get(category)
+    if isinstance(value, list):
+        return value
+    rankings[category] = ranked(rankings, category)
+    return rankings[category]
 
 
-def position(rankings: Any, category: str, place_id: str) -> tuple[str, int] | None:
-    for tier in TIERS:
-        items = tier_list(rankings, category, tier)
-        if place_id in items:
-            return tier, items.index(place_id)
-    return None
+def position(rankings: Any, category: str, place_id: str) -> int | None:
+    order = ranked(rankings, category)
+    return order.index(place_id) if place_id in order else None
 
 
 def score(rankings: Any, category: str, place_id: str) -> float | None:
-    found = position(rankings, category, place_id)
-    if found is None:
+    """10 for the best, 1 for the worst, evenly spaced between."""
+    idx = position(rankings, category, place_id)
+    if idx is None:
         return None
-    tier, idx = found
-    low, high = _BANDS[tier]
-    count = len(tier_list(rankings, category, tier))
+    count = len(ranked(rankings, category))
     if count <= 1:
-        return round(high if tier != "disliked" else (low + high) / 2, 1)
-    return round(high - (high - low) * idx / (count - 1), 1)
+        return TOP_SCORE
+    return round(TOP_SCORE - (TOP_SCORE - BOTTOM_SCORE) * idx / (count - 1), 1)
 
 
 def describe(rankings: Any, category: str, place_id: str) -> str | None:
-    """'#2 of 9 food · 9.2' for a place card, or None if unranked."""
-    s = score(rankings, category, place_id)
-    if s is None:
+    """'#2 of 9 food · 8.9' for a place card, or None if unranked."""
+    idx = position(rankings, category, place_id)
+    if idx is None:
         return None
-    order = [pid for pid, _ in ranked(rankings, category)]
-    return f"#{order.index(place_id) + 1} of {len(order)} {category} · {s:.1f}"
+    count = len(ranked(rankings, category))
+    return f"#{idx + 1} of {count} {category} · {score(rankings, category, place_id):.1f}"
 
 
 @dataclass
 class Insertion:
-    """An in-progress binary insertion of `place_id` into one tier."""
+    """An in-progress binary insertion of `place_id` into a category's list."""
 
     category: str
-    tier: str
     place_id: str
     lo: int
     hi: int
 
 
-def start(rankings: Any, category: str, place_id: str, tier: str) -> Insertion:
-    """Begin placing `place_id` in `tier`. Re-ranking a place removes it first,
-    so its old position never biases the comparisons."""
-    others = [p for p in tier_list(rankings, category, tier) if p != place_id]
-    return Insertion(category=category, tier=tier, place_id=place_id, lo=0, hi=len(others))
+def _others(rankings: Any, category: str, place_id: str) -> list[str]:
+    return [p for p in ranked(rankings, category) if p != place_id]
 
 
-def _others(rankings: Any, ins: Insertion) -> list[str]:
-    return [p for p in tier_list(rankings, ins.category, ins.tier) if p != ins.place_id]
+def start(rankings: Any, category: str, place_id: str) -> Insertion:
+    """Begin placing `place_id`. Re-ranking a place leaves it out of the
+    comparisons, so its old position never biases them."""
+    return Insertion(category, place_id, 0, len(_others(rankings, category, place_id)))
 
 
 def next_opponent(rankings: Any, ins: Insertion) -> str | None:
     """The place to compare against next, or None when the slot is found."""
     if ins.lo >= ins.hi:
         return None
-    return _others(rankings, ins)[(ins.lo + ins.hi) // 2]
+    return _others(rankings, ins.category, ins.place_id)[(ins.lo + ins.hi) // 2]
 
 
 def answer(ins: Insertion, new_is_better: bool) -> Insertion:
     mid = (ins.lo + ins.hi) // 2
     if new_is_better:
-        return Insertion(ins.category, ins.tier, ins.place_id, ins.lo, mid)
-    return Insertion(ins.category, ins.tier, ins.place_id, mid + 1, ins.hi)
+        return Insertion(ins.category, ins.place_id, ins.lo, mid)
+    return Insertion(ins.category, ins.place_id, mid + 1, ins.hi)
 
 
 def settle(ins: Insertion) -> Insertion:
     """'Too close to call' — stop comparing and take the current midpoint."""
     mid = (ins.lo + ins.hi) // 2
-    return Insertion(ins.category, ins.tier, ins.place_id, mid, mid)
+    return Insertion(ins.category, ins.place_id, mid, mid)
 
 
 def finish(rankings: Any, ins: Insertion) -> Any:
     """Insert at the found slot, removing any previous placement. Mutates and
     returns `rankings` (the live ruamel structure, so comments survive)."""
-    for tier in TIERS:
-        existing = (rankings.get(ins.category) or {}).get(tier)
-        if existing and ins.place_id in existing:
-            existing.remove(ins.place_id)
-    category = rankings.get(ins.category)
-    if category is None:
-        category = {}
-        rankings[ins.category] = category
-    items = category.get(ins.tier)
-    if items is None:
-        items = []
-        category[ins.tier] = items
-    items.insert(min(ins.lo, len(items)), ins.place_id)
+    lst = items(rankings, ins.category)
+    if ins.place_id in lst:
+        lst.remove(ins.place_id)
+    lst.insert(min(ins.lo, len(lst)), ins.place_id)
     return rankings
 
 
@@ -161,7 +155,6 @@ def unranked(rankings: Any, candidates: list[tuple[str, str | None]]) -> list[tu
 RANKINGS_FILE = "rankings.yaml"
 # Don't turn one note into a questionnaire.
 MAX_PROMPTS_PER_ENTRY = 2
-TIER_LABELS = {"liked": "Liked it", "fine": "Fine", "disliked": "Didn't like it"}
 
 
 def rank_candidates(facts: dict[str, Any], index: PlaceIndex) -> list[tuple[str, str | None]]:
@@ -184,13 +177,12 @@ def to_prompt(rankings: Any, facts: dict[str, Any], index: PlaceIndex) -> list[t
     return unranked(rankings, rank_candidates(facts, index))[:MAX_PROMPTS_PER_ENTRY]
 
 
-def restore(rankings: Any, category: str, place_id: str, tier: str, lo: int, hi: int) -> Insertion:
+def restore(rankings: Any, category: str, place_id: str, lo: int, hi: int) -> Insertion:
     """An insertion a client carried between comparisons (the web app holds the
-    bounds, not the server). ValueError if they no longer fit the tier."""
-    others = [p for p in tier_list(rankings, category, tier) if p != place_id]
-    if not 0 <= lo <= hi <= len(others):
-        raise ValueError("bounds no longer fit the tier")
-    return Insertion(category=category, tier=tier, place_id=place_id, lo=lo, hi=hi)
+    bounds, not the server). ValueError if they no longer fit the list."""
+    if not 0 <= lo <= hi <= len(_others(rankings, category, place_id)):
+        raise ValueError("bounds no longer fit the list")
+    return Insertion(category, place_id, lo, hi)
 
 
 def comparisons_left(ins: Insertion) -> int:
@@ -200,20 +192,17 @@ def comparisons_left(ins: Insertion) -> int:
 
 def remove(rankings: Any, category: str, place_id: str) -> bool:
     """Unrank a place in one category. Mutates `rankings`; False if it wasn't ranked."""
-    found = False
-    for tier in TIERS:
-        existing = (rankings.get(category) or {}).get(tier)
-        if existing and place_id in existing:
-            existing.remove(place_id)
-            found = True
-    return found
+    if place_id not in ranked(rankings, category):
+        return False
+    items(rankings, category).remove(place_id)
+    return True
 
 
-def move(rankings: Any, category: str, place_id: str, tier: str, index: int) -> int:
-    """A manual reorder: put `place_id` at `index` (0 = best) of `tier`, taking it
-    out of wherever it was. `index` counts the tier without the place, so it is
-    the slot the place ends up in. Mutates `rankings`; returns that slot."""
+def move(rankings: Any, category: str, place_id: str, index: int) -> int:
+    """A manual reorder: put `place_id` at `index` (0 = best), taking it out of
+    wherever it was. `index` counts the list without the place, so it is the
+    slot the place ends up in. Mutates `rankings`; returns that slot."""
     remove(rankings, category, place_id)
-    slot = max(0, min(index, len(tier_list(rankings, category, tier))))
-    finish(rankings, Insertion(category, tier, place_id, slot, slot))
+    slot = max(0, min(index, len(ranked(rankings, category))))
+    finish(rankings, Insertion(category, place_id, slot, slot))
     return slot

@@ -216,7 +216,7 @@ contract is [`docs/web-api.md`](docs/web-api.md).
   `rankings/session/next`, `rankings/move`, `rankings/remove`), `research`, `review`,
   `disciplines`, `changes` (+ `changes/{sha}/revert`), `cards`.
 - The frontend is plain HTML/CSS/JS in `src/daylog/webapp/static/`, shipped
-  as package data. Rankings (tiers, head-to-heads, drag to reorder) live in
+  as package data. Rankings (one list per category, head-to-heads, drag to reorder) live in
   the You tab; a note that mentions an unranked place offers a Rank card.
 
 ### Notifications
@@ -270,7 +270,7 @@ src/daylog/
   daily.py         The 4am day cutoff, end-of-day reconcile, the weekly
                    review.
   reconcile.py     Rebuilds a multi-note day in one pass.
-  rankings.py      Beli-style tiers + binary insertion, moves, the after-a-
+  rankings.py      One list per category, binary insertion, moves, the after-a-
                    note prompt (pure); rank_flow.py: which places in an
                    entry can be ranked, the list as text.
   llm.py           Pricing, monthly spend ledger (usage.yaml), budget
@@ -322,7 +322,7 @@ daylog-vault/
   itinerary.yaml           # the wishlist: intentions + hard dates
   goals.yaml               # hard/soft goals, slip_history
   disciplines.yaml         # the sports graph: parents, requires, status, aliases
-  rankings.yaml            # ordered lists per category and tier
+  rankings.yaml            # one ordered list per category, best first
   research/<place>.md      # destination research files
   research/daily/<date>.md # the morning research routine's output
   plans/<date>.md          # planner output (+ the chosen option)
