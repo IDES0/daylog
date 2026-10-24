@@ -41,11 +41,16 @@
 }
 
 * { box-sizing: border-box; }
-html { -webkit-text-size-adjust: 100%; }
+/* The document itself never scrolls: each view scrolls inside <main>.
+   On iOS a scrolling document drags position:fixed things along during
+   rubber-band overscroll and after the keyboard closes, which is how the
+   tab bar came loose from the bottom of the screen. */
+html { -webkit-text-size-adjust: 100%; height: 100%; overflow: hidden; overscroll-behavior: none; }
 body {
-  margin: 0; background: var(--bg); color: var(--text);
+  margin: 0; height: 100%; overflow: hidden; overscroll-behavior: none;
+  background: var(--bg); color: var(--text);
   font: 15px/1.55 var(--sans); -webkit-font-smoothing: antialiased;
-  overflow-x: hidden; -webkit-tap-highlight-color: transparent;
+  -webkit-tap-highlight-color: transparent;
 }
 h1, h2, h3, h4, p { margin: 0; }
 ul, ol { margin: 0; padding: 0; }
@@ -86,7 +91,14 @@ svg { display: block; }
   border-radius: 9px; background: var(--here); color: #fff; font: 600 11px/18px var(--sans); text-align: center;
   box-shadow: 0 0 0 2px var(--surface);
 }
-main { min-height: 100vh; min-height: 100dvh; padding-bottom: calc(var(--tabbar) + var(--safe-b)); outline: none; }
+/* The app fills the screen and never moves; <main> is the one scroller. It
+   runs under the translucent tab bar, padded so its end clears the bar. */
+.app { position: fixed; inset: 0; }
+main {
+  position: absolute; inset: 0; overflow-x: hidden; overflow-y: auto;
+  -webkit-overflow-scrolling: touch; overscroll-behavior-y: contain;
+  padding-bottom: calc(var(--tabbar) + var(--safe-b)); outline: none;
+}
 body.kb .tabs { display: none; }
 body.kb main { padding-bottom: 0; }
 
@@ -105,7 +117,7 @@ body.kb main { padding-bottom: 0; }
   .tab svg { width: 20px; height: 20px; }
   .badge { position: static; margin-left: auto; box-shadow: none; }
   .signout { display: block; margin-top: auto; padding: 0 var(--s3); }
-  main { margin-left: var(--side); padding-bottom: 0; }
+  main { left: var(--side); padding-bottom: 0; }
   body.kb .tabs { display: flex; }
 }
 

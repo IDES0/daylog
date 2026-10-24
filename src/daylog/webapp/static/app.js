@@ -1095,7 +1095,7 @@ function msgView(m, extra = {}) {
 
 function scrollChat(smooth) {
   if (location.hash !== "#/chat") return;
-  requestAnimationFrame(() => window.scrollTo({ top: document.documentElement.scrollHeight, behavior: smooth ? "smooth" : "auto" }));
+  requestAnimationFrame(() => scroller.scrollTo({ top: scroller.scrollHeight, behavior: smooth ? "smooth" : "auto" }));
 }
 
 function sendChat(raw) {
@@ -1915,6 +1915,8 @@ const ON_SHOW = {
   chat: () => scrollChat(false),
 };
 const inited = new Set();
+// Views scroll inside <main>, never the document (see app.css: the shell).
+const scroller = document.getElementById("main");
 const scrolls = {};
 let current = null;
 
@@ -1923,7 +1925,7 @@ function route() {
   const tab = name in VIEWS ? name : "home";
   if (!name) history.replaceState(null, "", "#/home");
   if (current === tab) return;
-  if (current) scrolls[current] = window.scrollY;
+  if (current) scrolls[current] = scroller.scrollTop;
   document.querySelectorAll(".view").forEach(v => { v.hidden = v.dataset.view !== tab; });
   document.querySelectorAll(".tab").forEach(a => {
     if (a.dataset.tab === tab) a.setAttribute("aria-current", "page"); else a.removeAttribute("aria-current");
@@ -1932,13 +1934,13 @@ function route() {
   current = tab;
   const first = !inited.has(tab);
   if (first) { inited.add(tab); VIEWS[tab](); } else if (ON_SHOW[tab]) ON_SHOW[tab]();
-  if (tab !== "chat") window.scrollTo(0, scrolls[tab] || 0);
+  if (tab !== "chat") scroller.scrollTop = scrolls[tab] || 0;
   updateBar();
 }
 
 function updateBar() {
   const bar = document.querySelector(".view:not([hidden]) .bar");
-  if (bar) bar.classList.toggle("scrolled", window.scrollY > 4);
+  if (bar) bar.classList.toggle("scrolled", scroller.scrollTop > 4);
 }
 
 document.addEventListener("click", e => {
@@ -1956,10 +1958,16 @@ document.addEventListener("focusin", e => {
   if (coarse.matches && e.target.matches("textarea, input:not([type=checkbox]):not([type=radio])")) document.body.classList.add("kb");
 });
 document.addEventListener("focusout", () => {
-  setTimeout(() => { if (!document.activeElement || !document.activeElement.matches("textarea, input")) document.body.classList.remove("kb"); }, 80);
+  setTimeout(() => {
+    if (document.activeElement && document.activeElement.matches("textarea, input")) return;
+    document.body.classList.remove("kb");
+    // iOS can leave the page nudged up after the keyboard closes; put it back
+    // so the fixed shell (and the tab bar) sits flush with the screen again.
+    if (window.scrollY || document.documentElement.scrollTop) window.scrollTo(0, 0);
+  }, 80);
 });
 
-window.addEventListener("scroll", updateBar, { passive: true });
+scroller.addEventListener("scroll", updateBar, { passive: true });
 window.addEventListener("hashchange", route);
 
 async function start() {
