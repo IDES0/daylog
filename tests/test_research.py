@@ -66,6 +66,26 @@ def test_flush_accumulates_into_usage_yaml(vault: Vault) -> None:
     assert "$2.10" in llm.format_usage(vault)
 
 
+def test_usage_data_projects_month_end_and_lists_history(vault: Vault) -> None:
+    llm._pending.clear()
+    months = {f"2026-0{i}": {"chat": float(i), "total": float(i)} for i in range(1, 10)}
+    months["2026-10"] = {"chat": 7.5, "brief": 2.5, "total": 10.0}
+    vault.write_yaml(llm.USAGE_FILE, months, "usage")
+    d = llm.usage_data(vault, date(2026, 10, 10))
+    assert d["month"] == "2026-10" and d["spent"] == 10.0
+    assert d["projected"] == 31.0  # 10 in 10 days, 31-day month
+    assert [k["kind"] for k in d["by_kind"]] == ["chat", "brief"]
+    assert [h["month"] for h in d["history"]] == [
+        "2026-05",
+        "2026-06",
+        "2026-07",
+        "2026-08",
+        "2026-09",
+        "2026-10",
+    ]
+    assert d["history"][-1]["usd"] == 10.0 and d["history"][0]["usd"] == 5.0
+
+
 def test_parse_drops_invented_ids_and_parentless_places() -> None:
     index = PlaceIndex(tree())
     raw = {

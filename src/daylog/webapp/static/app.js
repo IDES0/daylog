@@ -1871,36 +1871,156 @@ function initConditions(c) {
 
 // ---- reports: usage, site
 
+const repMoney = (x, cents = true) => `$${Number(x || 0).toLocaleString("en-US", { minimumFractionDigits: cents ? 2 : 0, maximumFractionDigits: cents ? 2 : 0 })}`;
+const repMonth = (ym, style = "long") => new Date(`${ym}-15T12:00:00`).toLocaleDateString("en-US", { month: style });
+const repDay = (iso, opts = { weekday: "short", month: "short", day: "numeric" }) => new Date(`${iso}T12:00:00`).toLocaleDateString("en-US", opts);
+let REP_REGION = null;
+function repCountry(code) {
+  if (!code || code === "?") return "Unknown";
+  try { REP_REGION = REP_REGION || new Intl.DisplayNames(["en"], { type: "region" }); return REP_REGION.of(code) || code; } catch { return code; }
+}
+
+const repHead = (text, aside) => h("div.rep-h", h("h3", text), aside || null);
+
+// A single-series column chart. `cols`: [{label, value, read, hot}]; `read`
+// is the line the readout shows on hover/focus, `hot` marks the emphasised
+// column(s) when the rest are context. Columns are HTML, so they stretch.
+function columns(cols, { idle, axis, label, emphasis = false, peakLabel = null, perCol = false }) {
+  const max = Math.max(...cols.map(c => c.value), 0) || 1;
+  const readout = h("p.rep-read", idle);
+  const n = cols.length;
+  const plot = h("div.rep-cols", { role: "list", "aria-label": label, style: { "--gap": n > 40 ? "1px" : "2px" } });
+  cols.forEach((c, i) => {
+    const pct = (c.value / max) * 100;
+    const bar = h("i", { class: emphasis && !c.hot ? "ctx" : "", style: { height: c.value ? `max(${pct}%, 2px)` : "0" } });
+    if (peakLabel === i && c.value) bar.append(h("b", c.short ?? String(c.value)));
+    const col = h("div.rep-col", { role: "listitem", tabindex: "0", "aria-label": c.read }, bar);
+    const on = () => { readout.textContent = c.read; plot.querySelectorAll(".rep-col.on").forEach(x => x.classList.remove("on")); col.classList.add("on"); };
+    const off = () => { readout.textContent = idle; col.classList.remove("on"); };
+    col.addEventListener("pointerenter", on);
+    // A tap leaves its reading up; a mouse puts it back on the way out.
+    col.addEventListener("pointerleave", e => { if (e.pointerType === "mouse") off(); });
+    col.addEventListener("focus", on);
+    col.addEventListener("blur", off);
+    plot.append(col);
+  });
+  const ticks = h("div.rep-axis" + (perCol ? ".per" : ""), { "aria-hidden": "true", style: { "--gap": n > 40 ? "1px" : "2px" } }, axis.map(t => h("span", t)));
+  return h("div.rep-chart", readout, plot, ticks);
+}
+
+// Ranked horizontal bars, one hue. rows: [{name, value, note, title}]
+function ranked(rows, label) {
+  const max = Math.max(...rows.map(r => r.value), 0) || 1;
+  return h("div.hbars.rep-bars", { role: "list", "aria-label": label },
+    rows.map(r => h("div.hbar", { role: "listitem", title: r.title || null },
+      h("span.name", r.name),
+      h("span", h("span.hb", { style: { display: "block", width: `${(100 * r.value) / max}%` } })),
+      h("span.v", r.note ?? String(r.value)))));
+}
+
 function usageView(d) {
-  const pct = d.budget ? Math.min(100, (d.spent / d.budget) * 100) : 0;
-  const max = Math.max(...(d.by_kind || []).map(k => k.usd), 0.01);
-  return h("div",
-    h("div.row.between", h("span", h("b.big-num", `$${d.spent.toFixed(2)}`), h("span.muted", ` of $${Number(d.budget).toFixed(0)} · ${d.month}`)), h("span.mono.faint", `${pct.toFixed(0)}%`)),
-    h("div.meter", { role: "meter", "aria-valuenow": String(d.spent), "aria-valuemin": "0", "aria-valuemax": String(d.budget), "aria-label": "API spend this month" }, h("div", { style: { width: `${pct}%` }, class: pct >= 90 ? "over" : "" })),
-    h("ul.list.spend", (d.by_kind || []).map(k => h("li.row.between",
-      h("span", k.kind),
-      h("span.kv-bar", h("i", { style: { width: `${(k.usd / max) * 100}%` } })),
-      h("span.mono", `$${k.usd.toFixed(2)}`)))));
+  const budget = Number(d.budget) || 0;
+  const pct = budget ? Math.min(100, (d.spent / budget) * 100) : 0;
+  const proj = d.projected ?? null;
+  const over = proj != null && budget && proj > budget;
+  const projPct = budget && proj != null ? Math.min(100, (proj / budget) * 100) : null;
+  const [y, m] = String(d.month).split("-").map(Number);
+  const last = new Date(y, m, 0).getDate();
+  const kinds = d.by_kind || [];
+  const hist = (d.history || []).filter((x, i, a) => i === a.length - 1 || x.usd > 0 || a.slice(0, i).some(p => p.usd > 0));
+
+  const head = h("div.rep-hero",
+    h("div", h("b.big-num", repMoney(d.spent)), h("span.muted", ` of ${repMoney(budget, false)}`)),
+    h("span.mono.faint.num", `${Math.round(budget ? (d.spent / budget) * 100 : 0)}%`));
+  const meter = h("div.rep-meter", { role: "meter", "aria-valuenow": String(d.spent), "aria-valuemin": "0", "aria-valuemax": String(budget), "aria-label": `API spend in ${repMonth(d.month)}` },
+    h("div", { class: pct >= 90 ? "over" : "", style: { width: `${pct}%` } }),
+    projPct != null && proj > d.spent ? h("i", { title: `Projected ${repMoney(proj)}`, style: { left: `${projPct}%` } }) : null);
+  const pace = proj == null ? null
+    : over ? h("p.rep-pace", h("span.status.bad", `On pace for ${repMoney(proj, false)}`), h("span.muted", ` by ${repMonth(d.month, "short")} ${last}, over budget`))
+    : h("p.rep-pace.muted", `${repMonth(d.month)} so far · on pace for ${repMoney(proj, false)} by the ${last}${last === 31 ? "st" : "th"}`);
+
+  return h("div.rep",
+    head, meter, pace,
+    kinds.length ? h("section.rep-sec", repHead("By kind"), ranked(kinds.map(k => ({ name: words(k.kind), value: k.usd, note: repMoney(k.usd) })), "Spend by kind")) : null,
+    hist.length > 1 ? h("section.rep-sec", repHead("By month"), columns(
+      hist.map((x, i) => ({ value: x.usd, hot: i === hist.length - 1, read: `${repMonth(x.month)} ${x.month.slice(0, 4)}: ${repMoney(x.usd)}${i === hist.length - 1 ? " so far" : ""}`, short: repMoney(x.usd, false) })),
+      { idle: `Last ${hist.length} months · tap a month`, axis: hist.map(x => repMonth(x.month, "short")), label: "Spend by month", emphasis: true, perCol: true, peakLabel: hist.length - 1 })) : null);
+}
+
+function siteView(d) {
+  const days = d.days;
+  if (!d.people && !d.resume) return h("div.rep", empty(null, `No visitors in the last ${plural(days, "day")}.`));
+  const tiles = h("div.tiles.rep-tiles",
+    h("div.tile", h("b", num(d.people)), h("span", "Visitors")),
+    h("div.tile", h("b", num(d.views)), h("span", "Page views")),
+    h("div.tile", h("b", num(d.resume)), h("span", "Resume")));
+
+  const byDay = d.by_day || [];
+  let peak = 0;
+  byDay.forEach((r, i) => { if (r.people > byDay[peak].people) peak = i; });
+  const total = byDay.reduce((s, r) => s + r.people, 0);
+  const axis = byDay.length ? [repDay(byDay[0].key, { month: "short", day: "numeric" }), repDay(byDay[byDay.length - 1].key, { month: "short", day: "numeric" })] : [];
+  const daily = byDay.length ? h("section.rep-sec", repHead("Visitors by day"), columns(
+    byDay.map(r => ({ value: r.people, read: `${repDay(r.key)}: ${plural(r.people, "visitor")}, ${plural(r.n, "view")}` })),
+    { idle: byDay[peak].people ? `Busiest ${repDay(byDay[peak].key)}, ${plural(byDay[peak].people, "visitor")}` : "No visitors", axis, label: `Visitors per day, ${total} in all`, peakLabel: peak })) : null;
+
+  const list = (title, rows, name) => rows && rows.length ? h("section.rep-sec", repHead(title),
+    ranked(rows.map(r => ({ name: name ? name(r.key) : r.key, value: r.people, title: `${r.key}: ${plural(r.people, "person")} · ${r.n}` })), title)) : null;
+  const refs = (d.by_ref || []).map(r => ({ key: r.key === "(none)" ? "no ref" : r.key, people: r.people, n: r.people }));
+
+  const e = d.engagement;
+  const eng = e ? h("section.rep-sec", repHead("Projects"), h("div.rep-eng",
+    h("div", h("b", "Chess"), h("span.muted", `${plural(e.games, "game")} · ${plural(e.moves, "move")}${e.engine_s ? ` · engine ${e.engine_s} s` : ""}`)),
+    h("div", h("b", "Spacetime"), h("span.muted", `${plural(e.sources, "source")} · ${plural(e.exports, "export")}`)))) : null;
+
+  const company = (d.company || []).length ? h("section.rep-sec", repHead("Company refs", h("span.faint.mono", String(d.company.length))),
+    h("ul.list.rep-co", d.company.map(v => {
+      const did = ["resume", "chess", "spacetime"].filter(k => v[k]);
+      const where = [v.city, v.country && repCountry(v.country)].filter(Boolean).join(", ");
+      return h("li",
+        h("div.row.between", h("b", v.ref), h("span.faint.mono", repDay(v.first_seen, { month: "short", day: "numeric" }))),
+        h("div.rep-co-meta",
+          h("span", plural(v.pages.length, "page")),
+          did.map(k => h("span.chip.accent", k)),
+          where ? h("span.muted", where) : null,
+          v.recording ? h("a", { href: v.recording, target: "_blank", rel: "noopener" }, "Replay") : null),
+        v.pages.length ? h("div.rep-pages.mono.faint", v.pages.slice(0, 6).join("  ")) : null);
+    }))) : null;
+
+  return h("div.rep",
+    tiles, daily, company,
+    h("div.rep-grid",
+      list("Top pages", d.pages),
+      list("Came from", d.sources),
+      list("Countries", d.countries, repCountry),
+      list("By ref", refs),
+      list("Devices", d.devices, k => words(k === "?" ? "unknown" : k))),
+    eng);
 }
 
 function initReports(c) {
   const box = h("div", { "aria-live": "polite" });
   const cache = {};
-  let cur = "usage";
+  let cur = "usage", siteDays = "7";
+  const rangeSeg = seg([["7", "7 d"], ["30", "30 d"], ["90", "90 d"]], siteDays, v => { siteDays = v; show("site"); }, "Site range");
+  rangeSeg.classList.add("rep-range");
   const show = (key, force) => {
     cur = key;
-    if (cache[key] && !force) { fill(box, cache[key]); return; }
-    const path = key === "usage" ? "/api/usage" : "/api/site?days=7";
+    rangeSeg.hidden = key !== "site";
+    const ck = key === "site" ? `site${siteDays}` : key;
+    if (cache[ck] && !force) { fill(box, cache[ck]); return; }
+    const path = key === "usage" ? "/api/usage" : `/api/site?days=${siteDays}`;
     load(box, () => api(path), d => {
       let node;
       if (key === "usage") node = usageView(d);
-      else if (d.text == null) node = empty(null, d.message ? `Not available: ${d.message}.` : "Nothing to show.");
-      else node = pre(d.text);
-      cache[key] = h("div", node, h("button.btn.ghost", { type: "button", style: { "margin": "8px 0 -8px -12px" }, onclick: () => show(cur, true) }, "Refresh"));
-      if (cur === key) fill(box, cache[key]);
+      else if (d.data) node = siteView(d.data);
+      else if (d.text != null) node = pre(d.text);
+      else node = empty(null, d.message === "not configured" ? "Site analytics aren't set up (no PostHog key)." : d.message || "Nothing to show.");
+      cache[ck] = h("div", node, h("button.btn.ghost.rep-refresh", { type: "button", onclick: () => show(cur, true) }, "Refresh"));
+      if ((cur === "site" ? `site${siteDays}` : cur) === ck) fill(box, cache[ck]);
     });
   };
-  c.body.append(h("div", { style: { "margin-bottom": "12px" } }, seg([["usage", "API spend"], ["site", "Site"]], cur, k => show(k), "Report")), box);
+  c.body.append(h("div.rep-top", seg([["usage", "API spend"], ["site", "Site"]], cur, k => show(k), "Report"), rangeSeg), box);
   show(cur);
 }
 

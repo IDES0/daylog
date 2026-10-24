@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+from datetime import date
 from typing import Any
 
 import httpx
@@ -136,6 +138,43 @@ def test_report_reads_every_section() -> None:
     assert "Top pages\n  /: 2 (3)" in report
     assert "chess: 1 games, 14 moves, engine loads in 2.3 s" in report
     assert "Company refs\n2026-10-10 acme: 2 pages" in report
+
+
+def test_report_data_fills_days_and_shapes_lists() -> None:
+    client = _fake(
+        {
+            "uniqIf(person_id, event = '$pageview') AS people": {
+                "columns": ["people", "views", "resume", "chess", "spacetime"],
+                "results": [[2, 5, 1, 1, 0]],
+            },
+            "toDate(timestamp)": {
+                "columns": ["key", "people", "n"],
+                "results": [["2026-10-09", 1, 2], ["2026-10-07", 1, 3]],
+            },
+            "$geoip_country_code), '?') AS key": {
+                "columns": ["key", "people", "n"],
+                "results": [["US", 2, 4], [None, 1, 1]],
+            },
+            "argMin": {"columns": list(_row()), "results": [list(_row().values())]},
+        }
+    )
+    d = analytics.fetch_report_data(3, client, today=date(2026, 10, 9))
+    # Oct 6 is the partial first day with nobody, so it's left out.
+    assert [(r["key"], r["people"]) for r in d["by_day"]] == [
+        ("2026-10-07", 1),
+        ("2026-10-08", 0),
+        ("2026-10-09", 1),
+    ]
+    assert d["countries"] == [
+        {"key": "US", "people": 2, "n": 4},
+        {"key": "?", "people": 1, "n": 1},
+    ]
+    assert d["people"] == 2 and d["views"] == 5 and d["engagement"] is None
+    assert d["company"][0]["ref"] == "acme" and d["company"][0]["pages"] == ["/", "/resume"]
+    assert d["company"][0]["recording"].endswith("/replay/s-123")
+    json.dumps(d)
+    # The zero day is chart filler; the text report skips it.
+    assert "2026-10-08" not in analytics.format_report(d)
 
 
 def test_report_on_an_empty_site() -> None:

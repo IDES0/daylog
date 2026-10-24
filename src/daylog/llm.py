@@ -16,6 +16,7 @@ Two caps, both in USD, both from the environment:
 
 from __future__ import annotations
 
+import calendar
 import logging
 import os
 from dataclasses import dataclass
@@ -166,23 +167,42 @@ def flush(vault: Vault) -> None:
     del _pending[: len(batch)]
 
 
-def usage_data(vault: Vault) -> dict[str, Any]:
-    """This month's spend: {month, spent, budget, by_kind: [{kind, usd}]}, largest first."""
-    m = _month()
-    saved = dict(vault.read_yaml(USAGE_FILE, {}).get(m) or {})
+HISTORY_MONTHS = 6
+
+
+def usage_data(vault: Vault, today: date | None = None) -> dict[str, Any]:
+    """This month's spend and pace, plus recent month totals.
+
+    {month, spent, budget, projected, by_kind: [{kind, usd}] largest first,
+    history: [{month, usd}] oldest first, ending with this month}. `projected`
+    is a straight-line month-end estimate from spend so far.
+    """
+    today = today or date.today()
+    m = _month(today)
+    saved_all = vault.read_yaml(USAGE_FILE, {}) or {}
+    saved = dict(saved_all.get(m) or {})
     for p in _pending:
         if p.month == m:
             saved[p.kind] = float(saved.get(p.kind, 0.0)) + p.usd
             saved["total"] = float(saved.get("total", 0.0)) + p.usd
     total = float(saved.pop("total", 0.0))
+    days_in_month = calendar.monthrange(today.year, today.month)[1]
+    history = [
+        {"month": str(k), "usd": round(float((v or {}).get("total", 0.0)), 2)}
+        for k, v in sorted(saved_all.items())
+        if str(k) < m and isinstance(v, dict)
+    ][-(HISTORY_MONTHS - 1) :]
+    history.append({"month": m, "usd": round(total, 2)})
     return {
         "month": m,
         "spent": round(total, 2),
         "budget": monthly_budget(),
+        "projected": round(total / today.day * days_in_month, 2),
         "by_kind": [
             {"kind": kind, "usd": round(float(usd), 2)}
             for kind, usd in sorted(saved.items(), key=lambda kv: -float(kv[1]))
         ],
+        "history": history,
     }
 
 

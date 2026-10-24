@@ -1067,7 +1067,8 @@ class Api:
             return 200, {"text": None, "message": "not configured"}
         days = _int(req.arg("days"), 7, high=365)
         try:
-            return 200, {"text": analytics.fetch_report(days)}
+            data = analytics.fetch_report_data(days)
+            return 200, {"text": analytics.format_report(data), "data": data}
         except analytics.AnalyticsError as exc:
             logger.warning("site report failed: %s", exc)
             raise ApiError(502, "upstream", "Couldn't reach PostHog.") from exc
