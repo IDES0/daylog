@@ -1637,7 +1637,7 @@ function initDisciplines(c) {
 }
 
 // Three looks, picked under the graph and remembered on this device:
-// constellation (element hubs around Me, branch width = sessions, cross-links
+// constellation (element hubs around one point, branch width = sessions, cross-links
 // only on a tap), classic (the first radial tree) and petals (a sunburst, each
 // slice as wide as its sessions).
 const DISC_STYLES = [
@@ -1706,13 +1706,13 @@ function discTip(box, tip, GD, byId) {
   return { show, hide };
 }
 
-// Me at the centre, the elements as solid hubs on a ring around it, sports on
-// the rim. Dots and branches grow with sessions; a sport's other parents are
+// One point at the centre, the elements as solid hubs on a ring around it,
+// sports on the rim. Dots and branches grow with sessions; a sport's other parents are
 // drawn only while it's tapped or hovered, so the picture stays calm.
 function drawConstellation(box, GD) {
   const d3 = window.d3;
   const R = 300, R1 = 110;
-  const { svg, g, tip, fs, zoomTo } = discFrame(box, "The discipline graph: your sports under Earth, Water, Body and Air, all from you");
+  const { svg, g, tip, fs, zoomTo } = discFrame(box, "The discipline graph: your sports under Earth, Water, Body and Air");
   const byId = new Map(GD.nodes.map(n => [n.id, n]));
   const { show, hide } = discTip(box, tip, GD, byId);
   const rows = [{ id: "_", parent: null }, ...GD.nodes.map(n => ({ ...n, parent: n.parent && byId.has(n.parent) ? n.parent : "_" }))];
@@ -1766,8 +1766,7 @@ function drawConstellation(box, GD) {
   hubs.append("circle").attr("r", 46).attr("fill", d => colour(d.id)).attr("opacity", 0.14);
   hubs.append("circle").attr("r", 34).attr("fill", d => colour(d.id)).attr("stroke", "var(--bg)").attr("stroke-width", 3);
   hubs.append("text").attr("class", "dhub").attr("font-size", Math.min(24, fs * 1.25)).attr("dy", "0.35em").text(d => d.data.name);
-  g.append("circle").attr("r", 30).attr("fill", "var(--text)");
-  g.append("text").attr("class", "dme").attr("font-size", Math.min(24, fs * 1.25)).attr("dy", "0.35em").text("Me");
+  g.append("circle").attr("r", 5).attr("fill", "var(--text)");
 
   g.append("g").selectAll("text").data(sports).join("text")
     .attr("class", d => "dlabel" + (d.data.state === "locked" ? " locked" : ""))
@@ -1784,13 +1783,12 @@ function drawConstellation(box, GD) {
   svg.on("click", blur);
 }
 
-// Me in the middle, the elements as the first ring, sports outside them; no
-// lines. A slice's width is its all-time sessions, with a sliver for ones not
+// The elements as the first ring, sports outside them; no lines. A slice's width is its all-time sessions, with a sliver for ones not
 // done yet so they stay on the wheel.
 function drawPetals(box, GD) {
   const d3 = window.d3;
   const R = 470, R0 = 88;
-  const { svg, g, tip, fs, zoomTo } = discFrame(box, "The discipline graph as a wheel: your sports around you, sized by sessions");
+  const { svg, g, tip, fs, zoomTo } = discFrame(box, "The discipline graph as a wheel: your sports, sized by sessions");
   const byId = new Map(GD.nodes.map(n => [n.id, n]));
   const { show, hide } = discTip(box, tip, GD, byId);
   const parents = new Set(GD.nodes.map(n => n.parent).filter(Boolean));
@@ -1812,8 +1810,6 @@ function drawPetals(box, GD) {
     .attr("stroke", "var(--bg)").attr("stroke-width", 1.5)
     .on("pointerenter", show).on("pointerleave", hide)
     .on("click", (e, d) => { e.stopPropagation(); show(e, d); if (d.depth === 1) zoomTo(d.descendants().map(centre), 60); });
-  g.append("circle").attr("r", R0 - 12).attr("fill", "var(--text)");
-  g.append("text").attr("class", "dme").attr("font-size", Math.min(30, fs * 1.5)).attr("dy", "0.35em").text("Me");
   // Only names that fit their slice; the rest are a tap away.
   const fits = d => (d.x1 - d.x0) * (inner(d) + outer(d)) / 2 > fs * 1.1;
   g.append("g").selectAll("text").data(parts.filter(fits)).join("text")
