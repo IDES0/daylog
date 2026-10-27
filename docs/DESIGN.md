@@ -111,7 +111,12 @@ The ledger is the foundation; the assistant is only as good as its grounding.
   `llm.py`, with a monthly budget and a per-run research cap. Long calls
   stream.
 - **Cloud routines (Claude Code, on the user's plan)**: a daily research
-  run before the brief and a weekly deep dive. They write under `research/`
+  run before the brief and a weekly deep dive, plus five narrower ones
+  (prompts in `docs/routines/`, sharing `_shared.md`): the evening request
+  sweep (nightly), the job-hunt check (weekdays), the decision push
+  (Wednesdays), the crew finder (Tuesdays) and the weekend planner
+  (Thursdays). Each writes `research/daily/<date>-<job>.md` dated for the
+  next morning, which the brief reads with the main daily file. They write under `research/`
   and may enrich existing places; they never create places or touch the
   journal. Changes to the itinerary, goals or plan they only propose, as
   `research/proposals/*.yaml`; the app shows each as one card (the brief's
@@ -161,6 +166,7 @@ The ledger is the foundation; the assistant is only as good as its grounding.
 | 2026-10-24 | Rankings drop the liked/fine/disliked tiers: each category is one ordered list and every score is relative to it (10 for #1, 1 for last). The user wants everything graded against everything else. A new place is placed by head-to-heads over the whole list (about 7 for 100 places); a rank card is just Rank it / Skip. Old tiered files read as one list (liked, then fine, then disliked) and flatten on the next write |
 | 2026-10-24 | The discipline graph gets three looks, picked under it and remembered per device: Constellation (default: Me in the centre, Earth/Water/Body/Air as solid hubs, dot size and branch width by sessions, a sport's other parents drawn only while it's tapped), Classic (the first radial tree) and Petals (a sunburst, slice width by sessions). The user liked both Constellation and the original, and wanted Petals to show how much each sport is done |
 | 2026-10-26 | The research routines run on the user's clock (America/Chicago; daily 11:30 UTC, weekly Sunday 17:00 UTC) so the morning file is written hours before the 07:00 brief, not the afternoon before. The graph drops the "Me" label; the branches meet at a plain dot |
+| 2026-10-27 | More background research on the user's plan, not more paid API calls: five extra routines (request sweep, job hunt, decision push, crew finder, weekend planner). They write only under `research/`, never contact anyone and never get send access. The brief now reads every `research/daily/<today>*.md`, chat lists the last three days of them, and chat gets `search_journal`, a full-text search over transcripts and summaries (no embeddings yet: the journal is small enough to scan) |
 
 ## Not built
 

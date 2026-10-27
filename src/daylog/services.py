@@ -323,6 +323,21 @@ def last_brief(v: Vault | None = None) -> Brief | None:
     return Brief(day, text.strip()) if text else None
 
 
+def todays_research(v: Vault, today: date) -> str | None:
+    """Every routine file dated today, the morning run first: `<date>.md` and the
+    others' `<date>-<slug>.md` (last night's request sweep, the job check, ...)."""
+    main = f"research/daily/{today.isoformat()}.md"
+    names = sorted(
+        v.list_docs("research/daily", f"{today.isoformat()}*.md"), key=lambda n: (n != main, n)
+    )
+    parts = []
+    for name in names:
+        text = v.read_text(name)
+        if text:
+            parts.append(text if name == main else f"<!-- {name} -->\n{text}")
+    return "\n\n".join(parts) or None
+
+
 def build_brief(v: Vault, today: date) -> str:
     """The morning brief, with the Site block when analytics are set up.
 
@@ -356,7 +371,7 @@ def build_brief(v: Vault, today: date) -> str:
             name: wishlist_flow.dossier_digest(text)
             for name, text in wishlist_flow.dossiers_for(v, v.read_itinerary()).items()
         },
-        morning_research=v.read_text(f"research/daily/{today.isoformat()}.md"),
+        morning_research=todays_research(v, today),
         current_plan=plan_flow.latest_plan(v),
         principles=v.read_principles(),
         disciplines=disciplines.summary(v, today),
