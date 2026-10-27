@@ -55,6 +55,15 @@ TOOLS: list[ToolParam] = [
         ["start", "end"],
     ),
     _tool(
+        "search_journal",
+        "Full-text search of the whole journal (what they said, not just the summaries): "
+        "days whose transcript or summary contains every word of `query`, ignoring case, "
+        "newest first, with the matching lines. Use it for 'when did I last…', 'what did I "
+        "say about…', and to find days before reading them with get_journal.",
+        {"query": {"type": "string"}, "limit": {"type": "integer"}},
+        ["query"],
+    ),
+    _tool(
         "get_trail",
         "Where the user was based and which places they went, day by day, for a date range.",
         {"start": {"type": "string"}, "end": {"type": "string"}},
@@ -300,6 +309,29 @@ class Tools:
             blocks.append(f"## {d.isoformat()}\n{entry.summary}\n{json.dumps(fm, default=str)}")
         return "\n\n".join(blocks)
 
+    def t_search_journal(self, query: str, limit: int = 12) -> str:
+        words = [w.lower() for w in query.split()]
+        if not words:
+            return "Give some words to search for."
+        cap = max(1, min(int(limit), 30))
+        hits = []
+        entries = self.v.read_journal_range(date(2000, 1, 1), self.today)
+        for d, entry in sorted(entries.items(), reverse=True):
+            text = f"{entry.transcript}\n{entry.summary}"
+            if not all(w in text.lower() for w in words):
+                continue
+            lines = [
+                line.strip()
+                for line in text.splitlines()
+                if line.strip()
+                and not line.startswith("#")
+                and any(w in line.lower() for w in words)
+            ]
+            hits.append(f"## {d.isoformat()}\n" + " … ".join(line[:300] for line in lines[:3]))
+            if len(hits) >= cap:
+                break
+        return "\n\n".join(hits) or f"Nothing in the journal mentions {query!r}."
+
     def t_get_trail(self, start: str, end: str) -> str:
         s, e = self._range(start, end)
         entries = self.v.read_journal_range(s, e)
@@ -370,8 +402,11 @@ class Tools:
         lines = []
         for folder in ("research", "research/decisions", "research/focus"):
             lines += self.v.list_docs(folder)
-        for folder in ("research/daily", "research/weekly"):
-            lines += self.v.list_docs(folder)[-3:]
+        # Every routine file from the last three days with any, then the last 3 weeklies.
+        daily = self.v.list_docs("research/daily")
+        days = sorted({Path(p).name[:10] for p in daily})[-3:]
+        lines += [p for p in daily if Path(p).name[:10] in days]
+        lines += self.v.list_docs("research/weekly")[-3:]
         return (
             "\n".join(p.removeprefix("research/").removesuffix(".md") for p in lines) or "None yet."
         )
