@@ -201,7 +201,9 @@ until its variable is set, and 404s everything else:
   the status domain); `?name=Charlee` fills in their name. Each page is a
   file, `booking/<slug>.yaml`: its wording (`kicker`, `title` with `*italic*`,
   `lede`, `details`, `types`, `order_label`, `notes_label`, `checks`, `fine`),
-  `where`, `minutes`, `event` (the calendar title) and `days`, each a `date`
+  `where`, `minutes`, `event` (the calendar title), `share_title` and
+  `share_text` for link previews (plus `booking/<slug>.png`, 1200×630, as the
+  preview image) and `days`, each a `date`
   with `times` (`"13:00"`) and optional `held` times with a note; `open:
   false` or deleting the file closes it. A booking is saved as pending in
   `bookings.yaml`, you get one notification, and a card in the app asks
