@@ -52,8 +52,8 @@ def _build_feed_bytes() -> bytes:
     )
 
 
-_BOOK_PATH = re.compile(r"/book/([a-z0-9-]+)")
-_BOOK_HOST_PATH = re.compile(r"/([a-z0-9-]+)")
+_BOOK_PATH = re.compile(r"/book/([a-z0-9-]+)(\.png)?")
+_BOOK_HOST_PATH = re.compile(r"/([a-z0-9-]+)(\.png)?")
 
 
 def _book_host(host: str | None) -> bool:
@@ -61,11 +61,12 @@ def _book_host(host: str | None) -> bool:
     return (host or "").lower().startswith("book.")
 
 
-def _booking_slug(host: str | None, path: str) -> str | None:
+def _booking_slug(host: str | None, path: str) -> tuple[str, bool] | None:
+    """(slug, wants the preview image) for a booking path, else None."""
     match = _BOOK_PATH.fullmatch(path) or (
         _BOOK_HOST_PATH.fullmatch(path) if _book_host(host) else None
     )
-    return match.group(1) if match else None
+    return (match.group(1), bool(match.group(2))) if match else None
 
 
 def _booking_vault() -> Vault:
@@ -75,13 +76,14 @@ def _booking_vault() -> Vault:
     return vault
 
 
-def _booking_page(slug: str) -> bytes | None:
+def _booking_page(slug: str, host: str | None, path: str) -> bytes | None:
     vault = _booking_vault()
     spec = booking.page(vault, slug)
     if spec is None:
         return None
     shown = booking.view(slug, spec, booking.bookings(vault), datetime.now(tz()))
-    return web.booking_page(shown)
+    image = booking.preview(vault, slug) is not None
+    return web.booking_page(shown, f"https://{host}{path}", image)
 
 
 def _week_of(query: str) -> date | None:
@@ -183,9 +185,18 @@ def _make_handler(
             path = url.path
             build: Any
             host = self.headers.get("Host")
-            slug = _booking_slug(host, path) if site else None
-            if slug is not None:
-                build, content_type = (lambda: _booking_page(slug)), "text/html; charset=utf-8"
+            wanted = _booking_slug(host, path) if site else None
+            if wanted is not None and wanted[1]:
+                image = booking.preview(_booking_vault(), wanted[0])
+                if image is None:
+                    self._not_found()
+                else:
+                    self._send(200, "image/png", image, cache="public, max-age=3600")
+                return
+            if wanted is not None:
+                slug = wanted[0]
+                build = lambda: _booking_page(slug, host, path)  # noqa: E731
+                content_type = "text/html; charset=utf-8"
             elif site and _book_host(host):
                 if path == "/robots.txt":
                     self._send(200, "text/plain; charset=utf-8", web.ROBOTS)
@@ -259,9 +270,9 @@ def _make_handler(
         def do_POST(self) -> None:
             path = urlsplit(self.path).path
             host = self.headers.get("Host")
-            slug = _booking_slug(host, path) if site else None
-            if slug is not None:
-                self._book(slug)
+            wanted = _booking_slug(host, path) if site else None
+            if wanted is not None and not wanted[1]:
+                self._book(wanted[0])
             elif site and _book_host(host):
                 self._not_found()
             elif health_path and path == health_path:

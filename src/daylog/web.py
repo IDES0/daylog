@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import hashlib
 import hmac
+import html
 import json
 import struct
 import threading
@@ -25,6 +26,7 @@ from collections import deque
 from functools import lru_cache
 from http.cookies import CookieError, SimpleCookie
 from importlib import resources
+from typing import Any
 from urllib.parse import parse_qs
 
 SESSION_COOKIE = "daylog_session"
@@ -190,12 +192,25 @@ self.addEventListener("notificationclick", e => {
 ROBOTS = b"User-agent: *\nDisallow: /\n"
 
 
-def booking_page(shown: dict[str, object]) -> bytes:
-    """A booking page (webapp/static/book.html) with its slots filled in; see booking.view."""
+def booking_page(shown: dict[str, Any], base: str, image: bool = False) -> bytes:
+    """A booking page (webapp/static/book.html) with its slots filled in; see
+    booking.view. `base` is the page's absolute URL; `image` adds the
+    link-preview image at `<base>.png`."""
     template = (resources.files("daylog.webapp") / "static" / "book.html").read_text("utf-8")
     # JSON inside a <script>: escape "<" so a value can't close the tag.
     data = json.dumps(shown, ensure_ascii=False).replace("<", "\\u003c")
-    return template.replace('"__BOOKING__"', data, 1).encode("utf-8")
+    tags = [
+        ("og:type", "website"),
+        ("og:url", base),
+        ("og:title", str(shown["share_title"])),
+        ("og:description", str(shown["share_text"])),
+    ]
+    if image:
+        tags += [("og:image", base + ".png"), ("og:image:width", "1200")]
+        tags += [("og:image:height", "630"), ("twitter:card", "summary_large_image")]
+    meta = "\n".join(f'<meta property="{k}" content="{html.escape(v)}">' for k, v in tags if v)
+    page = template.replace("<!--SHARE-->", meta, 1)
+    return page.replace('"__BOOKING__"', data, 1).encode("utf-8")
 
 
 def icon_svg() -> bytes:
