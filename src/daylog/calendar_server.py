@@ -68,8 +68,15 @@ def _booking_slug(host: str | None, path: str) -> str | None:
     return match.group(1) if match else None
 
 
-def _booking_page(slug: str) -> bytes | None:
+def _booking_vault() -> Vault:
+    # Caught up with the remote (throttled), so a page written elsewhere shows.
     vault = _vault()
+    vault.sync()
+    return vault
+
+
+def _booking_page(slug: str) -> bytes | None:
+    vault = _booking_vault()
     spec = booking.page(vault, slug)
     if spec is None:
         return None
@@ -339,7 +346,7 @@ def _make_handler(
             if not book_limit.allow(self._client()):
                 self._json(429, {"error": "slow_down", "message": "Too many tries. Try later."})
                 return
-            vault = _vault()
+            vault = _booking_vault()
             try:
                 saved = booking.request(vault, slug, data, datetime.now(tz()))
             except booking.BookingError as exc:
