@@ -6,7 +6,9 @@ view; once the password line has set a session, see web.py, the web app's
 shell from webapp/static, falling back to the private view), the files that
 make it installable as an app, the web app's JSON API under /api/ (see
 webapp/api.py: session first, then the CSRF header on anything but GET),
-and the phone's daily health numbers (see health.py), under its own secret.
+the phone's daily health numbers (see health.py), under its own secret,
+and booking pages (see booking.py) at /book/<slug>, or /<slug> on the
+book. domain, which serves nothing else.
 Request bodies are never logged.
 """
 
@@ -15,6 +17,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 import threading
 from datetime import date, datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -22,7 +25,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs, urlsplit
 
-from daylog import calendar_feed, daily, dashboard, health, web
+from daylog import booking, calendar_feed, daily, dashboard, health, push, web
 from daylog.runtime import tz
 from daylog.vault import Vault
 from daylog.webapp import api as webapi
@@ -41,7 +44,37 @@ def _build_feed_bytes() -> bytes:
         for entry_date in vault.list_journal_dates()
         if (entry := vault.read_journal_entry(entry_date)) is not None
     ]
-    return calendar_feed.build_feed(vault.read_goals(), vault.read_itinerary(), journal_entries)
+    return calendar_feed.build_feed(
+        vault.read_goals(),
+        vault.read_itinerary(),
+        journal_entries,
+        booking.events(booking.bookings(vault), tz()),
+    )
+
+
+_BOOK_PATH = re.compile(r"/book/([a-z0-9-]+)")
+_BOOK_HOST_PATH = re.compile(r"/([a-z0-9-]+)")
+
+
+def _book_host(host: str | None) -> bool:
+    """The booking domain (book.<domain>) serves booking pages and nothing else."""
+    return (host or "").lower().startswith("book.")
+
+
+def _booking_slug(host: str | None, path: str) -> str | None:
+    match = _BOOK_PATH.fullmatch(path) or (
+        _BOOK_HOST_PATH.fullmatch(path) if _book_host(host) else None
+    )
+    return match.group(1) if match else None
+
+
+def _booking_page(slug: str) -> bytes | None:
+    vault = _vault()
+    spec = booking.page(vault, slug)
+    if spec is None:
+        return None
+    shown = booking.view(slug, spec, booking.bookings(vault), datetime.now(tz()))
+    return web.booking_page(shown)
 
 
 def _week_of(query: str) -> date | None:
@@ -102,6 +135,9 @@ def _make_handler(
         except Exception:
             logger.exception("couldn't resume spooled web notes")
 
+    # Bookings per client, counted across requests like the login guard.
+    book_limit = booking.RateLimit()
+
     class Handler(BaseHTTPRequestHandler):
         web_api = api
 
@@ -139,7 +175,17 @@ def _make_handler(
             url = urlsplit(self.path)
             path = url.path
             build: Any
-            if feed_path and path == feed_path:
+            host = self.headers.get("Host")
+            slug = _booking_slug(host, path) if site else None
+            if slug is not None:
+                build, content_type = (lambda: _booking_page(slug)), "text/html; charset=utf-8"
+            elif site and _book_host(host):
+                if path == "/robots.txt":
+                    self._send(200, "text/plain; charset=utf-8", web.ROBOTS)
+                else:
+                    self._not_found()
+                return
+            elif feed_path and path == feed_path:
                 build, content_type = _build_feed_bytes, "text/calendar; charset=utf-8"
             elif api and path.startswith("/api/"):
                 self._api("GET")
@@ -186,6 +232,9 @@ def _make_handler(
                 self.send_response(500)
                 self.end_headers()
                 return
+            if body is None:
+                self._not_found()
+                return
             self._send(200, content_type, body)
 
         def _reply(self, code: int, text: str) -> None:
@@ -202,7 +251,13 @@ def _make_handler(
 
         def do_POST(self) -> None:
             path = urlsplit(self.path).path
-            if health_path and path == health_path:
+            host = self.headers.get("Host")
+            slug = _booking_slug(host, path) if site else None
+            if slug is not None:
+                self._book(slug)
+            elif site and _book_host(host):
+                self._not_found()
+            elif health_path and path == health_path:
                 self._store_health()
             elif site and path == "/login":
                 self._login()
@@ -250,6 +305,54 @@ def _make_handler(
                     return
                 req.body = self.rfile.read(length) if length else b""
             self._json(*api.handle(req))
+
+        def _client(self) -> str:
+            # Behind Railway's proxy the caller is the first forwarded address.
+            forwarded = (self.headers.get("X-Forwarded-For") or "").split(",")[0].strip()
+            return forwarded or self.client_address[0]
+
+        def _book(self, slug: str) -> None:
+            # No session: anyone with the link may book. JSON only (a plain
+            # form from another site can't send it) and same-host Origin.
+            origin = self.headers.get("Origin")
+            if origin and urlsplit(origin).netloc != self.headers.get("Host"):
+                self._json(403, {"error": "forbidden"})
+                return
+            if "application/json" not in (self.headers.get("Content-Type") or ""):
+                self._json(415, {"error": "json_only"})
+                return
+            body = self._body(booking.MAX_BODY_BYTES)
+            if body is None:
+                self._json(413, {"error": "too_large"})
+                return
+            try:
+                data = json.loads(body)
+            except ValueError:
+                data = None
+            if not isinstance(data, dict):
+                self._json(400, {"error": "bad_json"})
+                return
+            if data.get("website"):
+                # The hidden field only a bot fills in: pretend it worked.
+                self._json(200, {"ok": True, "ref": "BOOK-0000-0000"})
+                return
+            if not book_limit.allow(self._client()):
+                self._json(429, {"error": "slow_down", "message": "Too many tries. Try later."})
+                return
+            vault = _vault()
+            try:
+                saved = booking.request(vault, slug, data, datetime.now(tz()))
+            except booking.BookingError as exc:
+                self._json(exc.status, {"error": "refused", "message": exc.message})
+                return
+            except Exception:
+                logger.exception("failed to save a booking")
+                self._json(500, {"error": "server_error", "message": "Couldn't save that."})
+                return
+            logger.info("booking saved on %s for %s %s", slug, saved["date"], saved["time"])
+            title, text = booking.notice(saved)
+            threading.Thread(target=push.send, args=(vault, title, text), daemon=True).start()
+            self._json(200, {"ok": True, "ref": saved["ref"], "when": booking.when(saved)})
 
         def _login(self) -> None:
             # Right password: a session, so / shows the private view. Anything

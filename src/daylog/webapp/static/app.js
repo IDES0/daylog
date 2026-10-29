@@ -299,7 +299,7 @@ function okMsg(text) { return h("div.ok-msg", icon("check"), h("span", text)); }
 const KIND = {
   goal_slip: "Goal date", itinerary: "Itinerary", correction: "Correction", chat_proposal: "Proposed change",
   discipline_fix: "Discipline", discipline_add: "New discipline", ripple: "Ripple", plan: "Plan",
-  place: "Place", want: "Wishlist", research: "Research", rank: "Rank",
+  place: "Place", want: "Wishlist", research: "Research", rank: "Rank", booking: "Booking",
 };
 
 function cardView(card) {

@@ -2,7 +2,8 @@
 
 Pure logic — no filesystem access (vault.py owns that; the caller passes
 in already-loaded data). One VEVENT per goal/itinerary deadline or
-target, plus one all-day VEVENT per day with a journal entry. This is a
+target, plus one all-day VEVENT per day with a journal entry, plus a timed
+VEVENT per accepted booking. This is a
 view into daylog's data for a calendar app to render: nothing here
 writes back to the vault, and a subscribed calendar is read-only by
 construction — editing an event in Google/Apple Calendar has no effect
@@ -103,6 +104,21 @@ def _itinerary_events(cal: Calendar, itinerary_data: list[dict[str, Any]]) -> No
             )
 
 
+def _timed_events(cal: Calendar, timed: list[dict[str, Any]]) -> None:
+    """Events with a start and end time (accepted bookings, see booking.events)."""
+    for item in timed:
+        event = Event()
+        event.add("uid", item["uid"])
+        event.add("summary", item["summary"])
+        event.add("dtstart", item["start"])
+        event.add("dtend", item["end"])
+        if item.get("location"):
+            event.add("location", item["location"])
+        if item.get("description"):
+            event.add("description", item["description"])
+        cal.add_component(event)
+
+
 def _journal_summary_line(entry: JournalEntry) -> str:
     """Strip the '### HH:MM' per-note headings, leaving flowing prose."""
     return " ".join(
@@ -151,6 +167,7 @@ def build_feed(
     goals_data: list[dict[str, Any]],
     itinerary_data: list[dict[str, Any]],
     journal_entries: list[JournalEntry],
+    timed: list[dict[str, Any]] | None = None,
 ) -> bytes:
     cal = Calendar()
     cal.add("prodid", PRODID)
@@ -161,6 +178,7 @@ def build_feed(
     _goal_events(cal, goals_data)
     _itinerary_events(cal, itinerary_data)
     _journal_events(cal, journal_entries)
+    _timed_events(cal, timed or [])
 
     ical_bytes: bytes = cal.to_ical()
     return ical_bytes

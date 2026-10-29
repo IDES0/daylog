@@ -34,6 +34,7 @@ KINDS = (
     "want",
     "research",
     "rank",
+    "booking",
 )
 
 

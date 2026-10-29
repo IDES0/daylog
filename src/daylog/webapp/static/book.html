@@ -1,0 +1,225 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="robots" content="noindex,nofollow">
+<title>Book a time</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&family=Instrument+Serif:ital@0;1&display=swap">
+<style>
+/* One narrow intake form, like a firm's client portal, with a stamped confirmation at the end. */
+:root{
+  --bg:#eef1ee; --card:#ffffff; --ink:#16231d; --muted:#5d6b64; --line:#d5ddd8;
+  --accent:#1f5c43; --accent-ink:#ffffff; --hi:#f4e27a; --dis:#e7ebe8; --err:#b3261e;
+  --serif:"Instrument Serif",Georgia,serif; --sans:"IBM Plex Sans",system-ui,sans-serif; --mono:"IBM Plex Mono",ui-monospace,monospace;
+}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
+  --bg:#101714; --card:#18221d; --ink:#e6ede9; --muted:#97a69e; --line:#2c3a33;
+  --accent:#6cc39b; --accent-ink:#0e1a14; --hi:#6b5f1c; --dis:#1f2a24; --err:#f2b8b5; color-scheme:dark}}
+:root[data-theme="dark"]{
+  --bg:#101714; --card:#18221d; --ink:#e6ede9; --muted:#97a69e; --line:#2c3a33;
+  --accent:#6cc39b; --accent-ink:#0e1a14; --hi:#6b5f1c; --dis:#1f2a24; --err:#f2b8b5; color-scheme:dark}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--sans);font-size:15px;line-height:1.5;
+  padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));padding-block:28px 48px}
+.wrap{max-width:520px;margin:0 auto;display:flex;flex-direction:column;gap:18px}
+.firm{font-family:var(--mono);font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:var(--muted)}
+h1{font-family:var(--serif);font-weight:400;font-size:40px;line-height:1.05;margin:4px 0 0;text-wrap:balance}
+h1 em{font-style:italic;color:var(--accent)}
+.lede{color:var(--muted);margin:0}
+.card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:18px;display:flex;flex-direction:column;gap:14px}
+.meta{display:grid;grid-template-columns:auto 1fr;gap:6px 14px;font-size:14px;margin:0}
+.meta dt{font-family:var(--mono);font-size:11px;letter-spacing:.1em;text-transform:uppercase;color:var(--muted);padding-top:2px}
+.meta dd{margin:0}
+.label{font-family:var(--mono);font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);margin:0}
+.days,.slots{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+.day,.slot{font:inherit;color:var(--ink);background:transparent;border:1px solid var(--line);border-radius:8px;padding:10px 6px;cursor:pointer;text-align:center}
+.day b{display:block;font-size:13px;font-weight:600}
+.day span{font-family:var(--mono);font-size:12px;color:var(--muted)}
+.day[aria-pressed="true"],.slot[aria-pressed="true"]{background:var(--accent);color:var(--accent-ink);border-color:var(--accent)}
+.day[aria-pressed="true"] span{color:var(--accent-ink)}
+.slot{font-family:var(--mono);font-variant-numeric:tabular-nums;font-size:14px}
+.slot:disabled,.day:disabled{background:var(--dis);color:var(--muted);cursor:not-allowed}
+.slot:disabled{text-decoration:line-through}
+.note{font-size:12px;color:var(--muted);min-height:18px;margin:0}
+button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.field{display:flex;flex-direction:column;gap:6px}
+.field label{font-size:13px;font-weight:600}
+input[type=text],select,textarea{font:inherit;font-size:16px;color:var(--ink);background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:10px 12px;width:100%}
+textarea{resize:vertical;min-height:64px}
+.check{display:flex;gap:10px;align-items:flex-start;font-size:13px}
+.check input{margin-top:3px;accent-color:var(--accent)}
+.trap{position:absolute;left:-9999px;width:1px;height:1px;overflow:hidden}
+.submit{font:inherit;font-weight:600;background:var(--accent);color:var(--accent-ink);border:0;border-radius:8px;padding:14px;cursor:pointer;font-size:15px}
+.submit:disabled{opacity:.45;cursor:not-allowed}
+.err{color:var(--err);font-size:13px;margin:0}
+.fine{font-size:11px;color:var(--muted);text-align:center;margin:0}
+.stamp{align-self:flex-start;font-family:var(--mono);font-size:12px;letter-spacing:.16em;text-transform:uppercase;color:var(--accent);border:2px solid var(--accent);border-radius:4px;padding:4px 10px;transform:rotate(-3deg)}
+.ref{font-family:var(--mono);font-size:20px;font-variant-numeric:tabular-nums;background:var(--hi);padding:2px 6px;border-radius:3px;align-self:flex-start}
+.empty{color:var(--muted);margin:0}
+@media (prefers-reduced-motion:no-preference){.stamp{animation:thunk .35s ease-out}@keyframes thunk{from{transform:rotate(-3deg) scale(1.4);opacity:.3}}}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div class="firm" id="kicker"></div>
+    <h1 id="title"></h1>
+  </header>
+  <p class="lede" id="lede"></p>
+
+  <section id="booking" class="wrap">
+    <div class="card" id="detailsCard"><dl class="meta" id="details"></dl></div>
+
+    <div class="card">
+      <p class="label">1 · Select a date</p>
+      <div class="days" id="days"></div>
+      <p class="label">2 · Select a time</p>
+      <div class="slots" id="slots"></div>
+      <p class="note" id="slotnote"></p>
+    </div>
+
+    <form class="card" id="form" novalidate>
+      <p class="label">3 · Your details</p>
+      <div class="field">
+        <label for="name">Full name</label>
+        <input type="text" id="name" autocomplete="name" maxlength="80">
+      </div>
+      <div class="field" id="typeField">
+        <label for="mtype">Nature of engagement</label>
+        <select id="mtype"></select>
+      </div>
+      <div class="field" id="orderField">
+        <label for="order" id="orderLabel"></label>
+        <input type="text" id="order" maxlength="120" placeholder="e.g. iced oat latte">
+      </div>
+      <div class="field">
+        <label for="notes" id="notesLabel"></label>
+        <textarea id="notes" maxlength="1000"></textarea>
+      </div>
+      <div class="trap" aria-hidden="true"><label>Website <input type="text" id="website" tabindex="-1" autocomplete="off"></label></div>
+      <div id="checks"></div>
+      <p class="err" id="err" hidden></p>
+      <button class="submit" id="submit" type="submit">Confirm booking</button>
+      <p class="fine" id="fine"></p>
+    </form>
+  </section>
+
+  <section id="done" class="card" hidden>
+    <div class="stamp">Booked</div>
+    <p class="label">Confirmation number</p>
+    <div class="ref" id="ref"></div>
+    <dl class="meta" id="summary"></dl>
+    <p style="margin:0">That's it, nothing else to send. Alex has it and will confirm.</p>
+  </section>
+</div>
+
+<script>
+const P = "__BOOKING__";
+const $ = id => document.getElementById(id);
+const text = (id, value) => { $(id).textContent = value; };
+
+document.title = P.title.replace(/\*/g, "");
+text("kicker", P.kicker);
+// *word* in the title is set in italics.
+P.title.split(/(\*[^*]+\*)/).forEach(part => {
+  if (/^\*.+\*$/.test(part)) { const em = document.createElement("em"); em.textContent = part.slice(1, -1); $("title").append(em); }
+  else $("title").append(document.createTextNode(part));
+});
+text("lede", P.lede);
+if (!P.lede) $("lede").hidden = true;
+if (!P.details.length) $("detailsCard").hidden = true;
+P.details.forEach(([k, v]) => {
+  const dt = document.createElement("dt"); dt.textContent = k;
+  const dd = document.createElement("dd"); dd.textContent = v;
+  $("details").append(dt, dd);
+});
+if (P.types.length) P.types.forEach(t => { const o = document.createElement("option"); o.textContent = t; $("mtype").append(o); });
+else $("typeField").hidden = true;
+if (P.order_label) text("orderLabel", P.order_label); else $("orderField").hidden = true;
+text("notesLabel", P.notes_label);
+$("notes").placeholder = P.notes_hint;
+P.checks.forEach((c, i) => {
+  const l = document.createElement("label"); l.className = "check";
+  const box = document.createElement("input"); box.type = "checkbox"; box.className = "ack"; box.id = "ack" + i;
+  l.append(box, document.createTextNode(" " + c));
+  $("checks").append(l);
+});
+text("fine", P.fine);
+$("name").value = new URLSearchParams(location.search).get("name") || "";
+
+const open = d => d.slots.some(s => s.state === "open");
+let day = (P.days.find(open) || {}).date || null;
+let time = null;
+
+function render() {
+  $("days").innerHTML = "";
+  if (!P.days.length) { $("days").innerHTML = '<p class="empty">No times are open right now.</p>'; }
+  P.days.forEach(d => {
+    const b = document.createElement("button"); b.type = "button"; b.className = "day";
+    b.setAttribute("aria-pressed", d.date === day);
+    b.disabled = !open(d);
+    const dow = document.createElement("b"); dow.textContent = d.dow;
+    const date = document.createElement("span"); date.textContent = d.short;
+    b.append(dow, date);
+    b.onclick = () => { day = d.date; time = null; render(); };
+    $("days").append(b);
+  });
+  $("slots").innerHTML = "";
+  const current = P.days.find(d => d.date === day);
+  let note = "";
+  (current ? current.slots : []).forEach(s => {
+    const b = document.createElement("button"); b.type = "button"; b.className = "slot";
+    b.textContent = s.label;
+    b.disabled = s.state !== "open";
+    if (s.state === "held" && s.note) note = `${current.dow} ${s.label} is ${s.note.replace(/^is /, "")}`;
+    b.setAttribute("aria-pressed", s.time === time);
+    b.onclick = () => { time = s.time; render(); };
+    $("slots").append(b);
+  });
+  text("slotnote", note);
+}
+render();
+
+function fail(message) { text("err", message); $("err").hidden = false; }
+
+$("form").addEventListener("submit", async e => {
+  e.preventDefault();
+  $("err").hidden = true;
+  if (!day || !time) return fail("Please select a time slot.");
+  if (!$("name").value.trim()) return fail("Please add your name.");
+  if ([...document.querySelectorAll(".ack")].some(b => !b.checked)) return fail("All acknowledgments are required to proceed. Legal insisted.");
+  $("submit").disabled = true;
+  try {
+    const r = await fetch(location.pathname, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        date: day, time, name: $("name").value, type: $("mtype").value || "",
+        order: $("order").value, notes: $("notes").value, website: $("website").value,
+      }),
+    });
+    const out = await r.json().catch(() => ({}));
+    if (!r.ok) {
+      if (r.status === 409) { const d = P.days.find(x => x.date === day); const s = d && d.slots.find(x => x.time === time); if (s) s.state = "taken"; time = null; render(); }
+      return fail(out.message || "Something went wrong. Please try again.");
+    }
+    const d = P.days.find(x => x.date === day), s = d.slots.find(x => x.time === time);
+    text("ref", out.ref);
+    const rows = [["Client", $("name").value.trim()], ["When", out.when || `${d.long}, ${s.label}`], ["Where", P.where], ["Type", $("mtype").value], ["Order", $("order").value.trim()]];
+    $("summary").innerHTML = "";
+    rows.filter(([, v]) => v).forEach(([k, v]) => {
+      const dt = document.createElement("dt"); dt.textContent = k;
+      const dd = document.createElement("dd"); dd.textContent = v;
+      $("summary").append(dt, dd);
+    });
+    $("booking").hidden = true; $("done").hidden = false; window.scrollTo(0, 0);
+  } catch (_) {
+    fail("Couldn't reach the server. Check your connection and try again.");
+  } finally {
+    $("submit").disabled = false;
+  }
+});
+</script>
+</body>
+</html>

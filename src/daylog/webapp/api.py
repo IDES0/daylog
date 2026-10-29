@@ -32,6 +32,7 @@ from urllib.parse import urlsplit
 
 from daylog import (
     analytics,
+    booking,
     brief,
     chat,
     chat_flow,
@@ -976,8 +977,44 @@ class Api:
         return sum(1 for k in self.cards.card_keys() if k.startswith("proposal:"))
 
     def open_cards(self, req: Request, m: re.Match[str]) -> Reply:
-        self._sync_proposals(self._vault())
+        v = self._vault()
+        self._sync_proposals(v)
+        self._sync_bookings(v)
         return 200, {"cards": self._cards(self.cards.open())}
+
+    # -- bookings from a booking page (booking.py) ------------------------------------
+
+    def _sync_bookings(self, v: Vault) -> None:
+        """One Accept/Decline card per pending booking; it lives in the vault, so
+        a restart or the 24-hour card expiry only re-cards it."""
+        waiting = {str(b["id"]): b for b in booking.pending(v)}
+        for key in self.cards.card_keys():
+            if key.startswith("booking:") and key.removeprefix("booking:") not in waiting:
+                self.cards.drop_key(key)
+        have = self.cards.card_keys()
+        for booking_id, b in waiting.items():
+            if f"booking:{booking_id}" not in have:
+                self._booking_card(b)
+
+    def _booking_card(self, b: dict[str, Any]) -> Card:
+        booking_id, name = str(b["id"]), str(b["name"])
+
+        def apply(answer: str) -> Outcome:
+            done = booking.answer(self._vault(), booking_id, answer == "accept", self._today())
+            if done is None:
+                return Outcome("That booking was already answered.", ok=False)
+            if answer == "accept":
+                return Outcome(f"On your calendar: {name}, {booking.when(done)}. Let them know.")
+            return Outcome(f"Declined. The slot is open again; let {name} know.")
+
+        return self.cards.add(
+            "booking",
+            f"{name} booked {booking.when(b)}",
+            apply,
+            detail=booking.card_detail(b),
+            actions=[action("accept", "Accept", "primary"), action("decline", "Decline")],
+            key=f"booking:{booking_id}",
+        )
 
     def answer_card(self, req: Request, m: re.Match[str]) -> Reply:
         answer = self._json(req).get("action")
