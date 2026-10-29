@@ -78,6 +78,13 @@ def page(v: Vault, slug: str) -> dict[str, Any] | None:
     return dict(spec)
 
 
+def preview(v: Vault, slug: str) -> bytes | None:
+    """The page's link-preview image (`booking/<slug>.png`), if it has one."""
+    if page(v, slug) is None:
+        return None
+    return v.read_bytes(f"{FOLDER}/{slug}.png")
+
+
 def bookings(v: Vault) -> list[dict[str, Any]]:
     data = v.read_yaml(FILE, {}) or {}
     return [dict(b) for b in data.get("bookings") or [] if isinstance(b, dict)]
@@ -140,10 +147,11 @@ def view(
                 "slots": slots,
             }
         )
+    title = str(spec.get("title") or "Book a time")
     return {
         "slug": slug,
         "kicker": str(spec.get("kicker") or ""),
-        "title": str(spec.get("title") or "Book a time"),
+        "title": title,
         "lede": str(spec.get("lede") or ""),
         "details": [[str(k), str(v)] for k, v in (spec.get("details") or {}).items()],
         "where": str(spec.get("where") or ""),
@@ -154,6 +162,9 @@ def view(
         "checks": [str(c) for c in spec.get("checks") or []],
         "fine": str(spec.get("fine") or ""),
         "ref_prefix": str(spec.get("ref_prefix") or "BOOK"),
+        # What a link preview (iMessage, WhatsApp) shows.
+        "share_title": str(spec.get("share_title") or re.sub(r"\*", "", title)),
+        "share_text": str(spec.get("share_text") or spec.get("lede") or ""),
         "days": days,
     }
 

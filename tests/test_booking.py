@@ -169,6 +169,17 @@ def test_the_book_domain_serves_pages_and_nothing_else(server: int) -> None:
     assert _call(server, "GET", "/coffee", "status.example.com")[0] == 404
 
 
+def test_a_page_with_a_preview_image_gets_share_tags(server: int, page: Vault) -> None:
+    _, html = _call(server, "GET", "/coffee", "book.example.com")
+    assert 'property="og:title" content="Book your initial consultation"' in html
+    assert "og:image" not in html
+    assert _call(server, "GET", "/coffee.png", "book.example.com")[0] == 404
+    page.write_text("booking/coffee.png", "png", "preview")
+    _, html = _call(server, "GET", "/coffee?name=Charlee", "book.example.com")
+    assert 'content="https://book.example.com/coffee.png"' in html
+    assert _call(server, "GET", "/coffee.png", "book.example.com") == (200, "png")
+
+
 def test_a_guest_books_over_http(server: int, page: Vault) -> None:
     host = "book.example.com"
     body = {"date": "2026-11-02", "time": "12:00", "name": "Charlee"}

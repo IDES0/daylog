@@ -343,6 +343,10 @@ class Vault:
             return []
         return sorted(str(p.relative_to(self.path)) for p in base.glob(pattern))
 
+    def read_bytes(self, name: str) -> bytes | None:
+        path = self.path / name
+        return path.read_bytes() if path.is_file() else None
+
     def write_text(self, name: str, text: str, commit_message: str) -> Path:
         path = self.path / name
         path.parent.mkdir(parents=True, exist_ok=True)
