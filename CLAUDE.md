@@ -14,7 +14,9 @@ interface; Telegram was retired on 2026-10-24.
 - The web app is the one interface. The web surface: the calendar feed
   (secret path), the status site (one address on its own domain: a guest
   view, and behind one password line the web app, installable as a PWA),
-  and one inlet for the phone's daily health numbers (secret path). The web
+  one inlet for the phone's daily health numbers (secret path), and booking
+  pages on book.johnalexborkowski.com (a guest can only request an offered
+  slot; it's a pending card until the user accepts). The web
   app writes only behind the session + `X-Daylog` CSRF header, through the
   service functions and confirm cards (docs/web-api.md).
 - Every `/api/*` handler checks the session first.

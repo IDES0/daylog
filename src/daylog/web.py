@@ -24,6 +24,7 @@ import zlib
 from collections import deque
 from functools import lru_cache
 from http.cookies import CookieError, SimpleCookie
+from importlib import resources
 from urllib.parse import parse_qs
 
 SESSION_COOKIE = "daylog_session"
@@ -187,6 +188,14 @@ self.addEventListener("notificationclick", e => {
 """
 
 ROBOTS = b"User-agent: *\nDisallow: /\n"
+
+
+def booking_page(shown: dict[str, object]) -> bytes:
+    """A booking page (webapp/static/book.html) with its slots filled in; see booking.view."""
+    template = (resources.files("daylog.webapp") / "static" / "book.html").read_text("utf-8")
+    # JSON inside a <script>: escape "<" so a value can't close the tag.
+    data = json.dumps(shown, ensure_ascii=False).replace("<", "\\u003c")
+    return template.replace('"__BOOKING__"', data, 1).encode("utf-8")
 
 
 def icon_svg() -> bytes:

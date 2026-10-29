@@ -196,6 +196,20 @@ until its variable is set, and 404s everything else:
   names what was saved and what was skipped.
 - **Web app** (with the status site): a JSON API under `/api/` and the app
   shell at `/` (signed in), `/app.js`, `/app.css`. See below.
+- **Booking pages** (with the status site): a link someone can use to pick
+  one of your free slots, at `book.<domain>/<slug>` (or `/book/<slug>` on
+  the status domain); `?name=Charlee` fills in their name. Each page is a
+  file, `booking/<slug>.yaml`: its wording (`kicker`, `title` with `*italic*`,
+  `lede`, `details`, `types`, `order_label`, `notes_label`, `checks`, `fine`),
+  `where`, `minutes`, `event` (the calendar title) and `days`, each a `date`
+  with `times` (`"13:00"`) and optional `held` times with a note; `open:
+  false` or deleting the file closes it. A booking is saved as pending in
+  `bookings.yaml`, you get one notification, and a card in the app asks
+  Accept or Decline; only an accepted one goes on the calendar feed, and
+  nothing is sent to the guest. No session: the guard is JSON-only posts
+  with a same-host Origin, a hidden field bots fill in, 5 bookings per
+  client an hour, 4 KB bodies and at most 10 waiting per page. The book.
+  domain serves nothing else.
 
 ### Web app
 The status site, signed in, is the app: the only interface (Telegram was
@@ -292,7 +306,9 @@ src/daylog/
                    vague-sport resolver, the fix-it and Add answers.
   itinerary.py     The same hard/soft/slip pattern for travel.
   calendar_feed.py The .ics feed; calendar_server.py serves it, the status
-                   page and the health inlet.
+                   page, the health inlet and the booking pages.
+  booking.py       Booking pages: the slots a page offers, a guest's
+                   booking, Accept/Decline; the page is webapp/static/book.html.
   dashboard.py     The read-only status page (one static HTML page).
   health.py        Validates and merges the phone's daily numbers.
   analytics.py     Read-only PostHog queries for the personal site;
@@ -323,6 +339,8 @@ daylog-vault/
   goals.yaml               # hard/soft goals, slip_history
   disciplines.yaml         # the sports graph: parents, requires, status, aliases
   rankings.yaml            # one ordered list per category, best first
+  booking/<slug>.yaml      # a booking page: wording, days and times on offer
+  bookings.yaml            # bookings from those pages: pending/accepted/declined
   research/<place>.md      # destination research files
   research/daily/<date>.md # the morning research routine's output
   plans/<date>.md          # planner output (+ the chosen option)
@@ -494,7 +512,8 @@ Railway, Dockerfile-based build (`railway.json`):
   doesn't expose one by default just because a port is listening. For the
   status site's own domain, add it as a custom domain on the service
   (Settings → Networking) and point a CNAME for `status` at the target
-  Railway gives; Railway issues the certificate.
+  Railway gives; Railway issues the certificate. The booking pages' domain
+  is the same: add `book.<domain>` on the service and a CNAME for `book`.
 
 ## Status
 
