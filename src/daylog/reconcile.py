@@ -23,7 +23,7 @@ from dataclasses import dataclass
 from datetime import date
 from typing import Any
 
-from daylog import disciplines, extract, goals
+from daylog import disciplines, extract, goals, timeline
 from daylog.places import PlaceIndex
 from daylog.vault import JournalEntry
 
@@ -114,6 +114,8 @@ def rebuild(entry: JournalEntry, facts: dict[str, Any]) -> Reconciled:
     for activity in facts.get("activities") or []:
         if isinstance(activity, dict):
             activity.pop("new_discipline_parents", None)
+    # A time the user stated outlives a re-read that came back vaguer.
+    timeline.keep_said_times(entry.frontmatter.get("activities"), facts.get("activities"))
     frontmatter = {k: v for k, v in facts.items() if v not in (None, [], "")}
     if "location" not in frontmatter and entry.frontmatter.get("location"):
         frontmatter["location"] = entry.frontmatter["location"]

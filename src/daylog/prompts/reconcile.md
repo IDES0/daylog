@@ -8,6 +8,9 @@ record for the day once, as if it had been one long note:
 - Something mentioned in more than one note is one item, not two ("going
   surfing" at 7am and "surfed for two hours" at 9pm is one surf session).
 - A later note corrects an earlier one. Use the later version.
+- The `### HH:MM` headings are when each note was recorded, not when
+  things happened. Keep every time the user stated (`at`, `until`,
+  `sessions`, `time: said`) exactly as said in whichever note said it.
 - Totals are for the whole day: the goal progress you record replaces
   what the separate notes recorded, it doesn't add to it.
 - `summary` covers the whole day in two to four sentences.

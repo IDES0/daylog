@@ -219,7 +219,7 @@ def test_private_view_has_the_week_calendar_with_each_days_summary(vault: Vault)
     html = dashboard.render(vault, TODAY, private=True)
 
     assert '<template id="day-2026-10-01">' in html and "Dawn surf &lt;then&gt; work." in html
-    assert 'class="blk"' in html and 'class="blk guess"' in html
+    assert 'class="blk est"' in html and 'class="blk guess"' in html
     assert '<dialog id="dayDialog">' in html
     # Sep 28 – Oct 4: an earlier week to go back to, no later one yet.
     assert 'href="/?week=2026-09-21"' in html and "Next week" not in html

@@ -169,7 +169,9 @@ TOOLS: list[ToolParam] = [
         "Change a past day's record: update, remove or add one item in activities, meals, "
         "felt, skipped or open_questions. Read the day with get_journal first to get the "
         '0-based index. `values` holds the fields to set (e.g. {"hours": 2} or '
-        '{"place": "compass-warung"}); null removes a field. For skipped/'
+        '{"place": "compass-warung"}); null removes a field. A time the user gives is '
+        '{"at": "16:00", "time": "said"} (plus "until" for an end, or "sessions": '
+        '[{"at": "16:00"}, {"at": "18:00"}] for separate sessions). For skipped/'
         'open_questions use {"text": ...}. Goal totals are not touched — use '
         "propose_goal_edit for those.",
         {

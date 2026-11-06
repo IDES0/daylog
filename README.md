@@ -38,6 +38,29 @@ committed.
   today's entry rather than a second copy of the full transcript, which
   stays complete and verbatim under today's date, where the recording
   actually belongs.
+
+### Times and the week calendar
+Each activity can carry when it happened: `at` (start), `until` (end),
+`hours`, and `sessions` for one thing done in separate timed sessions
+("did the 4pm, 6pm and 7pm sessions" is one surf with three sessions, not
+a 16:00–19:00 block). A time the user says is copied exactly and marked
+`time: said`; one the extraction infers ("after lunch", the order things
+were told, when the note was recorded) is `time: estimated`. "12am" said
+of a midday session is read as noon, and a time before the 4am cutoff
+("hit the sack at 2am") is that night. The nightly reconcile keeps a said
+time when its re-read comes back vaguer (`timeline.keep_said_times`).
+
+The Home tab's week calendar (`GET /api/calendar`, laid out by
+`timeline.py`) draws each block from its start to its end (else its
+hours, else 1 h) on an hour grid running past midnight when needed: solid
+where the time was said, a softer fill (`~`) where it was estimated, and
+dashed (`≈`) for an activity with no time, which goes after whatever was
+told before it in the first free stretch (or just before the first timed
+thing, when it was told first). Overlaps sit side by side in lanes. Each
+block shows its name and, when tall enough, its start; tapping a day
+opens an hour-by-hour column with every block's times, session ("2/3")
+and detail, then the summary. Times from email and from a watch are
+designed in `docs/DESIGN.md` (To do), not built.
 - **Corrections**: say a correction out loud ("actually I only surfed 1
   hour, not 2") and extraction is given the day's entry so far to resolve
   it against, by index. Only `activities`/`skipped`/`open_questions` can be
@@ -202,11 +225,9 @@ until its variable is set, and 404s everything else:
     the same address then shows the private view; anything else just
     shows the guest view again. The private view adds goal slips, phone
     numbers by day, and a **week calendar** (Monday first, ‹ › for other
-    weeks via `/?week=YYYY-MM-DD`): each activity is a block at its rough
-    start (`at`, estimated at extraction from what was said and when the
-    note was recorded; `~`), or straight after the one before when it has
-    none (`≈`, dashed), sized by its hours (1 h when unsaid). Tapping a day
-    opens its full summary and the rough times. It also draws the
+    weeks via `/?week=YYYY-MM-DD`), drawn the same way as the web app's
+    (see **Times and the week calendar** above). Tapping a day
+    opens its full summary and its times. It also draws the
     **discipline graph** (d3, radial): Water, Air, Earth and Body around the
     centre, every sport on the outer ring under its first parent, a dashed
     curve to any other parent; size is all-time sessions, fill and stroke

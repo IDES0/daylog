@@ -91,7 +91,7 @@ function weekday(s, len = 0) { const d = parseD(s); if (!d) return ""; const w =
 function addDays(s, n) { const d = parseD(s); d.setDate(d.getDate() + n); return iso(d); }
 function daysBetween(a, b) { return Math.round((parseD(b) - parseD(a)) / 86400000); }
 const todayIso = () => S.today || iso(new Date());
-const clock = x => { const m = Math.round(x * 60); return `${pad(Math.floor(m / 60))}:${pad(m % 60)}`; };
+const clock = x => { const m = Math.round(x * 60); return `${pad(Math.floor(m / 60) % 24)}:${pad(m % 60)}`; };
 const num = (x, digits = 1) => x == null || Number.isNaN(+x) ? null
   : Math.abs(x) >= 100 ? Math.round(x).toLocaleString("en-US") : String(+(+x).toFixed(digits));
 const words = s => String(s ?? "").replace(/_/g, " ");
@@ -722,27 +722,47 @@ function loadCalendar(week) {
   api(`/api/calendar${q}`).then(renderCalendar, e => fill(c.body, errorBox(e, () => loadCalendar(week))));
 }
 
-function layoutLanes(blocks) {
-  const bs = blocks.map(b => ({ ...b, end: b.start + Math.max(0.5, b.hours || 1) }))
-    .sort((a, b) => a.start - b.start || a.end - b.end);
-  let cluster = [], ends = [], cEnd = -1;
-  const finish = () => cluster.forEach(b => { b.lanes = ends.length; });
-  for (const b of bs) {
-    if (cluster.length && b.start >= cEnd) { finish(); cluster = []; ends = []; cEnd = -1; }
-    let i = ends.findIndex(e => e <= b.start);
-    if (i < 0) { i = ends.length; ends.push(b.end); } else ends[i] = b.end;
-    b.lane = i; cluster.push(b); cEnd = Math.max(cEnd, b.end);
+// How sure a block's time is: said (exact), estimated (~), or placed by order (≈).
+// Lanes for overlaps come from the server (timeline.py).
+const MARK = { said: "", estimated: "~", guessed: "≈" };
+const timeKind = b => b.time || (b.guess ? "guessed" : "estimated");
+const blkClass = b => ({ said: "", estimated: ".est", guessed: ".guess" })[timeKind(b)];
+const blkName = b => words(b.label) + (b.session ? ` ${b.session}` : "");
+const blkEnd = b => b.end ?? b.start + (b.hours || 1);
+const blkWhen = b => `${MARK[timeKind(b)]}${clock(b.start)}–${clock(blkEnd(b))}`;
+
+// The whole hours some blocks need, on the day's axis (past 24 is after midnight).
+function hourSpan(blocks, lo = 7, hi = 22) {
+  return [Math.floor(Math.min(lo, ...blocks.map(b => b.start))),
+    Math.min(28, Math.ceil(Math.max(hi, ...blocks.map(blkEnd))))];
+}
+
+function hourGutter(lo, hi, step) {
+  const gutter = h("div.cal-gutter", { "aria-hidden": "true" });
+  for (let t = Math.ceil(lo / step) * step; t < hi; t += step) {
+    gutter.append(h("span", { style: { top: `calc(${t - lo} * var(--hour))` } }, pad(t % 24)));
   }
-  finish();
-  return bs;
+  return gutter;
+}
+
+function blockEl(b, lo, inner) {
+  const hours = blkEnd(b) - b.start;
+  return h("span.blk" + blkClass(b), {
+    title: `${blkWhen(b)} ${blkName(b)}${b.detail ? ` · ${b.detail}` : ""}`,
+    style: {
+      "--h": String(b.hue ?? 210),
+      top: `calc(${b.start - lo} * var(--hour))`,
+      height: `calc(${hours} * var(--hour) - 2px)`,
+      left: `${(100 * (b.lane || 0) / (b.lanes || 1)).toFixed(2)}%`,
+      width: `${(100 / (b.lanes || 1)).toFixed(2)}%`,
+    },
+  }, inner(hours));
 }
 
 function renderCalendar(d) {
   const c = S.hCal;
-  const days = (d.days || []).map(x => ({ ...x, blocks: layoutLanes(x.blocks || []) }));
-  const placed = days.flatMap(x => x.blocks);
-  const lo = Math.floor(Math.min(7, ...placed.map(b => b.start)));
-  const hi = Math.min(24, Math.ceil(Math.max(22, ...placed.map(b => b.end))));
+  const days = (d.days || []).map(x => ({ ...x, blocks: x.blocks || [] }));
+  const [lo, hi] = hourSpan(days.flatMap(x => x.blocks));
   const first = d.week_of || (days[0] && days[0].date);
   const last = first ? addDays(first, 6) : "";
   const nav = h("div.cal-nav",
@@ -751,22 +771,14 @@ function renderCalendar(d) {
     h("button.icon-btn", { type: "button", "aria-label": "Next week", disabled: !d.next, onclick: () => loadCalendar(d.next) }, icon("right")));
   fill(c.head, h("h2.label", "Week"), nav);
 
-  const gutter = h("div.cal-gutter", { "aria-hidden": "true" });
-  for (let t = lo; t < hi; t += 3) gutter.append(h("span", { style: { top: `calc(${t - lo} * var(--hour))` } }, pad(t)));
-  const grid = h("div.cal", { style: { "--span": String(hi - lo) } }, gutter);
+  const grid = h("div.cal", { style: { "--span": String(hi - lo) } }, hourGutter(lo, hi, 2));
   const today = todayIso();
   for (const day of days) {
     const head = h("span.cal-head", weekday(day.date, 3), h("b", String(parseD(day.date)?.getDate() ?? "")), scoreBadges(day));
-    const bodyEl = h("span.cal-body", day.blocks.map(b => h("span.blk" + (b.guess ? ".guess" : ""), {
-      title: `${b.guess ? "≈" : "~"}${clock(b.start)} ${words(b.label)}`,
-      style: {
-        "--h": String(b.hue ?? 210),
-        top: `calc(${b.start - lo} * var(--hour))`,
-        height: `calc(${b.end - b.start} * var(--hour) - 2px)`,
-        left: `${(100 * b.lane / b.lanes).toFixed(2)}%`,
-        width: `${(100 / b.lanes).toFixed(2)}%`,
-      },
-    }, words(b.label))));
+    const bodyEl = h("span.cal-body", day.blocks.map(b => blockEl(b, lo, hours => [
+      h("span.blk-name", blkName(b)),
+      hours >= 0.9 ? h("span.blk-time", `${MARK[timeKind(b)]}${clock(b.start)}`) : null,
+    ])));
     const has = day.summary || day.blocks.length;
     const cls = (has ? "" : ".empty") + (day.date === today ? ".today" : "");
     grid.append(has
@@ -776,7 +788,10 @@ function renderCalendar(d) {
   const avg = d.averages || {};
   const avgText = [avg.rating != null ? `you ${avg.rating}` : "", avg.assessment != null ? `assistant ${avg.assessment}` : ""].filter(Boolean).join(" · ");
   fill(c.body, grid,
-    h("p.cal-key", "Rough times: ~ estimated from what you said, ≈ guessed from the order. Tap a day for its summary."),
+    h("p.cal-key",
+      h("span.key", "Solid"), " where you said the time, ",
+      h("span.key.est", "~ estimated"), " from what you said, ",
+      h("span.key.guess", "≈ placed"), " by the order you told it. Tap a day for its times."),
     h("p.cal-key", h("span.score.you", "7"), " your rating, when you give one · ", h("span.score.ai", "6"), " the assistant's, for how the day's time went toward your goals",
       avgText ? ` · Week average: ${avgText}` : ""));
 }
@@ -800,14 +815,27 @@ function scoreRows(day) {
     a ? h("dd", a.why || "") : null);
 }
 
+// One day on a taller clock: every hour marked, each block with its times.
+function dayTimeline(blocks) {
+  const [lo, hi] = hourSpan(blocks, Math.min(...blocks.map(b => b.start)), Math.max(...blocks.map(blkEnd)));
+  return h("div.day-clock", { style: { "--span": String(hi - lo) }, "aria-hidden": "true" },
+    hourGutter(lo, hi, 1),
+    h("span.cal-body", blocks.map(b => blockEl(b, lo, hours => [
+      h("span.blk-time", blkWhen(b)), " ",
+      h("span.blk-name", blkName(b)),
+      b.detail && hours >= 0.9 ? h("span.blk-detail", b.detail) : null,
+    ]))));
+}
+
 function daySheet(day) {
-  const times = [...day.blocks].sort((a, b) => a.start - b.start)
-    .map(b => h("li", `${b.guess ? "≈" : "~"}${clock(b.start)}–${clock(b.end)} ${words(b.label)}`));
+  const blocks = [...day.blocks].sort((a, b) => a.start - b.start);
+  const times = blocks.map(b => h("li", `${blkWhen(b)} ${blkName(b)}`));
   const more = h("div");
   const btn = h("button.btn", { type: "button", onclick: () => { btn.remove(); load(more, () => api(`/api/journal/${day.date}`), j => more.append(dayDetail(j, { summary: false, scores: false }))); } }, "Details & transcript");
   openSheet(`${weekday(day.date)}, ${short(day.date)}`, h("div.stack-lg",
     scoreRows(day),
-    times.length ? h("ul.times", times) : null,
+    blocks.length ? dayTimeline(blocks) : null,
+    times.length ? h("ul.times.sr-only", times) : null,
     day.summary ? md(day.summary) : empty(null, "No summary."),
     h("div", btn, more)));
 }
