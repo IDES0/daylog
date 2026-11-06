@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, datetime
 from typing import Any
 
 from daylog import disciplines, reconcile
@@ -293,3 +293,157 @@ def test_a_sessions_goal_is_counted_from_the_journal() -> None:
     )
     assert [a.goal_id for a in applied] == ["jobs"]
     assert goals_data[0]["progress"] == 3
+
+
+# -- where: sessions by place ---------------------------------------------------
+
+
+def _surf_places() -> PlaceIndex:
+    return PlaceIndex(
+        [
+            {"id": "indonesia", "name": "Indonesia", "kind": "country"},
+            {"id": "bali", "name": "Bali", "kind": "region", "parent": "indonesia"},
+            {"id": "uluwatu", "name": "Uluwatu", "kind": "town", "parent": "bali"},
+            {"id": "impossibles", "name": "Impossibles", "kind": "surf_spot", "parent": "uluwatu"},
+            {"id": "sumbawa", "name": "Sumbawa", "kind": "region", "parent": "indonesia"},
+            {"id": "lakey", "name": "Lakey", "kind": "town", "parent": "sumbawa"},
+            {"id": "lakey-peak", "name": "Lakey Peak", "kind": "surf_spot", "parent": "lakey"},
+            {"id": "usa", "name": "United States", "kind": "country"},
+            {"id": "texas", "name": "Texas", "kind": "region", "parent": "usa"},
+            {"id": "waco", "name": "Waco", "kind": "town", "parent": "texas"},
+            {"id": "pool", "name": "Wave Pool", "kind": "wave_pool", "parent": "waco"},
+        ]
+    )
+
+
+def _surf_graph() -> Graph:
+    return Graph(
+        {
+            "water": {"name": "Water"},
+            "surf": {
+                "name": "Surfing",
+                "parents": ["water"],
+                "status": "active",
+                "aliases": ["surfing"],
+            },
+            "foil": {"name": "Foiling", "parents": ["water"], "status": "active"},
+        }
+    )
+
+
+def _surf_days() -> dict[date, dict[str, Any]]:
+    return {
+        date(2026, 9, 25): {"activities": [{"type": "surf", "place": "lakey-peak", "hours": 2}]},
+        date(2026, 9, 26): {"activities": [{"type": "surf", "place": "lakey-peak"}]},
+        date(2026, 10, 2): {"activities": [{"type": "surf", "place": "lakey"}]},
+        date(2026, 10, 11): {
+            "activities": [
+                {"type": "surf", "place": "impossibles", "hours": 1.5},
+                {"type": "foil", "place": "uluwatu"},
+                {"type": "travel", "place": "uluwatu"},
+            ]
+        },
+        date(2026, 11, 2): {
+            "activities": [
+                {"type": "surfing", "place": "pool", "hours": 3},
+                {"type": "surf", "place_mention": "the river wave", "place_kind": "other"},
+                {"type": "surf"},
+            ]
+        },
+    }
+
+
+def test_where_counts_spots_and_rolls_up_the_place_tree() -> None:
+    graph, places = _surf_graph(), _surf_places()
+    by_node = disciplines.where(graph, _surf_days(), places)
+
+    surf = by_node["surf"]
+    assert surf.spots["lakey-peak"].sessions == 2 and surf.spots["lakey-peak"].hours == 2
+    assert surf.spots["lakey"].sessions == 1  # linked to the town only
+    assert surf.spots["?the river wave"].sessions == 1
+    assert surf.spots["?"].sessions == 1
+    # A spot counts toward its town, region and country, each once.
+    areas = {k: t.sessions for k, t in surf.areas.items()}
+    assert areas == {
+        "lakey": 3,
+        "sumbawa": 3,
+        "uluwatu": 1,
+        "bali": 1,
+        "indonesia": 4,
+        "waco": 1,
+        "texas": 1,
+        "usa": 1,
+    }
+    assert surf.pool.sessions == 1 and surf.pool.last == date(2026, 11, 2)
+    # Disciplines roll up: Water has both sports' places; non-sports are skipped.
+    water = by_node["water"]
+    assert water.areas["uluwatu"].sessions == 2
+    assert water.areas["bali"].sessions == 2
+    assert "travel" not in by_node
+
+
+def test_where_data_and_line_rank_by_sessions() -> None:
+    graph, places = _surf_graph(), _surf_places()
+    surf = disciplines.where(graph, _surf_days(), places)["surf"]
+
+    data = disciplines.where_data(surf, places)
+    first = data["spots"][0]
+    assert first["id"] == "lakey-peak" and first["sessions"] == 2
+    assert first["within"] == "Lakey, Sumbawa" and first["last"] == "2026-09-26"
+    names = [s["name"] for s in data["spots"]]
+    assert "Lakey (spot not said)" in names
+    assert 'spot unknown ("the river wave")' in names and "spot unknown" in names
+    pool = next(s for s in data["spots"] if s["id"] == "pool")
+    assert pool["kind"] == "wave_pool" and pool["hours"] == 3
+    assert data["pool"] == 1 and data["unknown"] == 2
+    levels = {a["id"]: a["level"] for a in data["areas"]}
+    assert levels["sumbawa"] == "region" and levels["lakey"] == "town"
+    assert levels["usa"] == "country"
+    assert disciplines.where_data(None, places)["spots"] == []
+
+    twin = PlaceIndex(
+        [*places.nodes, {"id": "lakey-2", "name": "Lakey", "kind": "town", "parent": "bali"}]
+    )
+    assert disciplines.place_name("lakey", twin) == "Lakey (Sumbawa)"
+    assert disciplines.spot_name("lakey", twin) == "Lakey (Sumbawa) (spot not said)"
+    assert disciplines.place_name("lakey", places) == "Lakey"
+
+    line = disciplines.where_line(surf, places, limit=2)
+    assert line.startswith("Lakey Peak 2, ")
+    assert "+4 more" in line
+    assert "regions: Sumbawa 3, " in line and "Bali 1" in line and "Texas 1" in line
+    assert line.endswith("wave pool 1")
+
+
+def test_describe_and_graph_data_carry_where() -> None:
+    graph, places = _surf_graph(), _surf_places()
+    days = _surf_days()
+    all_time = disciplines.totals(graph, days)
+    by_node = disciplines.where(graph, days, places)
+
+    text = disciplines.describe(graph, [], {}, all_time, 30, by_node, places)
+    assert "Where, all time" in text
+    assert "- Surfing 7 — Lakey Peak 2" in text
+    assert "Water" not in text.split("Where, all time")[1]  # groupings left out
+    assert "Where" not in disciplines.describe(graph, [], {}, all_time, 30)
+
+    nodes = {n["id"]: n for n in disciplines.graph_data(graph, [], {}, all_time, by_node, places)}
+    assert nodes["surf"]["where"]["pool"] == 1
+    assert "where" not in disciplines.graph_data(graph, [], {}, all_time)[0]
+
+
+def test_where_snapshot_reads_places_from_the_vault(vault: Vault) -> None:
+    vault.write_place_files(
+        {"_world": [{"id": "usa", "name": "United States", "kind": "country"}]},
+        {"_world"},
+        "places",
+    )
+    vault.write_journal_entry(
+        datetime(2026, 10, 1, 9, 0),
+        {"activities": [{"type": "surf", "place": "usa"}]},
+        "Surfed.",
+        "Surf.",
+    )
+    places, by_node = disciplines.where_snapshot(vault, date(2026, 10, 2), _surf_graph())
+    assert places.get("usa") is not None
+    assert by_node["surf"].areas["usa"].sessions == 1

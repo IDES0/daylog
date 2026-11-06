@@ -23,6 +23,9 @@ KINDS = (
     "park",
     "town",
     "surf_spot",
+    # Its own kind, not a surf_spot: no swell to forecast, and keeping it apart
+    # is what lets the journal answer "the wave pool vs the ocean".
+    "wave_pool",
     "wind_spot",
     "fly_site",
     "dive_site",
@@ -325,9 +328,17 @@ def describe_for_brief(index: PlaceIndex, current: Any | None) -> str:
                 continue
             item_notes = f" — {item['notes']}" if item.get("notes") else ""
             lines.append(f"    - [{status}] {item.get('item', '?')}{item_notes}")
-        spot_kinds = ("surf_spot", "wind_spot", "dive_site", "hike", "viewpoint", "beach")
+        spot_kinds = (
+            "surf_spot",
+            "wave_pool",
+            "wind_spot",
+            "dive_site",
+            "hike",
+            "viewpoint",
+            "beach",
+        )
         for spot in index.descendants(region["id"], spot_kinds):
-            if not is_current and spot.get("kind") not in ("surf_spot", "wind_spot"):
+            if not is_current and spot.get("kind") not in ("surf_spot", "wave_pool", "wind_spot"):
                 continue
             facts = spot.get("facts") or {}
             fact_bits = "; ".join(f"{k} {v}" for k, v in facts.items() if v)

@@ -23,7 +23,7 @@ from daylog.places import PlaceIndex
 # category -> the place kinds ranked in it
 CATEGORIES: dict[str, tuple[str, ...]] = {
     "food": ("food",),
-    "surf": ("surf_spot",),
+    "surf": ("surf_spot", "wave_pool"),
     "dive": ("dive_site",),
     "outdoors": ("hike", "viewpoint", "beach"),
     "nightlife": ("venue",),

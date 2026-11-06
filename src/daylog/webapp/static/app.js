@@ -1679,11 +1679,14 @@ function drawDiscCard(content, GD) {
   try { style = localStorage.getItem(DISC_STYLE_KEY) || style; } catch { /* private mode */ }
   const pick = DISC_STYLES.find(x => x[0] === style) || DISC_STYLES[0];
   const box = h("div.viz.disc");
+  // A tapped sport's Where (spots, then the areas above them) shows under the graph.
+  const detail = h("div.disc-detail");
+  GD.onPick = n => fill(detail, discWhere(n));
   const styles = h("span.disc-styles", "Style ", ...DISC_STYLES.map(([id, label]) => h("button", {
     type: "button", "aria-pressed": String(id === pick[0]),
     onclick: () => { try { localStorage.setItem(DISC_STYLE_KEY, id); } catch { /* private mode */ } fill(content); drawDiscCard(content, GD); },
   }, label)));
-  content.append(box, h("p.cal-key", `${pick[2]} Tap a sport for its numbers, an element to zoom in. `, styles));
+  content.append(box, h("p.cal-key", `${pick[2]} Tap a sport for its numbers and where, an element to zoom in. `, styles), detail);
   pick[3]()(box, GD);
 }
 
@@ -1727,6 +1730,7 @@ function discTip(box, tip, GD, byId) {
     tip.style.left = `${Math.min(Math.max(evt.clientX - r.left, 110), r.width - 110)}px`;
     tip.style.top = `${Math.max(evt.clientY - r.top, 90)}px`;
     tip.style.opacity = 1;
+    if (evt.type === "click" && GD.onPick) GD.onPick(n);
   };
   const hide = () => { tip.style.opacity = 0; };
   return { show, hide };
@@ -1937,12 +1941,35 @@ function discList(GD) {
         h("div.li-main",
           h("span", { style: depth === 0 ? { "font-weight": "600" } : null }, h("span.swatch", { style: { background: `var(--root-${(GD.slots || {})[n.root] || 1})` } }), n.name),
           h("span.li-right", `${n.recent} in ${GD.days}d · ${n.total} all`)),
-        extra ? h("div.li-sub", { style: { "padding-left": "16px" } }, extra) : null));
+        extra ? h("div.li-sub", { style: { "padding-left": "16px" } }, extra) : null,
+        (n.where?.spots || []).length && depth > 0
+          ? h("details.key.where-fold", { style: { "margin-left": "16px" } }, h("summary", "Where"), discWhere(n, false))
+          : null));
       walk(n.id, depth + 1);
     }
   };
   walk(null, 0);
   return h("ul.list.disc-list", items);
+}
+
+// Where a sport was done, all time: each spot (or what was said when it isn't
+// linked to a place), then the towns, regions and countries above them.
+function discWhere(n, head = true) {
+  const w = n.where;
+  if (!w || !(w.spots || []).length) return null;
+  const nums = x => `${x.sessions}${x.hours ? ` · ${x.hours}h` : ""}${x.last ? ` · ${short(x.last)}` : ""}`;
+  const row = (name, sub, x) => h("li",
+    h("div.li-main", h("span", name), h("span.li-right", nums(x))), sub ? h("div.li-sub", sub) : null);
+  const kids = [];
+  if (head) kids.push(h("div.where-head", `Where · ${n.name}, all time`));
+  if (w.pool) kids.push(h("div.li-sub", `Wave pool ${w.pool} · elsewhere ${n.total - w.pool}`));
+  kids.push(h("ul.list.where", w.spots.map(s =>
+    row(s.name, [s.kind === "wave_pool" ? "wave pool" : null, s.within].filter(Boolean).join(" · "), s))));
+  for (const [level, label] of [["town", "Towns"], ["region", "Regions"], ["country", "Countries"]]) {
+    const rows = (w.areas || []).filter(a => a.level === level);
+    if (rows.length) kids.push(h("div.where-head", label), h("ul.list.where", rows.map(a => row(a.name, null, a))));
+  }
+  return h("div.disc-where", kids);
 }
 
 // ---- conditions: rated surf per spot and flyability per site, drawn

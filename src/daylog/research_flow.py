@@ -26,7 +26,7 @@ from daylog.vault import Vault
 
 logger = logging.getLogger(__name__)
 
-SPOT_KINDS = ("surf_spot", "wind_spot", "dive_site", "hike", "viewpoint", "beach")
+SPOT_KINDS = ("surf_spot", "wave_pool", "wind_spot", "dive_site", "hike", "viewpoint", "beach")
 # Fewer known spots than this in a region the user just arrived in triggers
 # an 'arrive' research run.
 ARRIVE_THRESHOLD = 3

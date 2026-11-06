@@ -168,6 +168,8 @@ def test_home_disciplines_and_journal(app: App, vault: Vault) -> None:
     assert status == 200 and graph["days"] == 30
     assert {n["id"] for n in graph["nodes"]} == {"water", "surf"}
     assert graph["slots"]["water"] == 1
+    surf_node = next(n for n in graph["nodes"] if n["id"] == "surf")
+    assert surf_node["where"]["spots"][0]["name"] == "spot unknown"
 
     status, journal = _json(app, "GET", "/api/journal?from=2026-09-25&to=2026-10-02")
     assert status == 200
