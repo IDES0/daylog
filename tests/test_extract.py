@@ -249,3 +249,34 @@ def test_a_single_note_never_writes_an_assessment(
     entry = vault.read_journal_entry(day)
     assert entry.frontmatter["rating"] == {"score": 8}
     assert "assessment" not in entry.frontmatter
+
+
+def test_stated_sessions_and_end_times_come_through_tidied(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from datetime import date
+
+    from daylog import extract, llm
+
+    props = cast(dict[str, Any], RECORD_JOURNAL_ENTRY_TOOL["input_schema"])["properties"]
+    assert {"at", "until", "sessions", "time"} <= set(props["activities"]["items"]["properties"])
+
+    monkeypatch.setattr(llm, "record", lambda *a, **k: None)
+    payload = {
+        "activities": [
+            {
+                "type": "surf",
+                "hours": 3,
+                "time": "said",
+                "sessions": [{"at": "16:00"}, {"at": "18:00"}, {"at": "19:00:00"}],
+            },
+            {"type": "travel", "until": "16:00", "time": "said"},
+        ],
+        "summary": "Three sessions.",
+    }
+    client = _Client(payload)
+    facts = extract.extract("did the 4, 6 and 7pm", [], [], date(2026, 11, 2), client=client)  # type: ignore[arg-type]
+    surf, drive = facts["activities"]
+    assert surf["at"] == "16:00" and surf["time"] == "said"
+    assert [s["at"] for s in surf["sessions"]] == ["16:00", "18:00", "19:00"]
+    assert drive == {"type": "travel", "until": "16:00", "time": "said"}

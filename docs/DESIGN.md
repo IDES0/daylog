@@ -83,8 +83,12 @@ The ledger is the foundation; the assistant is only as good as its grounding.
 - **`journal/YYYY-MM-DD.md`**: frontmatter (activities, meals, felt, goal
   progress, milestones, decisions, ...), the verbatim transcript, a summary. A day ends at the 4am
   cutoff; a day told in several notes is rebuilt once at day end.
-  Activities may carry `at`, a rough start ("HH:MM") the extraction
-  estimates for the week calendar; it's a ballpark, never a measurement.
+  Activities may carry times for the week calendar: `at` (start, "HH:MM"),
+  `until` (end), `sessions` (separate timed sessions of one activity, each
+  `{at, until?, hours?}`) and `time: said | estimated`. A time the user
+  said is copied exactly and marked `said`; an inferred one is
+  `estimated` (unmarked times are estimated). A time before the 4am cutoff
+  is late that night.
   `rating: {score, note}` is the user's own 1-10 for the day, only when
   said; `assessment: {score, why}` is the assistant's 1-10 for how the
   day's time went toward the goals, written by the nightly reconcile.
@@ -177,6 +181,7 @@ The ledger is the foundation; the assistant is only as good as its grounding.
 | 2026-11-06 | Notes are read in context. Extraction (and the nightly reconcile, which also gains the vocabulary) gets a digest of the 7 days before the note: each sport, where, and decisions. The prompt treats a misheard word as possibly a real word and reads it against that context, the places and the user's words; when it logs a sport other than the one transcribed it sets `heard_as`, and the app keeps `guessed` plus a one-tap card to switch it back. Prompted by a week where "Waco" came out as "Wakefoil" twice, two Waco Surf days were logged as wake foiling and the surf goal never moved; the static vocabulary only nudges Whisper, it can't infer. A sessions goal tied to a discipline is now counted from the journal (`baseline` plus sessions under it), shown that way everywhere, and a note's +1 no longer touches it; this reverses 2026-10-15's "progress stays as extracted", because the stored total drifted from the graph and a fixed day never fixed the goal. Unlogged sessions told in chat go into `baseline` |
 | 2026-11-06 | Days get scored, which lifts "no scoring or grading of days": the user asked for their own rating per date plus the assistant's on how well the time was filled toward their goals. Two fields, never mixed: `rating {score, note}`, 1-10, extracted only when a note states one (never inferred; a reconcile that misses it keeps the old one), and `assessment {score, why}`, the assistant's 1-10 with a one-line reason, written only by the whole-day reconcile so a morning note can't score a day that hasn't happened. It rides on the reconcile's model call; a single-note day (or one reconciled before this) now also gets that nightly pass, but only gains the assessment and keeps its record, since rebuilding it would gain nothing; a day that's only a pointer from another day's note isn't scored. The rubric in `prompts/reconcile.md` judges against what was realistic (travel, sick and rest days aren't failures), counts goal time and good non-goal time, and is calibrated so most days are 4-7 and 9-10 rare. Shown as a badge per day on the week calendar (the user's filled, the assistant's dashed), with reasons in the day view, week averages under the calendar and in the weekly review's numbers. The last four weeks were scored in a Claude Code session, not through the API |
 | 2026-11-06 | Sports are quantified by place. Each discipline's all-time sessions are counted by spot (the activity's `place` id) and rolled up the places tree to every town, region and country above it, each once (Uluwatu → Bali → Indonesia), computed on demand like the totals, never stored. A session linked only to an area shows as "X (spot not said)", one with no place as "spot unknown" plus what was said. Wave pools get their own place kind, `wave_pool`, rather than a fact on a surf_spot: it keeps them out of the swell forecasts and makes "Waco Surf vs normal surf" a count. Shown as a Where panel when a sport is tapped in the graph (and a fold in the list view), and as one line per pursued sport in the summary the brief, planner and chat get. The user asked to track sessions per site (Waco Surf vs the ocean, Uluwatu vs Sumbawa). Backfilled in session: Waco and Waco Surf added under Texas, and sports with a clear place in the transcript or the day's base linked to it (town-level where the spot wasn't said) |
+| 2026-11-06 | The week calendar places things where the user said they were. Stated times win and are copied exactly (`time: said`); one activity can hold several timed `sessions` and an end (`until`); estimated times are drawn softer and untimed ones dashed, placed after what was told before them in the first free stretch instead of piling onto timed blocks. The day runs to the 4am cutoff, so "bed at 2am" is that night's end, not 2am that morning (they were clamped to 5am before). The reconcile keeps a said time when its re-read comes back vaguer. The grid gets hour lines and labels inside blocks, and a tapped day opens its own hour-by-hour column. Prompted by 2026-11-02, where "the 4pm, 6pm and 7pm sessions" became one 16:00–19:00 block marked as a guess like everything else, a 4-hour drive was stacked after the surf, and a 2am viewpoint sat at 5am. The last three weeks were backfilled from the transcripts in a session. Times from email and from a watch are designed (To do), not built |
 
 ## Not built
 
@@ -186,6 +191,37 @@ subscription since 2026-06), Surfline (no official API; unofficial access
 breaks its terms).
 
 ### To do (wanted, not started — roughly in order)
+
+- **Times from email.** The app has no Gmail access; the research
+  routines do (read-only). The evening sweep would read booking
+  confirmations and itineraries for the day just gone and the days ahead
+  (Waco Surf session bookings, flights, tours, restaurant bookings) and
+  write `research/times/<date>.yaml`: a list of
+  `{kind: surf, place: "Waco Surf", at: "16:00", until: "17:00", source:
+  "email: Waco Surf booking #1234", subject, received}`. The calendar
+  shows each as a fourth kind, `booked` (solid, a small mail mark), beside
+  the journal's blocks: a booking matching a logged activity of the same
+  kind that day fills in its `sessions` when the journal's times are
+  estimated or missing (a said time still wins), and one with no matching
+  activity shows as a planned block, never as something done. Filling a
+  journal time from email is an inferred fact, so it goes through a
+  confirm card ("Surf on Nov 2 at 16:00, 18:00, 19:00 from 3 Waco Surf
+  bookings?"); flights also feed the trail (transit legs) the same way.
+- **Watch workouts with real times.** An Apple Watch records each workout
+  with a start, an end and a type. An iOS Shortcut ("Find Health Samples
+  → Workouts", run at the day's end) posts them through the health inlet,
+  `POST /health/<secret>` with a `workouts` list beside the daily numbers:
+  `{"date": "2026-11-02", "steps": 9100, "workouts": [{"type": "Surfing",
+  "start": "2026-11-02T16:02:10-06:00", "end": "2026-11-02T16:58:40-06:00",
+  "kcal": 410, "avg_hr": 128}]}`. `health.py` keeps them in
+  `health.yaml` under the day as `workouts:` (local "HH:MM" start/end,
+  type, numbers), still measurements beside the journal. `timeline.py`
+  gains a `measured` kind, the firmest of all: a workout matched to a
+  logged activity (sport mapped from the Watch's type, overlapping or
+  nearest in time) replaces that activity's blocks on the calendar, and
+  an unmatched workout shows as its own measured block with a one-tap
+  "log this". Sleep (`sleep_start`/`sleep_end`) arrives the same way and
+  draws the night (see Sleep tracking).
 
 - **Sleep tracking.** Bed and wake times from notes ("hit the sack around
   9"), plus sleep hours from the phone's health inlet when the Shortcut

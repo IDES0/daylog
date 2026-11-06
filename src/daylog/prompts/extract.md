@@ -50,11 +50,30 @@ Guidelines:
 - `activities`: one entry per distinct thing the user did, with a rough
   `hours` estimate. If no duration is stated or implied, omit `hours` for
   that activity rather than guessing.
-  `at` is a rough start time ("HH:MM", 24h) for a calendar view of the
-  day. Estimate it from what's said ("dawn patrol" ~06:00, "after lunch"
-  ~13:30, "tonight" ~20:00), the order things are told in, and the time
-  the note was recorded (anything told as done happened before it). A
-  ballpark is fine; omit `at` only when nothing hints at when it was.
+  Times put the day on a calendar ("HH:MM", 24h):
+  - A time the user says wins and is copied exactly: "did the 4pm
+    session" is `at: "16:00"`, "around 5" is 17:00 when it's clearly the
+    afternoon; set `time: said`. Never round or shift a stated time.
+  - Several separate sessions of one thing, each with its time ("did the
+    4pm, 6pm and 7pm sessions") are one activity with `sessions`
+    (`[{at: "16:00"}, {at: "18:00"}, {at: "19:00"}]`), `at` the first one
+    and `hours` the total. Never stretch them into one block from the
+    first to the last. A session's own length goes in its `hours`.
+  - An end the user says goes in `until`: "got home around 4" ends the
+    drive back at 16:00, "played until 2am" or "hit the sack at 2am"
+    ends the evening's last activity at 02:00, "watched reels for an hour
+    and a half until around 5" is `until: "17:00"`, `hours: 1.5`.
+  - Read times by sense: "12am" said of a midday session between 11am
+    and the afternoon is 12:00, not midnight. The day runs past
+    midnight to 4am, so 01:00 or 02:00 is late that night.
+  - Otherwise estimate `at` from what's said ("dawn patrol" ~06:00,
+    "after lunch" ~13:30, "tonight" ~20:00), the order things are told
+    in, and the time the note was recorded (anything told as done
+    happened before it), and set `time: estimated`. A ballpark is fine;
+    omit `at` only when nothing hints at when it was.
+  - A drive there and back around something timed is two travel
+    activities, before and after it, when the note gives enough to place
+    them; otherwise one, untimed.
   Eating is not an activity — meals go in `meals`.
   `type` for a sport is an id from Disciplines, copied exactly: the most
   specific one the transcript supports. When they don't say which kind,

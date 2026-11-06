@@ -125,9 +125,11 @@ details.list li { padding:6px 0; }
 .blk { position:absolute; box-sizing:border-box; padding:2px 3px; border-radius:5px;
   border:1px solid transparent; font:10px/1.2 var(--sans); overflow:hidden;
   background:hsl(var(--h) 60% 86%); color:hsl(var(--h) 45% 24%); }
+.blk.est { background:hsl(var(--h) 55% 92%); border-color:hsl(var(--h) 40% 78%); }
 .blk.guess { background:hsl(var(--h) 60% 93%); border:1px dashed hsl(var(--h) 40% 60%); }
 @media (prefers-color-scheme: dark) {
   .blk { background:hsl(var(--h) 35% 30%); color:hsl(var(--h) 70% 88%); }
+  .blk.est { background:hsl(var(--h) 30% 22%); border-color:hsl(var(--h) 30% 36%); }
   .blk.guess { background:hsl(var(--h) 30% 20%); border-color:hsl(var(--h) 35% 45%); }
 }
 .cal-key { margin-top:8px; font-size:12px; }
@@ -579,8 +581,12 @@ def _hue(kind: str) -> int:
 
 
 def _clock_text(hours: float) -> str:
-    h, m = divmod(round(hours * 60), 60)
-    return f"{h:02d}:{m:02d}"
+    return timeline.hhmm(hours)
+
+
+# How sure a block's time is: said exactly, estimated (~) or placed by order (≈).
+_MARK = {timeline.SAID: "", timeline.ESTIMATED: "~", timeline.GUESSED: "≈"}
+_BLK_CLASS = {timeline.SAID: "", timeline.ESTIMATED: " est", timeline.GUESSED: " guess"}
 
 
 def _summary_html(summary: str) -> str:
@@ -611,10 +617,10 @@ def _calendar_section(vault: Vault, today: date, week_of: date) -> str:
     placed = [b for day_blocks in blocks.values() for b in day_blocks]
     lo = min([7.0, *(b.start for b in placed)])
     hi = max([22.0, *(b.end for b in placed)])
-    lo, hi = float(int(lo)), float(min(24, -int(-hi)))
+    lo, hi = float(int(lo)), float(min(timeline.DAY_END, -int(-hi)))
 
     gutter = "".join(
-        f'<span style="top:calc({h - lo} * var(--hour))">{h:02d}</span>'
+        f'<span style="top:calc({h - lo} * var(--hour))">{h % 24:02d}</span>'
         for h in range(int(lo), int(hi), 3)
     )
     columns, notes = [], []
@@ -622,9 +628,9 @@ def _calendar_section(vault: Vault, today: date, week_of: date) -> str:
         head = f'<span class="cal-head">{d.strftime("%a")}<b>{d.day}</b></span>'
         cells = []
         for b in blocks.get(d, []):
-            title = f"{'~' if not b.guessed else '≈'}{_clock_text(b.start)} {b.kind}"
+            title = f"{_MARK[b.time]}{_clock_text(b.start)} {b.kind}"
             cells.append(
-                f'<span class="blk{" guess" if b.guessed else ""}" title="{escape(title)}" '
+                f'<span class="blk{_BLK_CLASS[b.time]}" title="{escape(title)}" '
                 f'style="--h:{_hue(b.kind)};top:calc({b.start - lo} * var(--hour));'
                 f"height:calc({b.end - b.start} * var(--hour) - 2px);"
                 f'left:{100 * b.lane / b.lanes:.2f}%;width:{100 / b.lanes:.2f}%">'
@@ -638,8 +644,8 @@ def _calendar_section(vault: Vault, today: date, week_of: date) -> str:
                 f'<span class="cal-body">{"".join(cells)}</span></button>'
             )
             times = "".join(
-                f"<li>{'≈' if b.guessed else '~'}{_clock_text(b.start)}–{_clock_text(b.end)} "
-                f"{escape(b.kind.replace('_', ' '))}"
+                f"<li>{_MARK[b.time]}{_clock_text(b.start)}–{_clock_text(b.end)} "
+                f"{escape(b.kind.replace('_', ' '))}{' ' + b.session if b.session else ''}"
                 f"{' · ' + escape(b.detail) if b.detail else ''}</li>"
                 for b in sorted(blocks[d], key=lambda b: b.start)
             )
@@ -667,8 +673,8 @@ def _calendar_section(vault: Vault, today: date, week_of: date) -> str:
         f'<div class="cal" style="--span:{hi - lo}"><div class="cal-gutter">{gutter}</div>'
         + "".join(columns)
         + "</div>"
-        '<p class="muted cal-key">Rough times: ~ estimated from what you said, '
-        "≈ guessed from the order. Tap a day for its summary.</p>"
+        '<p class="muted cal-key">Solid where you said the time, ~ estimated, '
+        "≈ placed by the order you told it. Tap a day for its summary.</p>"
         + "".join(notes)
         + '<dialog id="dayDialog"><div id="dayBody"></div>'
         '<form method="dialog"><button>Close</button></form></dialog>'

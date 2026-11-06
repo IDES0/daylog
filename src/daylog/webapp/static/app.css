@@ -341,7 +341,7 @@ body.kb main { padding-bottom: 0; }
 /* week calendar */
 .cal-nav { display: flex; align-items: center; gap: var(--s1); }
 .cal-nav span { font: 12.5px var(--mono); color: var(--muted); min-width: 0; text-align: center; }
-.cal { --hour: 26px; --head: 60px; display: grid; grid-template-columns: 22px repeat(7, minmax(0, 1fr)); gap: 3px; }
+.cal { --hour: 30px; --head: 60px; display: grid; grid-template-columns: 22px repeat(7, minmax(0, 1fr)); gap: 3px; }
 .cal-gutter { position: relative; margin-top: var(--head); height: calc(var(--span) * var(--hour)); }
 .cal-gutter span { position: absolute; right: 3px; transform: translateY(-50%); font: 10px var(--mono); color: var(--faint); }
 .cal-day { display: flex; flex-direction: column; padding: 0; border: 0; background: none; color: inherit; font: inherit; text-align: left; cursor: pointer; min-width: 0; border-radius: 8px; }
@@ -349,18 +349,25 @@ body.kb main { padding-bottom: 0; }
 .cal-head { height: var(--head); font: 10.5px/1.25 var(--mono); color: var(--faint); text-align: center; text-transform: uppercase; }
 .cal-head b { display: block; font: 500 17px/1.3 var(--serif); color: var(--text); text-transform: none; }
 .cal-day.today .cal-head b { color: var(--here); }
-.cal-body { position: relative; display: block; height: calc(var(--span) * var(--hour)); background: var(--surface-2); border-radius: 8px; overflow: hidden; }
-.cal-day:not(.empty) .cal-body { background: var(--bg); box-shadow: inset 0 0 0 1px var(--line); }
+.cal-body { position: relative; display: block; height: calc(var(--span) * var(--hour)); background: var(--surface-2); border-radius: 8px; overflow: hidden;
+  background-image: repeating-linear-gradient(to bottom, transparent 0 calc(var(--hour) - 1px), color-mix(in srgb, var(--line) 70%, transparent) calc(var(--hour) - 1px) var(--hour)); }
+.cal-day:not(.empty) .cal-body { background-color: var(--bg); box-shadow: inset 0 0 0 1px var(--line); }
 .cal-day.today .cal-body { box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--here) 55%, transparent); }
 .cal-day:not(.empty):hover .cal-body { box-shadow: inset 0 0 0 1.5px var(--accent); }
 .blk { position: absolute; padding: 2px 3px; border-radius: 5px; border: 1px solid transparent; font: 500 10px/1.15 var(--sans); overflow: hidden; word-break: break-word;
   background: hsl(var(--h) 60% 86%); color: hsl(var(--h) 45% 22%); border-color: var(--bg); }
-.blk.guess { background: hsl(var(--h) 60% 94%); border: 1px dashed hsl(var(--h) 40% 58%); }
+.blk .blk-name, .blk .blk-time, .blk .blk-detail { display: block; }
+.blk .blk-time { font: 9.5px/1.2 var(--mono); opacity: .8; }
+.blk .blk-detail { margin-top: 2px; font-weight: 400; opacity: .85; }
+/* Estimated: softer fill, same outline. Placed by order: fainter still, dashed. */
+.blk.est { background: hsl(var(--h) 55% 92%); border-color: hsl(var(--h) 40% 80%); color: hsl(var(--h) 30% 34%); }
+.blk.guess { background: hsl(var(--h) 60% 95%); border: 1px dashed hsl(var(--h) 40% 58%); color: hsl(var(--h) 25% 40%); }
 @media (prefers-color-scheme: dark) {
   .blk { background: hsl(var(--h) 35% 30%); color: hsl(var(--h) 70% 90%); }
-  .blk.guess { background: hsl(var(--h) 30% 19%); border-color: hsl(var(--h) 35% 45%); }
+  .blk.est { background: hsl(var(--h) 28% 22%); border-color: hsl(var(--h) 28% 36%); color: hsl(var(--h) 40% 78%); }
+  .blk.guess { background: hsl(var(--h) 30% 17%); border-color: hsl(var(--h) 35% 45%); color: hsl(var(--h) 30% 70%); }
 }
-@media (min-width: 900px) { .cal { --hour: 28px; grid-template-columns: 26px repeat(7, minmax(0, 1fr)); gap: 4px; } .blk { font-size: 11px; padding: 3px 4px; } }
+@media (min-width: 900px) { .cal { --hour: 34px; grid-template-columns: 26px repeat(7, minmax(0, 1fr)); gap: 4px; } .blk { font-size: 11px; padding: 3px 4px; } }
 .cal-key { margin-top: var(--s3); font-size: 12.5px; color: var(--faint); }
 .cal-key + .cal-key { margin-top: var(--s1); }
 /* Day scores: the user's own is filled, the assistant's outlined and dashed. */
@@ -370,6 +377,20 @@ body.kb main { padding-bottom: 0; }
 .score.you { background: var(--accent); color: var(--accent-ink); }
 .score.ai { border: 1.5px dashed var(--muted); color: var(--muted); background: transparent; }
 .kv.scores dt { display: flex; align-items: center; gap: 6px; }
+.cal-key .key { display: inline-block; padding: 0 5px; border-radius: 4px; border: 1px solid transparent; background: hsl(210 60% 86%); color: hsl(210 45% 22%); }
+.cal-key .key.est { background: hsl(210 55% 92%); border-color: hsl(210 40% 80%); color: hsl(210 30% 34%); }
+.cal-key .key.guess { background: hsl(210 60% 95%); border: 1px dashed hsl(210 40% 58%); color: hsl(210 25% 40%); }
+@media (prefers-color-scheme: dark) {
+  .cal-key .key { background: hsl(210 35% 30%); color: hsl(210 70% 90%); }
+  .cal-key .key.est { background: hsl(210 28% 22%); border-color: hsl(210 28% 36%); color: hsl(210 40% 78%); }
+  .cal-key .key.guess { background: hsl(210 30% 17%); border-color: hsl(210 35% 45%); color: hsl(210 30% 70%); }
+}
+/* The day sheet: one column, every hour labelled. */
+.day-line { --hour: 44px; display: grid; grid-template-columns: 34px minmax(0, 1fr); gap: 6px; }
+.day-line .cal-gutter { margin-top: 0; }
+.day-line .cal-body { background-color: var(--bg); box-shadow: inset 0 0 0 1px var(--line); }
+.day-line .blk { font-size: 12.5px; padding: 3px 6px; }
+.day-line .blk .blk-time { font-size: 11px; }
 .times li { list-style: none; font: 13px/1.5 var(--mono); color: var(--muted); padding: 2px 0; }
 
 /* ---------- log ---------- */

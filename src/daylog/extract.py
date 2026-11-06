@@ -12,7 +12,7 @@ from typing import Any, cast
 import anthropic
 from anthropic.types import MessageParam, ToolChoiceToolParam, ToolParam
 
-from daylog import llm
+from daylog import llm, timeline
 from daylog.places import KINDS, PlaceIndex, outline
 
 logger = logging.getLogger(__name__)
@@ -114,13 +114,50 @@ RECORD_JOURNAL_ENTRY_TOOL: ToolParam = {
                                 "activity label, e.g. 'travel'."
                             ),
                         },
-                        "hours": {"type": "number", "description": "Approximate hours spent."},
+                        "hours": {
+                            "type": "number",
+                            "description": "Hours spent in total (across all its sessions).",
+                        },
                         "at": {
                             "type": "string",
                             "description": (
-                                "Rough start time, 24h 'HH:MM', estimated from what's said "
+                                "Start time, 24h 'HH:MM'. Exactly the time the user said "
+                                "('at 4pm' is 16:00); else estimated from what's said "
                                 "('dawn surf' ~06:00, 'after lunch' ~13:30) and when the "
                                 "note was recorded. Omit when nothing hints at it."
+                            ),
+                        },
+                        "until": {
+                            "type": "string",
+                            "description": (
+                                "End time, 24h 'HH:MM', only when said or clearly implied "
+                                "('got home around 4' ends the drive at 16:00, 'bed at 2am' "
+                                "ends the evening at 02:00)."
+                            ),
+                        },
+                        "sessions": {
+                            "type": "array",
+                            "description": (
+                                "Only for one activity done in separate timed sessions "
+                                "('the 4pm, 6pm and 7pm sessions'): one entry per session; "
+                                "`at` is then the first session's start."
+                            ),
+                            "items": {
+                                "type": "object",
+                                "properties": {
+                                    "at": {"type": "string", "description": "'HH:MM'"},
+                                    "until": {"type": "string", "description": "'HH:MM'"},
+                                    "hours": {"type": "number"},
+                                },
+                                "required": ["at"],
+                            },
+                        },
+                        "time": {
+                            "type": "string",
+                            "enum": ["said", "estimated"],
+                            "description": (
+                                "'said' when the user stated the time(s) ('at 5pm', "
+                                "'around 4'), 'estimated' when you inferred them."
                             ),
                         },
                         "detail": {"type": "string", "description": "One-line specifics."},
@@ -768,6 +805,9 @@ def _facts_from(response: Any) -> dict[str, Any]:
                     "extract: malformed tool input: %.600s", json.dumps(raw, default=str)
                 )
                 raise
+            for activity in facts.get("activities") or []:
+                if isinstance(activity, dict):
+                    timeline.tidy_times(activity)
             return clean_scores(facts)
     raise ExtractError(f"no tool_use block in response (stop_reason={response.stop_reason})")
 

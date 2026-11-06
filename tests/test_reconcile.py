@@ -178,3 +178,29 @@ def test_logical_day_rolls_back_before_the_cutoff() -> None:
     assert daily.logical_day(datetime(2026, 9, 26, 1, 30), cutoff_hour=4) == date(2026, 9, 25)
     assert daily.logical_day(datetime(2026, 9, 26, 4, 0), cutoff_hour=4) == date(2026, 9, 26)
     assert daily.logical_day(datetime(2026, 9, 26, 1, 30), cutoff_hour=0) == date(2026, 9, 26)
+
+
+def test_rebuild_keeps_a_stated_time_the_re_read_lost(vault: Vault) -> None:
+    vault.write_journal_entry(
+        datetime(2026, 9, 25, 21, 0),
+        {
+            "activities": [
+                {
+                    "type": "surf",
+                    "at": "16:00",
+                    "time": "said",
+                    "sessions": [{"at": "16:00"}, {"at": "18:00"}],
+                }
+            ]
+        },
+        "did the 4pm and 6pm sessions",
+        "Two sessions.",
+    )
+    entry = vault.read_journal_entry(DAY)
+    assert entry is not None
+    result = reconcile.rebuild(
+        entry, {"activities": [{"type": "surf", "at": "15:00", "hours": 2}], "summary": "Surfed."}
+    )
+    [surf] = result.frontmatter["activities"]
+    assert surf["at"] == "16:00" and surf["time"] == "said" and len(surf["sessions"]) == 2
+    assert surf["hours"] == 2

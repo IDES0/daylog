@@ -186,6 +186,8 @@ def test_home_disciplines_and_journal(app: App, vault: Vault) -> None:
     assert cal["week_of"] == "2026-09-28" and len(cal["days"]) == 7
     block = cal["days"][3]["blocks"][0]
     assert (block["label"], block["start"], block["hours"]) == ("surf", 6.0, 2.0)
+    assert (block["end"], block["lane"], block["lanes"]) == (8.0, 0, 1)
+    assert block["time"] in ("said", "estimated", "guessed") and block["session"] == ""
 
 
 # -- writing ------------------------------------------------------------------------------

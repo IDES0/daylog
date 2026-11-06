@@ -455,8 +455,13 @@ class Api:
                             "label": b.kind,
                             "detail": b.detail,
                             "start": b.start,
+                            "end": b.end,
                             "hours": round(b.end - b.start, 2),
+                            "time": b.time,
                             "guess": b.guessed,
+                            "session": b.session,
+                            "lane": b.lane,
+                            "lanes": b.lanes,
                             "hue": dashboard._hue(b.kind),
                         }
                         for b in blocks
