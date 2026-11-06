@@ -117,10 +117,20 @@ Earth (with Mountain → Snow under it) and Body.
 - **Totals**: sessions and hours roll up every ancestor once, computed on
   demand. A kitefoil session counts toward Water and Air; the roots are
   never added together.
+- **By place**: each sport's all-time sessions are also counted by spot
+  (the activity's `place`) and by every town, region and country above it
+  (Impossibles → Uluwatu → Bali → Indonesia), each once. A session linked
+  only to a town reads "Uluwatu (spot not said)"; one with no place reads
+  "spot unknown" (with what was said, if anything). Wave pools are their
+  own place kind (`wave_pool`), so Waco Surf vs the ocean is a count, and
+  pools are left out of the surf forecasts.
 - **Where it shows**: the You tab (`GET /api/disciplines`) shows
-  the tree. The brief and the planner get a compact summary, and the
-  weekly review gets per-discipline numbers. A goal with a `discipline`
-  shows under it.
+  the tree; tapping a sport in the graph opens its Where (spots, towns,
+  regions, countries: sessions, hours, last date) under it, and the list
+  view has a Where fold per sport. The brief, the planner and chat get a
+  compact summary including a "Where, all time" line per pursued sport,
+  and the weekly review gets per-discipline numbers. A goal with a
+  `discipline` shows under it.
 
 ### Itinerary / "flexible calendar"
 `itinerary.yaml` mirrors the same hard/soft/slip pattern for travel:
@@ -437,7 +447,7 @@ speedwing:
   parent: example-island
 - id: left-point
   name: Left Point
-  kind: surf_spot
+  kind: surf_spot                # wave_pool for a surf park: counted apart, never forecast
   parent: example-town
   aliases: [the point]          # spoken names learned from the journal
   lat: 0.0

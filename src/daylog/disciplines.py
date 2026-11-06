@@ -34,7 +34,7 @@ from datetime import date, timedelta
 from typing import Any
 
 from daylog import goals as goals_mod
-from daylog.places import PlaceIndex
+from daylog.places import AREA_KINDS, PlaceIndex
 from daylog.vault import Vault
 
 logger = logging.getLogger(__name__)
@@ -183,6 +183,159 @@ def numbers(graph: Graph, by_node: Mapping[str, Totals]) -> dict[str, dict[str, 
         for n in order
         if by_node.get(n)
     }
+
+
+# -- where: sessions by place ----------------------------------------------------
+
+# Key prefix for a session with no linked place; what was said follows it.
+UNKNOWN = "?"
+
+_LEVELS = {"country": "country", "region": "region", "park": "region", "town": "town"}
+
+
+@dataclass
+class Where:
+    """One discipline's sessions by place: each spot (the activity's own place,
+    or what was said when it isn't linked) and every area above it, each once.
+    `pool` is the sessions at a wave pool, so a pool and the ocean stay apart."""
+
+    spots: dict[str, Totals] = field(default_factory=dict)
+    areas: dict[str, Totals] = field(default_factory=dict)
+    pool: Totals = field(default_factory=Totals)
+
+
+def _spot_key(activity: Mapping[str, Any], places: PlaceIndex) -> str:
+    place_id = str(activity.get("place") or "")
+    if place_id and places.get(place_id) is not None:
+        return place_id
+    said = str(activity.get("place_mention") or place_id).strip()
+    return UNKNOWN + said
+
+
+def where(
+    graph: Graph, days: Mapping[date, Mapping[str, Any]], places: PlaceIndex
+) -> dict[str, Where]:
+    """Sessions per discipline by spot and by every town, region and country
+    above it (Uluwatu -> Bali -> Indonesia), rolled up the parents like `totals`."""
+    out: dict[str, Where] = {}
+    for day, fm in sorted(days.items()):
+        for activity in fm.get("activities") or []:
+            if not isinstance(activity, Mapping):
+                continue
+            node_id = graph.resolve(activity.get("type"))
+            if node_id is None:
+                continue
+            key = _spot_key(activity, places)
+            node = places.get(key)
+            chain = [node, *places.ancestors(key)] if node is not None else []
+            areas = [a["id"] for a in chain if a.get("kind") in AREA_KINDS]
+            in_pool = node is not None and node.get("kind") == "wave_pool"
+            hours = activity.get("hours")
+            for member in graph.lineage(node_id):
+                found = out.setdefault(member, Where())
+                found.spots.setdefault(key, Totals()).add(day, hours)
+                for area in areas:
+                    found.areas.setdefault(area, Totals()).add(day, hours)
+                if in_pool:
+                    found.pool.add(day, hours)
+    return out
+
+
+def _ranked(counts: Mapping[str, Totals]) -> list[tuple[str, Totals]]:
+    return sorted(
+        counts.items(), key=lambda kv: (-kv[1].sessions, -(kv[1].last or date.min).toordinal())
+    )
+
+
+def place_name(key: str, places: PlaceIndex) -> str:
+    """A place's name, with its region when another place has the same one
+    ('Kuta (Bali)' vs 'Kuta (Lombok)')."""
+    node = places.get(key) or {}
+    name = str(node.get("name") or key)
+    if len(places.resolve(name)) > 1:
+        area = places.region_of(key)
+        if area is None or area.get("id") == key:
+            area = places.country_of(key)
+        if area is not None and area.get("id") != key:
+            return f"{name} ({area.get('name')})"
+    return name
+
+
+def spot_name(key: str, places: PlaceIndex) -> str:
+    """'Impossibles', 'Uluwatu (spot not said)' or 'spot unknown ("Waco Surf")'."""
+    if key.startswith(UNKNOWN):
+        said = key[len(UNKNOWN) :]
+        return f'spot unknown ("{said}")' if said else "spot unknown"
+    node = places.get(key) or {}
+    name = place_name(key, places)
+    return f"{name} (spot not said)" if node.get("kind") in AREA_KINDS else name
+
+
+def _numbers(t: Totals) -> dict[str, Any]:
+    return {
+        "sessions": t.sessions,
+        "hours": round(t.hours, 1),
+        "last": t.last.isoformat() if t.last else None,
+    }
+
+
+def where_data(found: Where | None, places: PlaceIndex) -> dict[str, Any]:
+    """One discipline's breakdown as plain data, most sessions first."""
+    if found is None:
+        return {"spots": [], "areas": [], "pool": 0, "unknown": 0}
+    spots = []
+    for key, t in _ranked(found.spots):
+        node = places.get(key)
+        above = [
+            str(a.get("name"))
+            for a in (places.ancestors(key) if node is not None else [])
+            if a.get("kind") in ("town", "region", "park")
+        ][:2]
+        spots.append(
+            {
+                "id": None if key.startswith(UNKNOWN) else key,
+                "name": spot_name(key, places),
+                "kind": node.get("kind") if node is not None else None,
+                "within": ", ".join(above) or None,
+                **_numbers(t),
+            }
+        )
+    areas = []
+    for key, t in _ranked(found.areas):
+        node = places.get(key) or {}
+        areas.append(
+            {
+                "id": key,
+                "name": place_name(key, places),
+                "level": _LEVELS.get(str(node.get("kind")), "town"),
+                **_numbers(t),
+            }
+        )
+    unknown = sum(t.sessions for k, t in found.spots.items() if k.startswith(UNKNOWN))
+    return {"spots": spots, "areas": areas, "pool": found.pool.sessions, "unknown": unknown}
+
+
+def where_line(found: Where | None, places: PlaceIndex, limit: int = 6) -> str:
+    """'Lakey Peak 7, Impossibles 5, Waco Surf 3, +4 more; towns: Lakey 12, ...;
+    regions: Sumbawa 12, Bali 13; wave pool 3' — for prompts."""
+    if found is None or not found.spots:
+        return ""
+    ranked = _ranked(found.spots)
+    spots = [f"{spot_name(k, places)} {t.sessions}" for k, t in ranked[:limit]]
+    if len(ranked) > limit:
+        spots.append(f"+{len(ranked) - limit} more")
+    parts = [", ".join(spots)]
+    for level, label in (("town", "towns"), ("region", "regions"), ("country", "countries")):
+        row = [
+            f"{place_name(k, places)} {t.sessions}"
+            for k, t in _ranked(found.areas)
+            if _LEVELS.get(str((places.get(k) or {}).get("kind"))) == level
+        ]
+        if row:
+            parts.append(f"{label}: " + ", ".join(row))
+    if found.pool.sessions:
+        parts.append(f"wave pool {found.pool.sessions}")
+    return "; ".join(parts)
 
 
 # -- prerequisites and state ------------------------------------------------
@@ -652,8 +805,11 @@ def describe(
     recent: Mapping[str, Totals],
     all_time: Mapping[str, Totals],
     days: int,
+    where_by_node: Mapping[str, Where] | None = None,
+    places: PlaceIndex | None = None,
 ) -> str:
-    """A compact summary for the brief and the planner."""
+    """A compact summary for the brief and the planner; with `where_by_node`,
+    each pursued sport's all-time sessions by spot and area too."""
     if not graph:
         return "(no disciplines set)"
     goals_list = list(goals_data or [])
@@ -685,6 +841,15 @@ def describe(
     for key, label in labels.items():
         if groups[key]:
             blocks.append(f"{label}:\n" + "\n".join(f"- {n}" for n in groups[key]))
+    if where_by_node and places is not None:
+        rows = []
+        for node_id in graph.nodes:
+            ever = all_time.get(node_id)
+            line = where_line(where_by_node.get(node_id), places)
+            if graph.status(node_id) == "active" and ever and line:
+                rows.append(f"- {graph.name(node_id)} {ever.sessions} — {line}")
+        if rows:
+            blocks.append("Where, all time (sessions by spot, then by area):\n" + "\n".join(rows))
     return "\n".join(blocks)
 
 
@@ -736,7 +901,14 @@ def snapshot(
 def summary(v: Vault, today: date) -> str:
     """The compact view the brief, the planner and chat are given."""
     graph, recent, all_time = snapshot(v, today)
-    return describe(graph, live_goals(v), recent, all_time, RECENT_DAYS)
+    places, by_place = where_snapshot(v, today, graph)
+    return describe(graph, live_goals(v), recent, all_time, RECENT_DAYS, by_place, places)
+
+
+def where_snapshot(v: Vault, today: date, graph: Graph) -> tuple[PlaceIndex, dict[str, Where]]:
+    """The places tree and every discipline's all-time sessions by place."""
+    places = PlaceIndex(v.read_places())
+    return places, where(graph, all_days(v, today), places)
 
 
 def primary_root(graph: Graph, node_id: str) -> str:
@@ -753,10 +925,13 @@ def graph_data(
     goals_data: Iterable[Any],
     recent: Mapping[str, Totals],
     all_time: Mapping[str, Totals],
+    where_by_node: Mapping[str, Where] | None = None,
+    places: PlaceIndex | None = None,
 ) -> list[dict[str, Any]]:
-    """Every node as plain data, for the status site's drawing of the graph."""
+    """Every node as plain data, for the drawing of the graph; with
+    `where_by_node`, each node with sessions carries its `where` breakdown."""
     goals_list = list(goals_data or [])
-    nodes = []
+    nodes: list[dict[str, Any]] = []
     for node_id in graph.nodes:
         parents = graph.parents(node_id)
         now, ever = recent.get(node_id), all_time.get(node_id)
@@ -776,4 +951,6 @@ def graph_data(
                 "needs": unmet(graph, node_id, goals_list, all_time),
             }
         )
+        if where_by_node is not None and places is not None and ever:
+            nodes[-1]["where"] = where_data(where_by_node.get(node_id), places)
     return nodes

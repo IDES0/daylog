@@ -483,6 +483,11 @@ body.kb .composer { bottom: 0; padding-bottom: var(--s2); }
 .glyph.locked { border: 2px dashed var(--faint); }
 .glyph.line { width: 18px; height: 0; border-radius: 0; border: 0; border-top: 2px dashed var(--muted); vertical-align: 3px; }
 .disc-list li { padding: var(--s2) 0; }
+.disc-detail:not(:empty) { margin-top: var(--s4); padding-top: var(--s3); border-top: 1px solid var(--line); }
+.where-head { font: 500 12px var(--mono); color: var(--faint); text-transform: uppercase; letter-spacing: .06em; margin: var(--s3) 0 var(--s2); }
+.disc-where > .where-head:first-child { margin-top: 0; }
+.list.where > li { padding: var(--s2) 0; }
+.disc-list .where-fold .disc-where { margin-top: var(--s2); }
 .swatch { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 8px; vertical-align: 1px; }
 
 /* options (plan) */

@@ -32,6 +32,7 @@ _PLACE_KINDS = (
     "region",
     "park",
     "surf_spot",
+    "wave_pool",
     "wind_spot",
     "fly_site",
     "dive_site",

@@ -1582,9 +1582,12 @@ class Api:
         graph, recent, all_time = disciplines.snapshot(v, self._today(), days)
         if not graph:
             return 200, {"days": days, "nodes": [], "slots": {}}
+        places, by_place = disciplines.where_snapshot(v, self._today(), graph)
         return 200, {
             "days": days,
-            "nodes": disciplines.graph_data(graph, v.read_goals(), recent, all_time),
+            "nodes": disciplines.graph_data(
+                graph, v.read_goals(), recent, all_time, by_place, places
+            ),
             "slots": dashboard.discipline_slots(graph),
         }
 
