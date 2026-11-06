@@ -818,7 +818,7 @@ function scoreRows(day) {
 // One day on a taller clock: every hour marked, each block with its times.
 function dayTimeline(blocks) {
   const [lo, hi] = hourSpan(blocks, Math.min(...blocks.map(b => b.start)), Math.max(...blocks.map(blkEnd)));
-  return h("div.day-line", { style: { "--span": String(hi - lo) }, "aria-hidden": "true" },
+  return h("div.day-clock", { style: { "--span": String(hi - lo) }, "aria-hidden": "true" },
     hourGutter(lo, hi, 1),
     h("span.cal-body", blocks.map(b => blockEl(b, lo, hours => [
       h("span.blk-time", blkWhen(b)), " ",
