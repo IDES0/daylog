@@ -50,13 +50,24 @@ def find_goal(goals: list[Any], goal_id: str) -> Any | None:
     return None
 
 
+def counted(goal: Any) -> bool:
+    """A sessions goal tied to a discipline is counted from the journal (see
+    disciplines.count_goals), not kept as a running total: a day fixed later
+    then fixes the goal too. Its stored `progress` is ignored; `baseline`
+    holds sessions from before the journal or never logged."""
+    return (
+        isinstance(goal, dict) and bool(goal.get("discipline")) and goal.get("metric") == "sessions"
+    )
+
+
 def apply_progress(goals: list[Any], goal_progress: list[dict[str, Any]]) -> list[AppliedProgress]:
-    """Apply each {goal_id, delta} to the matching goal's progress field, in place."""
+    """Apply each {goal_id, delta} to the matching goal's progress field, in place.
+    Counted goals are skipped: their sessions are already in the journal."""
     applied = []
     for item in goal_progress:
         goal = find_goal(goals, item.get("goal_id", ""))
         delta = item.get("delta")
-        if goal is None or delta is None:
+        if goal is None or delta is None or counted(goal):
             continue
         new_progress = (goal.get("progress") or 0) + delta
         goal["progress"] = new_progress

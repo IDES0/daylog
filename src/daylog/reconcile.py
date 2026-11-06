@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import logging
 import re
+from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import date
 from typing import Any
@@ -112,6 +113,8 @@ def reconcile_day(
     location_entry: Any | None,
     graph: disciplines.Graph | None = None,
     history: list[tuple[str, str | None]] | None = None,
+    vocabulary: list[str] | None = None,
+    recent: Mapping[date, Mapping[str, Any]] | None = None,
 ) -> Reconciled:
     """Re-extract the whole day. With a discipline graph, a vague sport is
     narrowed again, keeping whatever the user said or tapped that day."""
@@ -124,6 +127,8 @@ def reconcile_day(
         places=places,
         current_location_entry=location_entry,
         disciplines=disciplines.outline(graph) if graph else None,
+        vocabulary=vocabulary,
+        recent=recent,
         reconcile=True,
     )
     if graph:
@@ -131,6 +136,7 @@ def reconcile_day(
         here = index.current_place(location_entry)
         activities = facts.get("activities") or []
         disciplines.unsaid_kinds(graph, activities, entry.transcript)
+        disciplines.misheard(graph, activities)
         disciplines.resolve_vague(
             graph,
             activities,

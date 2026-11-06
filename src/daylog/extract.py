@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+from collections.abc import Mapping
 from datetime import date, time
 from pathlib import Path
 from typing import Any, cast
@@ -123,6 +124,14 @@ RECORD_JOURNAL_ENTRY_TOOL: ToolParam = {
                             ),
                         },
                         "detail": {"type": "string", "description": "One-line specifics."},
+                        "heard_as": {
+                            "type": "string",
+                            "description": (
+                                "Only when the transcript's word for this sport or place was "
+                                "misheard and you logged what the user meant instead: the word "
+                                "as transcribed, e.g. 'Wakefoil' for a Waco Surf session."
+                            ),
+                        },
                         "new_discipline_parents": {
                             "type": "array",
                             "items": {"type": "string"},
@@ -520,6 +529,32 @@ def _describe_activity(item: dict[str, Any]) -> str:
     return f"{item.get('type', '?')}{hours}{detail}"
 
 
+# Days of context before the note: what the user does, where, with whom.
+RECENT_DAYS = 7
+_DETAIL_CHARS = 90
+
+
+def _format_recent(recent: Mapping[date, Mapping[str, Any]] | None, index: PlaceIndex) -> str:
+    """One line per recent day: sports and where, plus decisions. Context for
+    reading a garbled word the way the user meant it, never facts to log."""
+    if not recent:
+        return "(none)"
+    lines = []
+    for day, fm in sorted(recent.items()):
+        bits = []
+        for a in fm.get("activities") or []:
+            if not isinstance(a, Mapping):
+                continue
+            node = index.get(a.get("place"))
+            where = str(node.get("name")) if node else a.get("place_mention")
+            text = _describe_activity(dict(a)) + (f" @ {where}" if where else "")
+            bits.append(text[:_DETAIL_CHARS])
+        bits += [f"decided: {str(d)[:_DETAIL_CHARS]}" for d in fm.get("decisions") or []]
+        if bits:
+            lines.append(f"- {day.isoformat()} {day:%a}: " + "; ".join(bits))
+    return "\n".join(lines) or "(none)"
+
+
 def _format_existing_entry(frontmatter: dict[str, Any] | None) -> str:
     """Numbered listing of today's activities/skipped/open_questions, for corrections.
 
@@ -562,6 +597,7 @@ def extract(
     current_location_entry: Any | None = None,
     disciplines: str | None = None,
     vocabulary: list[str] | None = None,
+    recent: Mapping[date, Mapping[str, Any]] | None = None,
     recorded_at: time | None = None,
     reconcile: bool = False,
     client: anthropic.Anthropic | None = None,
@@ -584,6 +620,9 @@ def extract(
     but wrong one. `current_location_entry` (the open location.yaml entry)
     focuses that list on the region the user is in. `disciplines` is the
     discipline graph's outline, so sports are logged under a real id.
+    `recent` is the frontmatter of the days before (RECENT_DAYS), so a
+    misheard word ("Wakefoil" the day after two Waco Surf sessions) is read
+    as what the user meant.
 
     `recorded_at` is when a note about today was sent (None when backdated),
     so activities' rough `at` times can be placed before it.
@@ -618,6 +657,8 @@ def extract(
         f"{disciplines or '(none set)'}\n\n"
         f"The user's own words (spell them like this; the transcript may garble them):\n"
         f"{', '.join(vocabulary) if vocabulary else '(none)'}\n\n"
+        f"Recent days (context only, already logged; never log them again):\n"
+        f"{_format_recent(recent, place_index)}\n\n"
         f"Transcript:\n{transcript}"
     )
     messages: list[MessageParam] = [{"role": "user", "content": user_content}]

@@ -250,3 +250,46 @@ def test_disciplines_round_trip_through_the_vault(vault: Vault) -> None:
 def test_new_node_drops_unknown_parents() -> None:
     node = disciplines.new_node(_graph(), "Sandboarding", ["earth", "water"])
     assert node == {"name": "Sandboarding", "parents": ["water"], "status": "active"}
+
+
+def test_a_misheard_sport_is_logged_as_meant_and_can_be_switched_back() -> None:
+    graph = Graph({**_graph().nodes, "surf": {"name": "Surfing", "parents": ["water"]}})
+    activities: list[Any] = [
+        {"type": "surf", "heard_as": "Wakefoil"},
+        {"type": "surf", "heard_as": "surfing"},
+        {"type": "tow_foil", "heard_as": "a wave pool"},
+    ]
+    guesses = disciplines.misheard(graph, activities)
+    assert activities[0] == {"type": "surf", "guessed": "wake_foil"}
+    assert activities[1] == {"type": "surf"}
+    assert activities[2] == {"type": "tow_foil"}
+    assert [(g.said, g.chosen, g.options) for g in guesses] == [
+        ("wake_foil", "surf", ["surf", "wake_foil"])
+    ]
+    fm = {"activities": activities}
+    assert disciplines.set_type(fm, 0, "wake_foil", "wake_foil")
+    assert fm["activities"][0]["type"] == "wake_foil"
+
+
+def test_a_sessions_goal_is_counted_from_the_journal() -> None:
+    from daylog import goals as goals_mod
+
+    graph = Graph({**_graph().nodes, "surf": {"name": "Surfing", "parents": ["water"]}})
+    goals_data = [
+        {"id": "surf", "discipline": "surf", "metric": "sessions", "progress": 3, "baseline": 10},
+        {"id": "fly", "discipline": "paraglide", "metric": "flights", "progress": 4},
+        {"id": "jobs", "metric": "applications_sent", "progress": 85},
+    ]
+    days = {
+        date(2026, 11, 2): {"activities": [{"type": "surf"}, {"type": "wake_foil"}]},
+        date(2026, 11, 3): {"activities": [{"type": "surfing"}, {"type": "surf"}]},
+    }
+    live = disciplines.count_goals(graph, goals_data, days)
+    assert [g["progress"] for g in live] == [13, 4, 85]
+    assert goals_data[0]["progress"] == 3
+    # A note's +1 doesn't double-count a counted goal; other goals still move.
+    applied = goals_mod.apply_progress(
+        goals_data, [{"goal_id": "surf", "delta": 1}, {"goal_id": "jobs", "delta": 2}]
+    )
+    assert [a.goal_id for a in applied] == ["jobs"]
+    assert goals_data[0]["progress"] == 3

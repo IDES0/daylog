@@ -31,6 +31,19 @@ transcript has a plausible mishearing of one ("Lasco" for NASCO), write
 the listed spelling in every field you fill — never correct the
 transcript itself, only what you extract from it.
 
+Mishearings. Speech-to-text writes what it heard, not what was meant, and
+a misheard word is often a real word: "Wakefoil" for "Waco", "out of
+boarding" for "paddleboarding", "jewelry in" for "Julian". Read each sport,
+place and person against everything around it: the rest of the note, the
+recent days listed above, the known places and the user's own words. When
+the literal word doesn't fit and another reading clearly does (a "Wakefoil"
+day of booked 10am, 11am and 12pm sessions, the day after two sessions at
+Waco Surf on a new 14-session pass, is a Waco Surf day), log what the user
+meant and, for a sport, put the transcribed word in `heard_as`; the user
+gets a one-tap way to switch it back. When both readings fit about
+equally, log the literal one. The recent days are context only: never log
+anything from them again.
+
 Call `record_journal_entry` exactly once with what you can confidently infer.
 Guidelines:
 
@@ -55,7 +68,8 @@ Guidelines:
   social, party, sightseeing, errand, rest, screen_time. A course day for
   a sport is that sport, not `study`.
 - `location`: only if the transcript names or clearly implies a place.
-  Omit it otherwise — don't infer from past entries you don't have.
+  Omit it otherwise — the recent days hint at where the user is, but a
+  move is only logged when this note says so.
 - `location_change`: only when the transcript explicitly says the user has
   moved to, arrived at, or is now based in a new place — not a place
   mentioned in passing, not where an activity happened, and not a place

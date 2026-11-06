@@ -70,6 +70,9 @@ progress or slipped dates are extracted automatically:
   signal worth surfacing, not just its current date.
 - **Hard** goals (a real deadline) never move silently — the app asks for
   a Confirm/Cancel card before writing a moved date.
+- **Counted** goals (`metric: sessions` with a `discipline`) aren't kept as
+  a running total: progress is `baseline` plus the sessions logged under
+  that discipline, so fixing a day fixes the goal.
 
 ### Disciplines
 `disciplines.yaml` holds your sports as a graph rather than a flat list.
@@ -84,6 +87,10 @@ Earth (with Mountain → Snow under it) and Body.
   e.g. Austin → wakefoil), then a default (tow foil). The reply says which
   and why, with buttons to change it; a reconcile keeps what you said or
   tapped.
+- **Misheard sports**: a note is read against the 7 days before it, so
+  "Wakefoil" the day after two Waco Surf sessions is logged as surf. When
+  the logged sport differs from the word transcribed, the reply says so,
+  with a button to switch it back.
 - **New sports**: one the graph doesn't know gets an Add card (pursuing,
   want, or no); nothing joins the graph without the tap.
 - **State**: you set `active` or `want`. The app derives *not started*

@@ -164,3 +164,34 @@ def test_extract_sends_the_discipline_outline_and_goal_disciplines(
         "Disciplines (id: name; indented under what it is a kind of):\n- foil: Foiling" in content
     )
     assert "discipline: surf" in content
+
+
+def test_extract_reads_the_note_against_the_recent_days(monkeypatch: pytest.MonkeyPatch) -> None:
+    from datetime import date
+
+    from daylog import extract, llm
+
+    monkeypatch.setattr(llm, "record", lambda *a, **k: None)
+    schema = cast(dict[str, Any], RECORD_JOURNAL_ENTRY_TOOL["input_schema"])
+    assert "heard_as" in schema["properties"]["activities"]["items"]["properties"]
+    recent = {
+        date(2026, 11, 3): {
+            "activities": [
+                {"type": "surf", "hours": 2, "detail": "two sessions", "place": "waco-surf"},
+                {"type": "screen_time"},
+            ],
+            "decisions": ["Booked the Waco Surf winter pass"],
+        },
+        date(2026, 11, 4): {"meals": [{"items": ["tacos"]}]},
+    }
+    places = [{"id": "waco-surf", "name": "Waco Surf", "kind": "surf_spot"}]
+    client = _Client({"activities": [{"type": "surf"}], "summary": "Surfed."})
+    day = date(2026, 11, 5)
+    extract.extract("Wakefoil", [], [], day, places=places, recent=recent, client=client)  # type: ignore[arg-type]
+    content = client.sent["messages"][0]["content"]
+    assert "Recent days (context only" in content
+    assert "- 2026-11-03 Tue: surf, 2h — two sessions @ Waco Surf; screen_time" in content
+    assert "decided: Booked the Waco Surf winter pass" in content
+    # A day with nothing done is left out.
+    assert "2026-11-04" not in content
+    extract.extract("x", [], [], day, client=_Client({"summary": "x"}))  # type: ignore[arg-type]

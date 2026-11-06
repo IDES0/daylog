@@ -519,7 +519,7 @@ def context_block(v: Vault, today: date, now: datetime) -> str:
     node = index.current_place(location)
     where = index.path_name(node["id"]) if node else (location or {}).get("place", "unknown")
     goal_lines = []
-    for g in v.read_goals():
+    for g in disciplines.live_goals(v):
         if g.get("status", "active") != "active":
             continue
         target = goals.current_target_date(g)
