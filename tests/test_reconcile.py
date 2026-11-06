@@ -103,6 +103,77 @@ def test_run_reconcile_rewrites_day_and_corrects_goal_total(
     assert entry is not None and reconcile.needs_reconcile(entry)
 
 
+def test_reconcile_carries_both_scores_and_keeps_the_users_own(
+    vault: Vault, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _two_note_day(vault)
+    entry = vault.read_journal_entry(DAY)
+    assert entry is not None
+    entry.frontmatter["rating"] = {"score": 8, "note": "great waves"}
+    rebuilt = reconcile.rebuild(
+        entry,
+        {
+            "activities": [{"type": "surf", "hours": 2}],
+            "assessment": {"score": 6, "why": "One surf toward the goal; the rest drifted."},
+            "summary": "Surfed.",
+        },
+    )
+    # The pass missed the user's rating: it's kept, not wiped.
+    assert rebuilt.frontmatter["rating"] == {"score": 8, "note": "great waves"}
+    assert rebuilt.frontmatter["assessment"]["score"] == 6
+
+    def fake_extract(transcript: str, *args: Any, **kwargs: Any) -> dict[str, Any]:
+        return {
+            "activities": [{"type": "surf", "hours": 2}],
+            "rating": {"score": 7},
+            "assessment": {"score": 6, "why": "A surf toward the goal."},
+            "summary": "Surfed two hours.",
+        }
+
+    monkeypatch.setattr(extract, "extract", fake_extract)
+    daily.run_reconcile(vault, DAY)
+    entry = vault.read_journal_entry(DAY)
+    assert entry is not None
+    assert entry.frontmatter["rating"] == {"score": 7}
+    assert entry.frontmatter["assessment"] == {"score": 6, "why": "A surf toward the goal."}
+    assert not daily.needs_work(entry)
+
+
+def test_a_single_note_day_is_only_assessed_not_rebuilt(
+    vault: Vault, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    day = date(2026, 9, 24)
+    linked = [{"type": "surf", "hours": 2, "place": "lakey-peak"}]
+    vault.write_journal_entry(datetime(2026, 9, 24, 20, 0), {"activities": linked}, "surfed", "S.")
+    vault.write_journal_entry(
+        datetime(2026, 9, 23, 20, 0), {}, "(Mentioned in the 2026-09-24 entry) ran", "Ran."
+    )
+    entry = vault.read_journal_entry(day)
+    pointer = vault.read_journal_entry(date(2026, 9, 23))
+    assert entry is not None and pointer is not None
+    assert daily.needs_work(entry) and not reconcile.needs_reconcile(entry)
+    assert not reconcile.needs_assessment(pointer)
+
+    def fake_extract(transcript: str, *args: Any, **kwargs: Any) -> dict[str, Any]:
+        assert kwargs["reconcile"] is True
+        return {
+            "activities": [{"type": "surf"}],  # a worse read: must not replace the record
+            "assessment": {"score": 7, "why": "Two hours of surf toward the goal."},
+            "summary": "Different summary.",
+        }
+
+    monkeypatch.setattr(extract, "extract", fake_extract)
+    outcomes = daily.reconcile_recent(vault, date(2026, 9, 25))
+    assert outcomes == ["2026-09-24 assessed: 7/10."]
+    entry = vault.read_journal_entry(day)
+    assert entry is not None
+    assert entry.frontmatter["activities"] == linked
+    assert entry.summary == "### 20:00\n\nS."
+    assert entry.frontmatter["assessment"]["score"] == 7
+    assert "reconciled" not in entry.frontmatter
+    assert not daily.needs_work(entry)
+
+
 def test_logical_day_rolls_back_before_the_cutoff() -> None:
     assert daily.logical_day(datetime(2026, 9, 26, 1, 30), cutoff_hour=4) == date(2026, 9, 25)
     assert daily.logical_day(datetime(2026, 9, 26, 4, 0), cutoff_hour=4) == date(2026, 9, 26)

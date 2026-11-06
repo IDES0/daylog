@@ -40,6 +40,7 @@ from daylog import (
     dashboard,
     disciplines,
     edits,
+    extract,
     itinerary,
     journal_service,
     llm,
@@ -158,6 +159,16 @@ def plain(value: Any) -> Any:
     if value is None or isinstance(value, bool | int | float | str):
         return value
     return str(value)
+
+
+def day_scores(frontmatter: Mapping[str, Any] | None) -> dict[str, Any]:
+    """A day's two scores, each {score, note|why} or None: `rating` is the
+    user's own, `assessment` the assistant's."""
+    fm = frontmatter or {}
+    return {
+        key: extract.day_score(fm.get(key), text_key)
+        for key, text_key in extract.SCORE_FIELDS.items()
+    }
 
 
 def _date(value: Any, name: str = "date") -> date:
@@ -450,12 +461,15 @@ class Api:
                         }
                         for b in blocks
                     ],
+                    **day_scores(entry.frontmatter if entry else None),
                 }
             )
         nxt = monday + timedelta(days=7)
+        frontmatters = [e.frontmatter for e in entries.values()]
         return 200, {
             "week_of": monday.isoformat(),
             "days": out,
+            "averages": {key: review.score_avg(frontmatters, key) for key in extract.SCORE_FIELDS},
             "prev": (monday - timedelta(days=7)).isoformat(),
             "next": nxt.isoformat() if nxt <= today else None,
         }
@@ -474,6 +488,7 @@ class Api:
             "milestones": plain(fm.get("milestones") or []),
             "location": plain(fm.get("location")),
             "notes": journal_service.note_count(entry.summary),
+            **day_scores(fm),
         }
 
     def journal(self, req: Request, m: re.Match[str]) -> Reply:

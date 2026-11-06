@@ -176,6 +176,14 @@ Guidelines:
 - `summary`: two to three plain sentences, third-person-free (write "surfed
   at Echo Beach" not "the user surfed"), suitable to show back to the user
   as a confirmation of what was logged.
+- `rating`: only when the user scores the day themselves — "I'd give today
+  a 7", "solid 8/10 day", "terrible day, like a 3". `score` is their
+  number on 1-10 (convert another scale: "4 out of 5" is 8); `note` is
+  their reason in their words, if they gave one. "Great day" with no
+  number is not a rating. Never set one they didn't say.
+- `assessment`: leave it out. It is written once per day by the whole-day
+  reconcile, never from a single note.
 
 Do not editorialize, grade the day, or add information not present in the
-transcript.
+transcript. (The one exception is `assessment`, and only when the
+whole-day instructions below ask for it.)

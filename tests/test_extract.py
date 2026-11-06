@@ -195,3 +195,57 @@ def test_extract_reads_the_note_against_the_recent_days(monkeypatch: pytest.Monk
     # A day with nothing done is left out.
     assert "2026-11-04" not in content
     extract.extract("x", [], [], day, client=_Client({"summary": "x"}))  # type: ignore[arg-type]
+
+
+def test_day_scores_have_a_fixed_shape_and_bad_ones_are_dropped(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from datetime import date
+
+    from daylog import extract, llm
+
+    schema = cast(dict[str, Any], RECORD_JOURNAL_ENTRY_TOOL["input_schema"])
+    rating = schema["properties"]["rating"]
+    assessment = schema["properties"]["assessment"]
+    assert rating["properties"]["score"]["minimum"] == 1
+    assert rating["properties"]["score"]["maximum"] == 10
+    assert rating["required"] == ["score"] and "note" in rating["properties"]
+    assert assessment["required"] == ["score", "why"]
+
+    monkeypatch.setattr(llm, "record", lambda *a, **k: None)
+    payload = {
+        "activities": [],
+        "rating": {"score": 7.0, "note": "  good waves  "},
+        "assessment": {"score": 11, "why": "off the scale"},
+        "summary": "Surfed.",
+    }
+    facts = extract.extract("a 7", [], [], date(2026, 11, 2), client=_Client(payload))  # type: ignore[arg-type]
+    assert facts["rating"] == {"score": 7, "note": "good waves"}
+    assert "assessment" not in facts  # out of range: dropped, the note still logs
+
+    assert extract.day_score({"score": True}, "note") is None
+    assert extract.day_score("7", "note") is None
+    assert extract.day_score({"score": 3}, "why") == {"score": 3}
+
+
+def test_a_single_note_never_writes_an_assessment(
+    vault: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from datetime import date, datetime
+
+    from daylog import extract, journal_service
+
+    def fake_extract(*args: Any, **kwargs: Any) -> dict[str, Any]:
+        return {
+            "activities": [],
+            "rating": {"score": 8},
+            "assessment": {"score": 6, "why": "guessing from one note"},
+            "summary": "A good day.",
+        }
+
+    monkeypatch.setattr(extract, "extract", fake_extract)
+    day = date(2026, 11, 2)
+    journal_service.log(vault, "solid 8 out of 10 day", day, datetime(2026, 11, 2, 21, 0))
+    entry = vault.read_journal_entry(day)
+    assert entry.frontmatter["rating"] == {"score": 8}
+    assert "assessment" not in entry.frontmatter

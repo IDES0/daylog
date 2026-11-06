@@ -756,7 +756,7 @@ function renderCalendar(d) {
   const grid = h("div.cal", { style: { "--span": String(hi - lo) } }, gutter);
   const today = todayIso();
   for (const day of days) {
-    const head = h("span.cal-head", weekday(day.date, 3), h("b", String(parseD(day.date)?.getDate() ?? "")));
+    const head = h("span.cal-head", weekday(day.date, 3), h("b", String(parseD(day.date)?.getDate() ?? "")), scoreBadges(day));
     const bodyEl = h("span.cal-body", day.blocks.map(b => h("span.blk" + (b.guess ? ".guess" : ""), {
       title: `${b.guess ? "≈" : "~"}${clock(b.start)} ${words(b.label)}`,
       style: {
@@ -773,15 +773,40 @@ function renderCalendar(d) {
       ? h("button.cal-day" + cls, { type: "button", "aria-label": `${weekday(day.date)} ${short(day.date)}`, onclick: () => daySheet(day) }, head, bodyEl)
       : h("div.cal-day" + cls, { "aria-label": `${weekday(day.date)} ${short(day.date)}: nothing logged` }, head, bodyEl));
   }
-  fill(c.body, grid, h("p.cal-key", "Rough times: ~ estimated from what you said, ≈ guessed from the order. Tap a day for its summary."));
+  const avg = d.averages || {};
+  const avgText = [avg.rating != null ? `you ${avg.rating}` : "", avg.assessment != null ? `assistant ${avg.assessment}` : ""].filter(Boolean).join(" · ");
+  fill(c.body, grid,
+    h("p.cal-key", "Rough times: ~ estimated from what you said, ≈ guessed from the order. Tap a day for its summary."),
+    h("p.cal-key", h("span.score.you", "7"), " your rating, when you give one · ", h("span.score.ai", "6"), " the assistant's, for how the day's time went toward your goals",
+      avgText ? ` · Week average: ${avgText}` : ""));
+}
+
+// A day's two 1–10 scores: the user's own (filled) and the assistant's (outlined).
+function scoreBadges(day) {
+  const r = day.rating, a = day.assessment;
+  if (!r && !a) return null;
+  return h("span.cal-scores",
+    r ? h("span.score.you", { title: `Your rating: ${r.score}/10${r.note ? ` (${r.note})` : ""}` }, String(r.score)) : null,
+    a ? h("span.score.ai", { title: `Assistant: ${a.score}/10 (${a.why || ""})` }, String(a.score)) : null);
+}
+
+function scoreRows(day) {
+  const r = day.rating, a = day.assessment;
+  if (!r && !a) return null;
+  return h("dl.kv.scores",
+    r ? h("dt", h("span.score.you", String(r.score)), " You") : null,
+    r ? h("dd", r.note || "Your rating for the day.") : null,
+    a ? h("dt", h("span.score.ai", String(a.score)), " Assistant") : null,
+    a ? h("dd", a.why || "") : null);
 }
 
 function daySheet(day) {
   const times = [...day.blocks].sort((a, b) => a.start - b.start)
     .map(b => h("li", `${b.guess ? "≈" : "~"}${clock(b.start)}–${clock(b.end)} ${words(b.label)}`));
   const more = h("div");
-  const btn = h("button.btn", { type: "button", onclick: () => { btn.remove(); load(more, () => api(`/api/journal/${day.date}`), j => more.append(dayDetail(j, { summary: false }))); } }, "Details & transcript");
+  const btn = h("button.btn", { type: "button", onclick: () => { btn.remove(); load(more, () => api(`/api/journal/${day.date}`), j => more.append(dayDetail(j, { summary: false, scores: false }))); } }, "Details & transcript");
   openSheet(`${weekday(day.date)}, ${short(day.date)}`, h("div.stack-lg",
+    scoreRows(day),
     times.length ? h("ul.times", times) : null,
     day.summary ? md(day.summary) : empty(null, "No summary."),
     h("div", btn, more)));
@@ -1037,7 +1062,7 @@ function dayRow(d) {
   return det;
 }
 
-function dayDetail(j, { summary }) {
+function dayDetail(j, { summary, scores = true }) {
   const kv = h("dl.kv");
   const row = (k, v) => { if (v) kv.append(h("dt", k), h("dd", v)); };
   row("Where", typeof j.location === "object" ? fmtAny(j.location) : j.location);
@@ -1053,6 +1078,7 @@ function dayDetail(j, { summary }) {
     render: r => { recon.append(okMsg(r.message || "Rebuilt.")); S.homeStale = true; },
   }));
   add(out, [
+    scores ? scoreRows(j) : null,
     (j.activities || []).length ? h("div.chips", j.activities.map(a => h("span.chip", actText(a)))) : null,
     kv.childNodes.length ? kv : null,
     summary && j.summary ? md(j.summary) : null,

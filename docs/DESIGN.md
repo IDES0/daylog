@@ -51,7 +51,10 @@ The ledger is the foundation; the assistant is only as good as its grounding.
 - **One source of truth per fact; everything else is derived.** The trail,
   visits, the "current" place, the export tables and the status page are
   computed on demand, never stored.
-- **No scoring or grading of days.** Record facts; surface slippage.
+- **Days get two scores at most, never mixed.** The user's own `rating`,
+  only when they say one, and the assistant's nightly `assessment`, shown
+  as the assistant's. Nothing else grades a day. Record facts; surface
+  slippage. (Until 2026-11-06 the rule was no scoring at all.)
 - **Nothing personal in the code repo.** Tests use invented fixtures and a
   temp git repo, never the real vault.
 - **Research reads the web properly** (search, fetch, read full pages). The
@@ -82,6 +85,9 @@ The ledger is the foundation; the assistant is only as good as its grounding.
   cutoff; a day told in several notes is rebuilt once at day end.
   Activities may carry `at`, a rough start ("HH:MM") the extraction
   estimates for the week calendar; it's a ballpark, never a measurement.
+  `rating: {score, note}` is the user's own 1-10 for the day, only when
+  said; `assessment: {score, why}` is the assistant's 1-10 for how the
+  day's time went toward the goals, written by the nightly reconcile.
 - **`health.yaml`**: the phone's daily numbers, kept beside the journal as
   reference, joined by date.
 - **`site.yaml`**: summaries of the personal site's PostHog analytics —
@@ -169,6 +175,7 @@ The ledger is the foundation; the assistant is only as good as its grounding.
 | 2026-10-27 | More background research on the user's plan, not more paid API calls: five extra routines (request sweep, job hunt, decision push, crew finder, weekend planner). They write only under `research/`, never contact anyone and never get send access. The brief now reads every `research/daily/<today>*.md`, chat lists the last three days of them, and chat gets `search_journal`, a full-text search over transcripts and summaries (no embeddings yet: the journal is small enough to scan) |
 | 2026-10-29 | Booking pages: the first thing a stranger can write. A page is a vault file (`booking/<slug>.yaml`, the slots on offer and its wording) served on its own domain, `book.johnalexborkowski.com/<slug>?name=…`, which serves nothing else. A guest can only take an offered, free slot; the booking lands in `bookings.yaml` as pending, the user gets one notification and an Accept/Decline card, and only an accepted one goes on the calendar feed, so a guest never puts a hard date in the plans without a Confirm. Nothing goes back to the guest. Guarded by JSON-only posts with a same-host Origin, a honeypot field, 5 per client an hour, 4 KB bodies and 10 waiting per page. The user wanted a coffee booking page to report back on its own instead of the guest texting a confirmation, and a reusable scheduling tool; pages are written by hand (or by Claude in a session) for now, a screen to make them comes later if it's used |
 | 2026-11-06 | Notes are read in context. Extraction (and the nightly reconcile, which also gains the vocabulary) gets a digest of the 7 days before the note: each sport, where, and decisions. The prompt treats a misheard word as possibly a real word and reads it against that context, the places and the user's words; when it logs a sport other than the one transcribed it sets `heard_as`, and the app keeps `guessed` plus a one-tap card to switch it back. Prompted by a week where "Waco" came out as "Wakefoil" twice, two Waco Surf days were logged as wake foiling and the surf goal never moved; the static vocabulary only nudges Whisper, it can't infer. A sessions goal tied to a discipline is now counted from the journal (`baseline` plus sessions under it), shown that way everywhere, and a note's +1 no longer touches it; this reverses 2026-10-15's "progress stays as extracted", because the stored total drifted from the graph and a fixed day never fixed the goal. Unlogged sessions told in chat go into `baseline` |
+| 2026-11-06 | Days get scored, which lifts "no scoring or grading of days": the user asked for their own rating per date plus the assistant's on how well the time was filled toward their goals. Two fields, never mixed: `rating {score, note}`, 1-10, extracted only when a note states one (never inferred; a reconcile that misses it keeps the old one), and `assessment {score, why}`, the assistant's 1-10 with a one-line reason, written only by the whole-day reconcile so a morning note can't score a day that hasn't happened. It rides on the reconcile's model call; a single-note day (or one reconciled before this) now also gets that nightly pass, but only gains the assessment and keeps its record, since rebuilding it would gain nothing; a day that's only a pointer from another day's note isn't scored. The rubric in `prompts/reconcile.md` judges against what was realistic (travel, sick and rest days aren't failures), counts goal time and good non-goal time, and is calibrated so most days are 4-7 and 9-10 rare. Shown as a badge per day on the week calendar (the user's filled, the assistant's dashed), with reasons in the day view, week averages under the calendar and in the weekly review's numbers. The last four weeks were scored in a Claude Code session, not through the API |
 
 ## Not built
 

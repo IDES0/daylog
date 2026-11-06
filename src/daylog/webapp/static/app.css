@@ -341,12 +341,12 @@ body.kb main { padding-bottom: 0; }
 /* week calendar */
 .cal-nav { display: flex; align-items: center; gap: var(--s1); }
 .cal-nav span { font: 12.5px var(--mono); color: var(--muted); min-width: 0; text-align: center; }
-.cal { --hour: 26px; display: grid; grid-template-columns: 22px repeat(7, minmax(0, 1fr)); gap: 3px; }
-.cal-gutter { position: relative; margin-top: 40px; height: calc(var(--span) * var(--hour)); }
+.cal { --hour: 26px; --head: 60px; display: grid; grid-template-columns: 22px repeat(7, minmax(0, 1fr)); gap: 3px; }
+.cal-gutter { position: relative; margin-top: var(--head); height: calc(var(--span) * var(--hour)); }
 .cal-gutter span { position: absolute; right: 3px; transform: translateY(-50%); font: 10px var(--mono); color: var(--faint); }
 .cal-day { display: flex; flex-direction: column; padding: 0; border: 0; background: none; color: inherit; font: inherit; text-align: left; cursor: pointer; min-width: 0; border-radius: 8px; }
 .cal-day.empty { cursor: default; }
-.cal-head { height: 40px; font: 10.5px/1.25 var(--mono); color: var(--faint); text-align: center; text-transform: uppercase; }
+.cal-head { height: var(--head); font: 10.5px/1.25 var(--mono); color: var(--faint); text-align: center; text-transform: uppercase; }
 .cal-head b { display: block; font: 500 17px/1.3 var(--serif); color: var(--text); text-transform: none; }
 .cal-day.today .cal-head b { color: var(--here); }
 .cal-body { position: relative; display: block; height: calc(var(--span) * var(--hour)); background: var(--surface-2); border-radius: 8px; overflow: hidden; }
@@ -362,6 +362,14 @@ body.kb main { padding-bottom: 0; }
 }
 @media (min-width: 900px) { .cal { --hour: 28px; grid-template-columns: 26px repeat(7, minmax(0, 1fr)); gap: 4px; } .blk { font-size: 11px; padding: 3px 4px; } }
 .cal-key { margin-top: var(--s3); font-size: 12.5px; color: var(--faint); }
+.cal-key + .cal-key { margin-top: var(--s1); }
+/* Day scores: the user's own is filled, the assistant's outlined and dashed. */
+.cal-scores { display: flex; justify-content: center; gap: 2px; margin-top: 2px; }
+.score { display: inline-grid; place-items: center; min-width: 18px; height: 18px; padding: 0 3px; border-radius: 9px;
+  font: 600 10.5px/1 var(--mono); letter-spacing: 0; text-transform: none; vertical-align: 1px; }
+.score.you { background: var(--accent); color: var(--accent-ink); }
+.score.ai { border: 1.5px dashed var(--muted); color: var(--muted); background: transparent; }
+.kv.scores dt { display: flex; align-items: center; gap: 6px; }
 .times li { list-style: none; font: 13px/1.5 var(--mono); color: var(--muted); padding: 2px 0; }
 
 /* ---------- log ---------- */

@@ -24,7 +24,7 @@ from daylog import (
     review,
     vocab,
 )
-from daylog.vault import Vault, VaultError
+from daylog.vault import JournalEntry, Vault, VaultError
 
 logger = logging.getLogger(__name__)
 
@@ -43,12 +43,22 @@ def logical_day(now: datetime, cutoff_hour: int | None = None) -> date:
     return now.date()
 
 
+def needs_work(entry: JournalEntry) -> bool:
+    """Rebuilt (several notes) or only scored (one note, no assessment yet)."""
+    return reconcile.needs_reconcile(entry) or reconcile.needs_assessment(entry)
+
+
 def run_reconcile(v: Vault, day: date, force: bool = False) -> str:
-    """Reconcile one day. Returns a human-readable outcome line."""
+    """Reconcile one day. Returns a human-readable outcome line.
+
+    A day told in several notes is rebuilt. A day whose record was already
+    right at capture (one note, or reconciled before assessments existed)
+    only gains the pass's `assessment`; the rest of its record is kept."""
     entry = v.read_journal_entry(day)
     if entry is None:
         return f"{day.isoformat()}: no entry."
-    if not force and not reconcile.needs_reconcile(entry):
+    rebuild = force or reconcile.needs_reconcile(entry)
+    if not rebuild and not reconcile.needs_assessment(entry):
         return f"{day.isoformat()}: nothing to reconcile."
 
     location_data = v.read_location()
@@ -65,6 +75,12 @@ def run_reconcile(v: Vault, day: date, force: bool = False) -> str:
         vocabulary=vocab.custom(v.read_profile()),
         recent=journal_service.recent_days(v, day),
     )
+    if not rebuild:
+        scored = reconcile.assessment_only(entry, result.frontmatter)
+        if scored is None:
+            return f"{day.isoformat()}: no assessment given."
+        v.rewrite_journal_entry(day, scored, f"journal: {day.isoformat()} (assessed)")
+        return f"{day.isoformat()} assessed: {scored['assessment']['score']}/10."
     v.rewrite_journal_entry(
         day, result.frontmatter, f"journal: {day.isoformat()} (reconciled)", summary=result.summary
     )
@@ -84,7 +100,7 @@ def reconcile_recent(v: Vault, today: date) -> list[str]:
     for offset in range(1, CATCH_UP_DAYS + 1):
         day = today - timedelta(days=offset)
         entry = v.read_journal_entry(day)
-        if entry is None or not reconcile.needs_reconcile(entry):
+        if entry is None or not needs_work(entry):
             continue
         try:
             outcomes.append(run_reconcile(v, day))

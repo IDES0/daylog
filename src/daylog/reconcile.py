@@ -50,6 +50,29 @@ def needs_reconcile(entry: JournalEntry) -> bool:
     return note_count(entry) > 1 and not entry.frontmatter.get("reconciled")
 
 
+_POINTER = "(Mentioned in the "
+
+
+def needs_assessment(entry: JournalEntry) -> bool:
+    """A day told in a real note that has no assessment yet. A day that is only
+    a pointer from another day's note ("(Mentioned in the ... entry)") isn't
+    scored: one aside says too little about how the day went."""
+    if entry.frontmatter.get("assessment"):
+        return False
+    bodies = [b.strip() for b in _HEADING_RE.split(entry.transcript) if b.strip()]
+    return any(not b.startswith(_POINTER) for b in bodies)
+
+
+def assessment_only(entry: JournalEntry, facts: dict[str, Any]) -> dict[str, Any] | None:
+    """The day's frontmatter with just the assessment from a whole-day pass added,
+    for a single-note day whose record was already right at capture. None when
+    the pass gave no usable assessment."""
+    assessment = extract.day_score(facts.get("assessment"), "why")
+    if assessment is None:
+        return None
+    return {**entry.frontmatter, "assessment": assessment}
+
+
 def _totals(progress: list[dict[str, Any]] | None) -> dict[str, float]:
     out: dict[str, float] = {}
     for item in progress or []:
@@ -94,6 +117,13 @@ def rebuild(entry: JournalEntry, facts: dict[str, Any]) -> Reconciled:
     frontmatter = {k: v for k, v in facts.items() if v not in (None, [], "")}
     if "location" not in frontmatter and entry.frontmatter.get("location"):
         frontmatter["location"] = entry.frontmatter["location"]
+    # The user's own score is theirs: a pass that misses it doesn't drop it.
+    # An assessment the pass didn't give keeps the one the day had.
+    for key, text_key in extract.SCORE_FIELDS.items():
+        if key not in frontmatter:
+            kept = extract.day_score(entry.frontmatter.get(key), text_key)
+            if kept:
+                frontmatter[key] = kept
     frontmatter["reconciled"] = True
     return Reconciled(
         entry_date=entry.date,

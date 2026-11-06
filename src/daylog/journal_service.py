@@ -222,6 +222,9 @@ def log(
         recorded_at=None if backdated else now.time(),
     )
     summary = facts.pop("summary", "")
+    # The assistant's score is for a whole day, written by the nightly
+    # reconcile; one note never sets it.
+    facts.pop("assessment", None)
     place_index = PlaceIndex(places_list)
     here = place_index.current_place(current)
     guesses, new_disciplines = disciplines.prepare(
