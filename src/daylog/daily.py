@@ -13,7 +13,17 @@ import logging
 import os
 from datetime import date, datetime, timedelta
 
-from daylog import brief, disciplines, goals, itinerary, llm, reconcile, review
+from daylog import (
+    brief,
+    disciplines,
+    goals,
+    itinerary,
+    journal_service,
+    llm,
+    reconcile,
+    review,
+    vocab,
+)
 from daylog.vault import Vault, VaultError
 
 logger = logging.getLogger(__name__)
@@ -52,6 +62,8 @@ def run_reconcile(v: Vault, day: date, force: bool = False) -> str:
         brief.current_location(location_data),
         graph,
         disciplines.history(graph, disciplines.all_days(v, day - timedelta(days=1))),
+        vocabulary=vocab.custom(v.read_profile()),
+        recent=journal_service.recent_days(v, day),
     )
     v.rewrite_journal_entry(
         day, result.frontmatter, f"journal: {day.isoformat()} (reconciled)", summary=result.summary

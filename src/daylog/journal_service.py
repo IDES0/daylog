@@ -15,7 +15,7 @@ from __future__ import annotations
 import logging
 import re
 from dataclasses import dataclass, field
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from typing import Any
 
 from daylog import brief, disciplines, export, extract, goals, itinerary, vocab
@@ -156,6 +156,13 @@ def resolve_other_day_notes(notes: list[dict[str, Any]]) -> list[ResolvedOtherDa
     return resolved
 
 
+def recent_days(v: Vault, day: date) -> dict[date, dict[str, Any]]:
+    """The frontmatter of the days just before `day`, for reading a note in context."""
+    start = day - timedelta(days=extract.RECENT_DAYS)
+    entries = v.read_journal_range(start, day - timedelta(days=1))
+    return {d: e.frontmatter for d, e in entries.items()}
+
+
 def has_place_mentions(facts: dict[str, Any]) -> bool:
     return any(
         isinstance(item, dict) and item.get("place_mention") and not item.get("place")
@@ -210,6 +217,7 @@ def log(
         current_location_entry=current,
         disciplines=disciplines.outline(graph) if graph else None,
         vocabulary=vocab.custom(v.read_profile()),
+        recent=recent_days(v, entry_date),
         # A backdated note was sent later than the day it's about.
         recorded_at=None if backdated else now.time(),
     )

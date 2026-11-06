@@ -958,7 +958,7 @@ def render_guest(vault: Vault, today: date, login: bool = False) -> str:
     )
 
     # Goals: title, progress, and how often the date slipped. No notes.
-    raw_goals = [g for g in vault.read_goals() or [] if isinstance(g, dict)]
+    raw_goals = [g for g in disciplines.live_goals(vault) if isinstance(g, dict)]
     slips = {str(g.get("title", g.get("id"))): len(g.get("slip_history") or []) for g in raw_goals}
     goal_items = []
     for g in goal_rows(raw_goals):
@@ -1122,7 +1122,7 @@ def render(
     headed = future_map(itinerary, PlaceIndex(vault.read_places()), location, today)
     legs = [_item(p, when) for p, when in upcoming(itinerary, today)]
 
-    raw_goals = [g for g in vault.read_goals() or [] if isinstance(g, dict)]
+    raw_goals = [g for g in disciplines.live_goals(vault) if isinstance(g, dict)]
     slips = {
         str(g.get("title", g.get("id", "?"))): len(g.get("slip_history") or []) for g in raw_goals
     }

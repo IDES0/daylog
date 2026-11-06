@@ -350,7 +350,7 @@ class Api:
         legs.sort(key=lambda leg: leg["date"])
 
         goal_list = []
-        for g in v.read_goals() or []:
+        for g in disciplines.live_goals(v):
             if not isinstance(g, dict) or g.get("status", "active") != "active":
                 continue
             progress, target = (
@@ -1089,12 +1089,14 @@ class Api:
     def upcoming(self, req: Request, m: re.Match[str]) -> Reply:
         v = self._vault()
         return 200, {
-            "items": services.upcoming_items(v.read_goals(), v.read_itinerary(), self._today())
+            "items": services.upcoming_items(
+                disciplines.live_goals(v), v.read_itinerary(), self._today()
+            )
         }
 
     def status(self, req: Request, m: re.Match[str]) -> Reply:
         v = self._vault()
-        return 200, {"text": services.format_status(v.read_goals(), v.read_itinerary())}
+        return 200, {"text": services.format_status(disciplines.live_goals(v), v.read_itinerary())}
 
     def usage(self, req: Request, m: re.Match[str]) -> Reply:
         return 200, llm.usage_data(self._vault())

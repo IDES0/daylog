@@ -297,7 +297,9 @@ def edit_goal(goals_data: list[Any], edit: dict[str, Any], on: date) -> str:
     if edit.get("target") is not None:
         goal["target"] = edit["target"]
     if edit.get("progress_delta"):
-        goal["progress"] = (goal.get("progress") or 0) + edit["progress_delta"]
+        # Sessions never logged go into the baseline; the rest is counted.
+        field_name = "baseline" if goals.counted(goal) else "progress"
+        goal[field_name] = (goal.get(field_name) or 0) + edit["progress_delta"]
     if edit.get("date"):
         new_date = _day(edit["date"])
         if goal.get("type") == "hard":

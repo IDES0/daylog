@@ -33,6 +33,7 @@ from dataclasses import dataclass, field
 from datetime import date, timedelta
 from typing import Any
 
+from daylog import goals as goals_mod
 from daylog.places import PlaceIndex
 from daylog.vault import Vault
 
@@ -355,6 +356,26 @@ def unsaid_kinds(graph: Graph, activities: list[Any], transcript: str) -> None:
             activity["type"] = general
 
 
+def misheard(graph: Graph, activities: list[Any]) -> list[Guess]:
+    """Activities extraction logged as another sport than the transcript's word
+    (`heard_as`: speech-to-text wrote "Wakefoil" for "Waco"). Each keeps
+    `guessed: <the sport as transcribed>`, so one tap puts it back."""
+    out = []
+    for index, activity in enumerate(activities):
+        if not isinstance(activity, dict):
+            continue
+        heard = str(activity.pop("heard_as", "") or "").strip()
+        chosen = graph.resolve(activity.get("type"))
+        literal = graph.resolve(heard) if heard else None
+        if not heard or chosen is None or literal is None or literal == chosen:
+            continue
+        activity["type"] = chosen
+        activity["guessed"] = literal
+        reason = f'the note said "{heard}"; read from context'
+        out.append(Guess(index, literal, chosen, reason, [chosen, literal]))
+    return out
+
+
 def fitting_progress(
     graph: Graph,
     goals_data: Iterable[Any],
@@ -504,7 +525,8 @@ def prepare(
     if transcript:
         unsaid_kinds(graph, activities, transcript)
     past = history(graph, all_days(v, entry_date - timedelta(days=1)))
-    guesses = resolve_vague(graph, activities, places, current_place_id, past, prefer or [])
+    guesses = misheard(graph, activities)
+    guesses += resolve_vague(graph, activities, places, current_place_id, past, prefer or [])
     if facts.get("goal_progress"):
         kept, dropped = fitting_progress(graph, v.read_goals(), activities, facts["goal_progress"])
         if dropped:
@@ -677,6 +699,30 @@ def all_days(v: Vault, until: date) -> dict[date, dict[str, Any]]:
     return {d: e.frontmatter for d, e in v.read_journal_range(min(dates), until).items()}
 
 
+def count_goals(graph: Graph, goals_data: Any, days: Mapping[date, Mapping[str, Any]]) -> list[Any]:
+    """The goals with every counted one's `progress` set from the journal:
+    its `baseline` plus the sessions logged under its discipline. A copy;
+    goals.yaml is untouched."""
+    by_node = totals(graph, days)
+    out: list[Any] = []
+    for goal in goals_data or []:
+        if goals_mod.counted(goal) and goal.get("discipline") in graph:
+            logged = by_node.get(str(goal["discipline"]))
+            goal = {
+                **goal,
+                "progress": (goal.get("baseline") or 0) + (logged.sessions if logged else 0),
+            }
+        out.append(goal)
+    return out
+
+
+def live_goals(v: Vault) -> list[Any]:
+    """goals.yaml as the user should see it: counted goals from the journal."""
+    dates = v.list_journal_dates()
+    days = all_days(v, max(dates)) if dates else {}
+    return count_goals(Graph(v.read_disciplines()), v.read_goals(), days)
+
+
 def snapshot(
     v: Vault, today: date, days: int = RECENT_DAYS
 ) -> tuple[Graph, dict[str, Totals], dict[str, Totals]]:
@@ -690,7 +736,7 @@ def snapshot(
 def summary(v: Vault, today: date) -> str:
     """The compact view the brief, the planner and chat are given."""
     graph, recent, all_time = snapshot(v, today)
-    return describe(graph, v.read_goals(), recent, all_time, RECENT_DAYS)
+    return describe(graph, live_goals(v), recent, all_time, RECENT_DAYS)
 
 
 def primary_root(graph: Graph, node_id: str) -> str:

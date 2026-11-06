@@ -38,7 +38,7 @@ def build_context(v: Vault, now: datetime) -> str:
     where = index.path_name(node["id"]) if node else "unknown"
 
     goal_lines = []
-    for g in v.read_goals():
+    for g in disciplines.live_goals(v):
         if g.get("status", "active") != "active":
             continue
         target = goals.current_target_date(g)

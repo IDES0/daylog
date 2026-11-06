@@ -228,3 +228,11 @@ def test_focus_edit_through_chat_writes_profile_and_shows_in_context(vault: Vaul
     assert vault.read_profile()["focus"] == ["Surf: rights"]
     block = chat.context_block(vault, TODAY, datetime(2026, 9, 28, 9, 0))
     assert "Current focus (their explicit steer):\n- Surf: rights" in block
+
+
+def test_unlogged_sessions_on_a_counted_goal_go_into_its_baseline() -> None:
+    data: list[Any] = [
+        {"id": "surf", "title": "Surf", "discipline": "surf", "metric": "sessions", "progress": 5}
+    ]
+    edits.edit_goal(data, {"goal_id": "surf", "progress_delta": 3}, TODAY)
+    assert data[0]["baseline"] == 3 and data[0]["progress"] == 5
