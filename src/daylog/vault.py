@@ -36,6 +36,8 @@ _FRONTMATTER_KEY_ORDER = (
     "skipped",
     "mood",
     "open_questions",
+    "rating",
+    "assessment",
     "reconciled",
 )
 

@@ -440,6 +440,42 @@ RECORD_JOURNAL_ENTRY_TOOL: ToolParam = {
                 "type": "array",
                 "items": {"type": "string"},
             },
+            "rating": {
+                "type": "object",
+                "description": (
+                    "Only when the user gives the day a score themselves ('I'd give today a "
+                    "7', 'solid 8/10', 'terrible day, like a 3'). Never inferred or invented."
+                ),
+                "properties": {
+                    "score": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 10,
+                        "description": "Their number on a 1-10 scale (a '4 out of 5' is 8).",
+                    },
+                    "note": {
+                        "type": "string",
+                        "description": "Their reason in their words, if they gave one.",
+                    },
+                },
+                "required": ["score"],
+            },
+            "assessment": {
+                "type": "object",
+                "description": (
+                    "Whole-day reconcile only (leave it out for a single note): your own "
+                    "1-10 for how well the day's time was used toward the user's goals, "
+                    "by the rubric in the instructions. Separate from `rating`."
+                ),
+                "properties": {
+                    "score": {"type": "integer", "minimum": 1, "maximum": 10},
+                    "why": {
+                        "type": "string",
+                        "description": "One plain line: what moved them forward or didn't.",
+                    },
+                },
+                "required": ["score", "why"],
+            },
             "summary": {
                 "type": "string",
                 "description": "Two or three plain sentences summarising the day.",
@@ -732,5 +768,40 @@ def _facts_from(response: Any) -> dict[str, Any]:
                     "extract: malformed tool input: %.600s", json.dumps(raw, default=str)
                 )
                 raise
-            return facts
+            return clean_scores(facts)
     raise ExtractError(f"no tool_use block in response (stop_reason={response.stop_reason})")
+
+
+# A day's two scores: the user's own (`rating`, only when said) and the
+# assistant's (`assessment`, whole-day reconcile only).
+SCORE_FIELDS = {"rating": "note", "assessment": "why"}
+
+
+def day_score(value: Any, text_key: str) -> dict[str, Any] | None:
+    """A {score: 1-10, <text_key>: str} dict, or None when malformed."""
+    if not isinstance(value, Mapping):
+        return None
+    score = value.get("score")
+    if isinstance(score, float) and score.is_integer():
+        score = int(score)
+    if isinstance(score, bool) or not isinstance(score, int) or not 1 <= score <= 10:
+        return None
+    out: dict[str, Any] = {"score": score}
+    text = str(value.get(text_key) or "").strip()
+    if text:
+        out[text_key] = text
+    return out
+
+
+def clean_scores(facts: dict[str, Any]) -> dict[str, Any]:
+    """Drop a malformed `rating`/`assessment` rather than fail the note over it."""
+    for field, text_key in SCORE_FIELDS.items():
+        if field not in facts:
+            continue
+        cleaned = day_score(facts[field], text_key)
+        if cleaned is None:
+            logger.warning("extract: dropped malformed %s: %r", field, facts[field])
+            del facts[field]
+        else:
+            facts[field] = cleaned
+    return facts

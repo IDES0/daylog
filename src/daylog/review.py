@@ -10,13 +10,14 @@ from __future__ import annotations
 
 import json
 from collections import defaultdict
+from collections.abc import Iterable, Mapping
 from datetime import date, timedelta
 from pathlib import Path
 from typing import Any
 
 import anthropic
 
-from daylog import llm
+from daylog import extract, llm
 from daylog.vault import JournalEntry
 
 PROMPT_PATH = Path(__file__).parent / "prompts" / "review.md"
@@ -80,6 +81,17 @@ def _has_number(item: Any, key: str) -> bool:
     )
 
 
+def score_avg(frontmatters: Iterable[Mapping[str, Any]], key: str) -> float | None:
+    """Mean of the days' `rating` or `assessment` scores, over the days that have one."""
+    text_key = extract.SCORE_FIELDS[key]
+    scores = []
+    for fm in frontmatters:
+        score = extract.day_score(fm.get(key), text_key)
+        if score:
+            scores.append(score["score"])
+    return _avg(scores)
+
+
 def week_stats(entries: dict[date, JournalEntry]) -> dict[str, Any]:
     hours: dict[str, float] = defaultdict(float)
     counts: dict[str, int] = defaultdict(int)
@@ -140,6 +152,9 @@ def week_stats(entries: dict[date, JournalEntry]) -> dict[str, Any]:
         "avg_energy": _avg(energy),
         "avg_mood": _avg(mood),
         "avg_focus": _avg(focus),
+        # The user's own day scores (when said) and the assistant's, kept apart.
+        "avg_rating": score_avg((e.frontmatter for e in entries.values()), "rating"),
+        "avg_assessment": score_avg((e.frontmatter for e in entries.values()), "assessment"),
         # Rough estimates, averaged over the days that have any.
         "avg_kcal_per_day": round(sum(kcal) / len(kcal)) if kcal else None,
         "avg_protein_g_per_day": round(sum(protein) / len(protein)) if protein else None,
@@ -161,7 +176,9 @@ def build_input(
     days = []
     for d, entry in sorted(entries.items()):
         fm = {
-            k: v for k, v in entry.frontmatter.items() if k in ("mood", "open_questions", "skipped")
+            k: v
+            for k, v in entry.frontmatter.items()
+            if k in ("mood", "open_questions", "skipped", "rating", "assessment")
         }
         heading = f"## {d.isoformat()} ({d.strftime('%A')})"
         days.append(f"{heading}\n{entry.summary}\n{json.dumps(fm, default=str)}")

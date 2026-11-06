@@ -37,6 +37,8 @@ def test_week_stats_are_exact(vault: Vault) -> None:
             "felt": [{"energy": 2}],
             "goal_progress": [{"goal_id": "surf", "delta": 1}],
             "milestones": [{"what": "first barrel", "type": "surf"}],
+            "rating": {"score": 9},
+            "assessment": {"score": 7, "why": "Surf toward the goal."},
         },
         "t",
         "s",
@@ -49,6 +51,7 @@ def test_week_stats_are_exact(vault: Vault) -> None:
     assert stats["milestones"] == [{"date": "2026-09-26", "what": "first barrel"}]
     assert stats["goal_deltas"] == {"surf": 2.0, "jobs": 5.0}
     assert stats["avg_energy"] == 3.0
+    assert (stats["avg_rating"], stats["avg_assessment"]) == (9.0, 7.0)
     assert stats["meals_logged"] == 1
     assert stats["places_visited"] == ["lakey-peak"]
     assert stats["skipped"] == ["evening surf"]

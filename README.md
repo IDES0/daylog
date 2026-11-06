@@ -74,6 +74,24 @@ progress or slipped dates are extracted automatically:
   a running total: progress is `baseline` plus the sessions logged under
   that discipline, so fixing a day fixes the goal.
 
+### Day scores
+Each journal day can carry two 1–10 scores, kept apart:
+- **`rating: {score, note}`**: yours, only when a note says one ("I'd give
+  today a 7", "solid 8/10", "terrible day, like a 3"). Never filled in for
+  you; a reconcile that misses it keeps it.
+- **`assessment: {score, why}`**: the assistant's read of how well the
+  day's time went toward your goals (goals, itinerary, the sports you do),
+  with a one-line reason. Written by the nightly reconcile, so it costs no
+  extra call on a multi-note day; a single-note day gets the same pass but
+  keeps its record and only gains the assessment. The rubric
+  (`prompts/reconcile.md`) judges against what was realistic (travel,
+  sick and rest days aren't failures) and is calibrated: most days 4–7,
+  9–10 rare. A single note never sets it.
+- **Where it shows**: a badge per day on the Home week calendar (yours
+  filled, the assistant's dashed), both with their reasons when you tap the
+  day and in a day's details, the week's averages under the calendar, and
+  `avg_rating` / `avg_assessment` in the weekly review's numbers.
+
 ### Disciplines
 `disciplines.yaml` holds your sports as a graph rather than a flat list.
 Each sport names what it is a kind of (`parents`, possibly more than one:
@@ -292,7 +310,7 @@ src/daylog/
                    journal place links, never stored.
   daily.py         The 4am day cutoff, end-of-day reconcile, the weekly
                    review.
-  reconcile.py     Rebuilds a multi-note day in one pass.
+  reconcile.py     Rebuilds a multi-note day in one pass; scores each day.
   rankings.py      One list per category, binary insertion, moves, the after-a-
                    note prompt (pure); rank_flow.py: which places in an
                    entry can be ranked, the list as text.

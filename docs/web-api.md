@@ -223,7 +223,12 @@ list.
 - `GET /api/home`: `where` is null when no location is known; `next` is at
   most 8 legs; goal `progress`/`target` are numbers or null.
 - `GET /api/calendar`: each block also has `"detail"`; a day without an
-  entry has `"summary": null, "blocks": []`.
+  entry has `"summary": null, "blocks": []`. Each day also has `"rating"`
+  (the user's own, `{"score": 1-10, "note"?}`) and `"assessment"` (the
+  assistant's, `{"score": 1-10, "why"}`), each null when absent or
+  malformed; the week has `"averages": {"rating", "assessment"}` (null
+  when no day has one). `GET /api/journal` and `/api/journal/{date}` days
+  carry the same two fields.
 - `GET /api/journal`: `location` is the day's `location` frontmatter or null;
   the range is capped at 366 days.
 - `GET /api/journal/{date}`: 404 when there's no entry.

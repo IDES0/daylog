@@ -402,3 +402,37 @@ def test_usage_and_site_reports(app: App, monkeypatch: pytest.MonkeyPatch) -> No
     status, body = _json(app, "GET", "/api/site?days=30")
     assert status == 200 and seen == [30]
     assert body == {"text": "Site, last 30 days: no visitors.", "data": data}
+
+
+def test_calendar_and_journal_show_both_day_scores(app: App, vault: Vault) -> None:
+    _seed(vault)
+    vault.rewrite_journal_entry(
+        date(2026, 10, 1),
+        {
+            "activities": [{"type": "surf", "hours": 2, "at": "06:00"}],
+            "rating": {"score": 8, "note": "glassy"},
+            "assessment": {"score": 6, "why": "A surf toward the goal; little else."},
+        },
+        "scores",
+    )
+    vault.write_journal_entry(
+        datetime(2026, 9, 30, 20, 0),
+        {"assessment": {"score": 4, "why": "Travel day."}, "rating": {"score": "high"}},
+        "flew",
+        "Flew.",
+    )
+    status, cal = _json(app, "GET", "/api/calendar?week=2026-10-01")
+    assert status == 200
+    days = {d["date"]: d for d in cal["days"]}
+    assert days["2026-10-01"]["rating"] == {"score": 8, "note": "glassy"}
+    assert days["2026-10-01"]["assessment"] == {
+        "score": 6,
+        "why": "A surf toward the goal; little else.",
+    }
+    # A malformed score is left out, never shown as something.
+    assert days["2026-09-30"]["rating"] is None
+    assert days["2026-10-02"]["rating"] is None and days["2026-10-02"]["assessment"] is None
+    assert cal["averages"] == {"rating": 8.0, "assessment": 5.0}
+
+    status, one = _json(app, "GET", "/api/journal/2026-10-01")
+    assert one["rating"]["score"] == 8 and one["assessment"]["score"] == 6
