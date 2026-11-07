@@ -219,6 +219,29 @@ list.
 - Errors besides the usual: 400 `bad_category`, `not_rankable`; 404 `not_found` (place);
   500 `commit_failed` (nothing changed in git).
 
+### Booking pages (since 2026-11-06)
+The You tab's Booking screen; see booking.py and the README.
+- `GET /api/booking` → `{"base", "pages", "themes"}`: `base` is where links live
+  (`https://<BOOK_HOST>`, else `book.` + the site's domain); each page has `slug`,
+  `path` (`/` for `index`), `title`, `status` (`open`/`closed`/`template`/`used`),
+  `extends`, `children`, `guest`, `theme`, `once`, `minutes`, `open_slots`,
+  `next_open` and its last 20 `bookings` (`id`, `name`, `when`, `date`, `status`,
+  `type`, `notes`).
+- `GET /api/booking/pages/{slug}` → `{"slug", "yaml", "inherited"}`: the file as
+  written, and what it inherits as YAML.
+- `POST /api/booking/pages` `{"slug", "extends"?, "guest"?, "theme"?, "title"?,
+  "once"?, "template"?}` → `{"ok": true, "message"}`; 409 if it exists. Without
+  `extends` the page gets weekday 12:00/13:00 slots to start from.
+- `POST /api/booking/pages/{slug}` `{"yaml"}` → saves the whole file, checked
+  first: 400 `bad_yaml` or `booking` with every problem named.
+- `POST /api/booking/pages/{slug}/open` `{"open": bool}`;
+  `POST /api/booking/pages/{slug}/delete` (409 while another page extends it).
+- `POST /api/booking/{booking id}/cancel` → a pending or accepted booking is
+  cancelled (off the calendar feed, slot free again); 409 otherwise. Nothing is
+  sent to the guest.
+- Chat proposes pages with `propose_booking_page`: a `chat_proposal` card whose
+  `detail` lists the fields and the link.
+
 ### Shapes
 - `GET /api/home`: `where` is null when no location is known; `next` is at
   most 8 legs; goal `progress`/`target` are numbers or null.

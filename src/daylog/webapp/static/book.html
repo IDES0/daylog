@@ -61,6 +61,7 @@ textarea{resize:vertical;min-height:64px}
 .empty{color:var(--muted);margin:0}
 @media (prefers-reduced-motion:no-preference){.stamp{animation:thunk .35s ease-out}@keyframes thunk{from{transform:rotate(-3deg) scale(1.4);opacity:.3}}}
 </style>
+<!--THEME-->
 </head>
 <body>
 <div class="wrap">
@@ -84,11 +85,11 @@ textarea{resize:vertical;min-height:64px}
     <form class="card" id="form" novalidate>
       <p class="label">3 · Your details</p>
       <div class="field">
-        <label for="name">Full name</label>
+        <label for="name" id="nameLabel">Full name</label>
         <input type="text" id="name" autocomplete="name" maxlength="80">
       </div>
       <div class="field" id="typeField">
-        <label for="mtype">Nature of engagement</label>
+        <label for="mtype" id="typeLabel">Nature of engagement</label>
         <select id="mtype"></select>
       </div>
       <div class="field" id="orderField">
@@ -108,11 +109,11 @@ textarea{resize:vertical;min-height:64px}
   </section>
 
   <section id="done" class="card" hidden>
-    <div class="stamp">Booked</div>
+    <div class="stamp" id="stamp">Booked</div>
     <p class="label">Confirmation number</p>
     <div class="ref" id="ref"></div>
     <dl class="meta" id="summary"></dl>
-    <p style="margin:0">That's it, nothing else to send. Alex has it and will confirm.</p>
+    <p style="margin:0" id="doneText"></p>
   </section>
 </div>
 
@@ -148,7 +149,12 @@ P.checks.forEach((c, i) => {
   $("checks").append(l);
 });
 text("fine", P.fine);
-$("name").value = new URLSearchParams(location.search).get("name") || "";
+text("nameLabel", P.name_label);
+text("typeLabel", P.type_label);
+text("submit", P.submit_label);
+text("stamp", P.stamp);
+text("doneText", P.done_text);
+$("name").value = new URLSearchParams(location.search).get("name") || P.guest || "";
 
 const open = d => d.slots.some(s => s.state === "open");
 let day = (P.days.find(open) || {}).date || null;
@@ -191,7 +197,7 @@ $("form").addEventListener("submit", async e => {
   $("err").hidden = true;
   if (!day || !time) return fail("Please select a time slot.");
   if (!$("name").value.trim()) return fail("Please add your name.");
-  if ([...document.querySelectorAll(".ack")].some(b => !b.checked)) return fail("All acknowledgments are required to proceed. Legal insisted.");
+  if ([...document.querySelectorAll(".ack")].some(b => !b.checked)) return fail(P.checks_error);
   $("submit").disabled = true;
   try {
     const r = await fetch(location.pathname, {

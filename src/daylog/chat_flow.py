@@ -9,7 +9,7 @@ from __future__ import annotations
 from datetime import date
 from typing import Any
 
-from daylog import chat, edits, itinerary, rank_flow
+from daylog import booking, chat, edits, itinerary, rank_flow
 from daylog.vault import Vault
 
 
@@ -76,7 +76,25 @@ def apply_edit(v: Vault, proposal: dict[str, Any], today: date) -> str:
         outcome = edits.edit_focus(profile, proposal)
         v.write_profile(profile, f"profile: {outcome}")
         return outcome
+    if kind == "booking":
+        return apply_booking(v, proposal)
     raise edits.EditError(f"unknown edit kind {kind!r}")
+
+
+def apply_booking(v: Vault, proposal: dict[str, Any]) -> str:
+    """A confirmed booking-page proposal: create, update, open, close or delete."""
+    action, slug = str(proposal.get("action")), str(proposal.get("slug"))
+    try:
+        if action in ("create", "update"):
+            fields = proposal.get("fields") or {}
+            return booking.update(v, slug, fields, create=action == "create")
+        if action in ("open", "close"):
+            return booking.set_open(v, slug, action == "open")
+        if action == "delete":
+            return booking.delete(v, slug)
+    except booking.BookingError as exc:
+        raise edits.EditError(exc.message) from exc
+    raise edits.EditError(f"unknown booking action {action!r}")
 
 
 def apply_proposal(itinerary_data: Any, proposal: dict[str, Any], on: Any) -> str:

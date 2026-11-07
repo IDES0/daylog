@@ -63,6 +63,8 @@ def _book_host(host: str | None) -> bool:
 
 def _booking_slug(host: str | None, path: str) -> tuple[str, bool] | None:
     """(slug, wants the preview image) for a booking path, else None."""
+    if _book_host(host) and path == "/":
+        return booking.ROOT_SLUG, False
     match = _BOOK_PATH.fullmatch(path) or (
         _BOOK_HOST_PATH.fullmatch(path) if _book_host(host) else None
     )
@@ -83,7 +85,9 @@ def _booking_page(slug: str, host: str | None, path: str) -> bytes | None:
         return None
     shown = booking.view(slug, spec, booking.bookings(vault), datetime.now(tz()))
     image = booking.preview(vault, slug) is not None
-    return web.booking_page(shown, f"https://{host}{path}", image)
+    # The root page's preview image is at /index.png, not "/.png".
+    base = f"https://{host}{path.rstrip('/') or '/' + slug}"
+    return web.booking_page(shown, base, image)
 
 
 def _week_of(query: str) -> date | None:

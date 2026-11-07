@@ -254,20 +254,40 @@ until its variable is set, and 404s everything else:
   shell at `/` (signed in), `/app.js`, `/app.css`. See below.
 - **Booking pages** (with the status site): a link someone can use to pick
   one of your free slots, at `book.<domain>/<slug>` (or `/book/<slug>` on
-  the status domain); `?name=Charlee` fills in their name. Each page is a
-  file, `booking/<slug>.yaml`: its wording (`kicker`, `title` with `*italic*`,
-  `lede`, `details`, `types`, `order_label`, `notes_label`, `checks`, `fine`),
-  `where`, `minutes`, `event` (the calendar title), `share_title` and
-  `share_text` for link previews (plus `booking/<slug>.png`, 1200×630, as the
-  preview image) and `days`, each a `date`
-  with `times` (`"13:00"`) and optional `held` times with a note; `open:
-  false` or deleting the file closes it. A booking is saved as pending in
-  `bookings.yaml`, you get one notification, and a card in the app asks
-  Accept or Decline; only an accepted one goes on the calendar feed, and
-  nothing is sent to the guest. No session: the guard is JSON-only posts
-  with a same-host Origin, a hidden field bots fill in, 5 bookings per
-  client an hour, 4 KB bodies and at most 10 waiting per page. The book.
-  domain serves nothing else.
+  the status domain); `book.<domain>/` itself is the generic page,
+  `booking/index.yaml`. `?name=Charlee`, or the page's `guest`, fills in
+  their name. Each page is a file, `booking/<slug>.yaml`:
+  - `extends: <slug>` inherits everything from another page; the file
+    overrides only what it says (`extends`, `template`, `open`, `once` and
+    `guest` are never inherited). `template: true` is a base only, never
+    served. So one base holds the times and wording, and a personal link is
+    a few lines on top.
+  - Wording: `kicker`, `title` (`*italic*`), `lede`, `details`, `types`,
+    `type_label`, `order_label`, `notes_label`, `notes_hint`, `checks`,
+    `checks_error`, `name_label`, `submit_label`, `stamp`, `done_text`,
+    `fine`; `where`, `minutes`, `event` (the calendar title), `ref_prefix`,
+    `share_title` and `share_text` for link previews (plus
+    `booking/<slug>.png`, 1200×630, or its base's, as the preview image).
+  - `theme`: one of the presets in booking.py (`firm`, the default, `surf`,
+    `sunset`, `alpine`, `night`, `paper`): colours and fonts, nothing freeform.
+  - Times: `weekly` (`weekdays`/`weekends`/`daily`/`mon`…`sun`: `["13:00"]`)
+    over the next `horizon` days (default 14), within `from`/`until`; then
+    `days`, each a `date` with `times` (replacing that day's), `held` times
+    with a note, or `off: true`. A slot booked on any page is taken on all.
+  - `once: true` closes the link once its booking is accepted; `open: false`
+    or deleting the file closes any page.
+
+  A booking is saved as pending in `bookings.yaml`, you get one
+  notification, and a card in the app asks Accept or Decline; only an
+  accepted one goes on the calendar feed, and nothing is sent to the guest.
+  In the app, You → Booking pages lists every page with its link, status and
+  bookings: copy or share the link, edit the file, open/close, delete, or
+  cancel a booking; "New page" makes one from a base. Chat can make or change
+  one too ("make Sam a surf booking link") as a confirm card. Links use
+  `BOOK_HOST` if set, else `book.` + the site's domain. No session on the
+  page itself: the guard is JSON-only posts with a same-host Origin, a
+  hidden field bots fill in, 5 bookings per client an hour, 4 KB bodies and
+  at most 10 waiting per page. The book. domain serves nothing else.
 
 ### Web app
 The status site, signed in, is the app: the only interface (Telegram was

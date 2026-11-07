@@ -87,6 +87,20 @@ def _yaml() -> YAML:
     return yaml
 
 
+def load_yaml_text(text: str) -> Any:
+    """Parse YAML typed into the app (the booking page editor); raises ValueError."""
+    try:
+        return _yaml().load(text)
+    except Exception as exc:  # ruamel raises many kinds
+        raise ValueError(str(exc).splitlines()[0] if str(exc) else "not valid YAML") from exc
+
+
+def dump_yaml_text(data: Any) -> str:
+    buf = io.StringIO()
+    _yaml().dump(data, buf)
+    return buf.getvalue()
+
+
 def _describe(result: subprocess.CompletedProcess[str]) -> str:
     """Git's failure reason isn't always on stderr — e.g. a no-op `git commit`
     ("nothing to commit, working tree clean") prints to stdout and leaves
@@ -356,6 +370,14 @@ class Vault:
         self._commit(path, message=commit_message)
         self._push()
         return path
+
+    def delete_files(self, names: list[str], commit_message: str) -> None:
+        """Remove files (paths relative to the vault) and commit the removal."""
+        paths = [self.path / name for name in names]
+        for path in paths:
+            path.unlink(missing_ok=True)
+        self._commit(*paths, message=commit_message)
+        self._push()
 
     def _dump(self, data: Any, path: Path) -> None:
         buf = io.StringIO()

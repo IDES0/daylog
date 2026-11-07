@@ -1572,12 +1572,14 @@ function initYou() {
   const goals = card(2, "Goals");
   const rankBtn = h("button.btn.primary.sm", { type: "button", onclick: () => rankFlow(null) }, icon("plus"), "Rank a place");
   const ranks = card(3, "Rankings", { action: rankBtn });
+  const book = card(4, "Booking pages", { id: "booking" });
   const miles = card(4, "Milestones");
   const review = card(5, "Weekly review");
   const reports = card(6, "Reports");
   const changes = card(7, "Recent changes");
   const account = card(8, "Session");
-  fill(root, h("div.grid", disc, h("div.col", goals, ranks), h("div.col", miles, review, reports, changes, account)));
+  fill(root, h("div.grid", disc, h("div.col", goals, ranks, book), h("div.col", miles, review, reports, changes, account)));
+  initBooking(book);
 
   initDisciplines(disc);
   load(review.body, () => api("/api/review"), d => renderReview(review.body, d));
@@ -1597,6 +1599,171 @@ function initYou() {
     notify,
     h("form", { method: "post", action: "/logout", style: { "margin-top": "12px" } }, h("button.btn", { type: "submit" }, "Sign out")));
   initNotifications(notify);
+}
+
+// ---- booking pages (booking.py): each link, what's booked, and editing them.
+// Pages inherit (`extends`), so a personal link is a few lines over a base.
+
+const BOOK_STATUS = { open: "Open", closed: "Closed", template: "Template", used: "Used (one-time)" };
+const BOOK_STATE = { pending: "Waiting on you", accepted: "Accepted", declined: "Declined", cancelled: "Cancelled" };
+
+function initBooking(c) {
+  let data = null;
+  const reload = () => load(c.body, () => api("/api/booking"), d => { data = d; renderBooking(c.body, d, reload); });
+  c.head.append(h("button.btn.primary.sm", { type: "button", onclick: () => data && newBookingSheet(data, reload) }, icon("plus"), "New page"));
+  reload();
+}
+
+function renderBooking(body, d, reload) {
+  const pages = d.pages || [];
+  if (!pages.length) {
+    body.append(empty("No booking pages yet.", "Make one here or ask chat: “make Sam a surf booking link”."));
+    return;
+  }
+  body.append(h("ul.list", pages.map(p => {
+    const waiting = p.bookings.filter(b => b.status === "pending").length;
+    const next = p.bookings.find(b => b.status === "accepted" && b.date >= (S.today || ""));
+    const right = waiting ? h("span.chip.warn", `${waiting} waiting`) : p.status === "open" ? h("span.muted", plural(p.open_slots, "slot")) : null;
+    return h("li", h("button.li-btn", { type: "button", onclick: () => bookingSheet(p, d, reload) },
+      h("div.li-main", h("span", p.title), right),
+      h("div.li-sub", h("span.mono", p.path), p.guest ? ` · for ${p.guest}` : "", p.extends ? ` · from ${p.extends}` : ""),
+      h("div.chips", { style: { "margin-top": "6px" } },
+        h("span.chip" + (p.status === "open" ? ".accent" : ""), BOOK_STATUS[p.status] || p.status),
+        h("span.chip", p.theme), p.once ? h("span.chip", "One-time") : null,
+        next ? h("span.chip.accent", `${next.name}: ${next.when}`) : null)));
+  })));
+}
+
+function bookLink(d, p) { return d.base + p.path; }
+
+function bookingSheet(p, d, reload) {
+  const url = bookLink(d, p);
+  const msg = h("div");
+  const act = async (call, after) => {
+    try { const r = await call(); announce(r.message || "Done."); reload(); if (after) after(r); }
+    catch (e) { fill(msg, errorBox(e)); if (!sheet.open) announce(e.message); }
+  };
+  const copy = async () => {
+    try { await navigator.clipboard.writeText(url); announce("Link copied."); fill(msg, okMsg("Link copied.")); }
+    catch { fill(msg, h("p.muted", url)); }
+  };
+  const share = () => navigator.share({ title: p.title, url }).catch(() => {});
+  const linkRow = p.status === "template" ? h("p.muted", "A template: never shown itself; pages that extend it take its times and wording.")
+    : h("div.stack",
+      h("div.mono", { style: { "overflow-wrap": "anywhere", "font-size": "14px" } }, url),
+      h("div.btns",
+        h("button.btn.primary", { type: "button", onclick: copy }, "Copy link"),
+        navigator.share ? h("button.btn", { type: "button", onclick: share }, "Share") : null,
+        h("a.btn.ghost", { href: url, target: "_blank", rel: "noopener" }, "Open")));
+  const facts = [
+    ["Status", BOOK_STATUS[p.status] || p.status],
+    p.extends ? ["Extends", p.extends] : null,
+    p.children.length ? ["Used by", p.children.join(", ")] : null,
+    p.guest ? ["Guest", p.guest] : null,
+    ["Theme", p.theme], ["Length", `${p.minutes} min`],
+    p.next_open ? ["Next open", p.next_open] : null,
+  ].filter(Boolean);
+  const booked = p.bookings.length ? h("ul.list", p.bookings.map(b => li(
+    `${b.name} · ${b.when}`, h("span.chip" + (b.status === "pending" ? ".warn" : b.status === "accepted" ? ".accent" : ""), BOOK_STATE[b.status] || b.status),
+    sub([b.type, b.notes].filter(Boolean).join(" · ")),
+    ["pending", "accepted"].includes(b.status) ? h("button.btn.ghost.danger", { type: "button", onclick: async () => {
+      if (await confirmSheet("Cancel this booking?", `**${b.name}**, ${b.when}. It leaves your calendar and the slot opens again. Nothing is sent to them.`, "Cancel booking", true))
+        act(() => post(`/api/booking/${b.id}/cancel`, {}, NORMAL));
+    } }, "Cancel") : null))) : empty("", "Nothing booked on this page yet.");
+
+  const editor = h("div");
+  const edit = async () => {
+    fill(editor, skeleton());
+    try {
+      const f = await api(`/api/booking/pages/${p.slug}`);
+      const ta = h("textarea.textarea.mono", { rows: 16, spellcheck: "false", "aria-label": "Page file (YAML)", style: { "font-size": "13px" } });
+      ta.value = f.yaml;
+      const save = h("button.btn.primary", { type: "button" }, "Save");
+      const out = h("div");
+      save.onclick = async () => {
+        save.disabled = true;
+        try { const r = await post(`/api/booking/pages/${p.slug}`, { yaml: ta.value }, NORMAL); fill(out, okMsg(r.message)); reload(); }
+        catch (e) { fill(out, errorBox(e)); }
+        finally { save.disabled = false; }
+      };
+      fill(editor, h("div.stack",
+        h("label.field-label", `booking/${p.slug}.yaml`), ta,
+        f.inherited ? h("details.fold", h("summary", h("span.muted", `Inherited from ${p.extends}`)), h("pre.mono", { style: { "font-size": "12px", "white-space": "pre-wrap" } }, f.inherited)) : null,
+        h("p.muted", { style: { "font-size": "13px" } }, `Themes: ${(d.themes || []).map(t => t.id).join(", ")}. Times like "13:00"; weekly: weekdays / mon…sun / weekends / daily.`),
+        h("div.btns", save), out));
+    } catch (e) { fill(editor, errorBox(e, edit)); }
+  };
+  const toChat = () => {
+    sheet.close();
+    location.hash = "#/chat";
+    setTimeout(() => {
+      const ta = $("#chat textarea");
+      if (!ta) return;
+      ta.value = `Booking page ${p.slug}: `;
+      ta.dispatchEvent(new Event("input"));
+      ta.focus();
+    }, 60);
+  };
+  const toggle = p.status === "template" ? null : h("button.btn", { type: "button", onclick: () =>
+    act(() => post(`/api/booking/pages/${p.slug}/open`, { open: p.status === "closed" }, NORMAL), () => sheet.close()) },
+    p.status === "closed" ? "Open it" : "Close it");
+  const del = h("button.btn.danger", { type: "button", onclick: async () => {
+    if (await confirmSheet(`Delete ${p.slug}?`, p.children.length
+      ? `${p.children.join(", ")} extend this page; change or delete them first.`
+      : "The link stops working. Its bookings stay in your history.", "Delete page", true))
+      act(() => post(`/api/booking/pages/${p.slug}/delete`, {}, NORMAL));
+  } }, "Delete");
+
+  openSheet(p.title, h("div.stack-lg",
+    linkRow,
+    h("dl.kv", facts.map(([k, v]) => [h("dt", k), h("dd", v)])),
+    h("div", h("h3.label", "Bookings"), booked),
+    h("div.btns",
+      h("button.btn", { type: "button", onclick: edit }, "Edit"),
+      h("button.btn", { type: "button", onclick: toChat }, icon("chat"), "Edit with chat"),
+      toggle, del),
+    editor, msg));
+}
+
+function newBookingSheet(d, reload) {
+  const bases = (d.pages || []).map(p => p.slug);
+  const slug = h("input.input", { placeholder: "sam", autocapitalize: "none", spellcheck: "false", "aria-label": "Link name" });
+  const guest = h("input.input", { placeholder: "Sam", "aria-label": "Their name" });
+  const title = h("input.input", { placeholder: "Coffee with *Sam*", "aria-label": "Title" });
+  const base = h("select.input", { "aria-label": "Extends" }, h("option", { value: "" }, "Nothing: its own times"),
+    bases.map(b => h("option", { value: b }, b)));
+  const tmpl = (d.pages || []).find(p => p.status === "template");
+  if (tmpl) base.value = tmpl.slug;
+  const theme = h("select.input", { "aria-label": "Theme" }, h("option", { value: "" }, "Same as the base"),
+    (d.themes || []).map(t => h("option", { value: t.id }, t.label)));
+  const once = h("input", { type: "checkbox", checked: true });
+  const isTmpl = h("input", { type: "checkbox" });
+  const out = h("div");
+  const fit = () => { slug.value = slug.value.toLowerCase().replace(/[^a-z0-9-]+/g, "-").replace(/^-+/, ""); };
+  slug.addEventListener("input", fit);
+  guest.addEventListener("input", () => { if (!slug.dataset.touched) slug.value = guest.value.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, ""); });
+  slug.addEventListener("keydown", () => { slug.dataset.touched = "1"; });
+  const make = h("button.btn.primary", { type: "button" }, "Make page");
+  make.onclick = async () => {
+    make.disabled = true;
+    try {
+      const r = await post("/api/booking/pages", {
+        slug: slug.value, guest: guest.value, title: title.value, extends: base.value,
+        theme: theme.value, once: once.checked, template: isTmpl.checked,
+      }, NORMAL);
+      announce(r.message);
+      sheet.close();
+      reload();
+    } catch (e) { fill(out, errorBox(e)); }
+    finally { make.disabled = false; }
+  };
+  const field = (label, el) => h("div", h("label.field-label", label), el);
+  openSheet("New booking page", h("div.stack-lg",
+    h("p.muted", { style: { "font-size": "14px" } }, "A personal link that extends a base takes its times and wording; change the rest with Edit or chat after."),
+    field("Their name", guest), field("Link name", slug), field("Extends", base), field("Theme", theme), field("Title (optional)", title),
+    h("label.row", once, "One-time link (closes once a booking is accepted)"),
+    h("label.row", isTmpl, "A template (a base for other pages, never shown itself)"),
+    h("div.btns", make), out));
 }
 
 // The morning brief on the lock screen (push.py). iOS allows it only for the

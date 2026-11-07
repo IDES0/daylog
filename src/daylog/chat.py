@@ -24,9 +24,10 @@ from typing import Any
 import anthropic
 from anthropic.types import MessageParam, ToolParam
 
-from daylog import brief, disciplines, edits, goals, llm, rankings, trail
+from daylog import booking, brief, disciplines, edits, goals, llm, rankings, trail
 from daylog.places import PlaceIndex
-from daylog.vault import Vault
+from daylog.runtime import tz
+from daylog.vault import Vault, dump_yaml_text
 
 logger = logging.getLogger(__name__)
 
@@ -236,6 +237,45 @@ TOOLS: list[ToolParam] = [
             "summary": {"type": "string"},
         },
         ["action", "summary"],
+    ),
+    _tool(
+        "list_booking_pages",
+        "The user's booking pages (links a guest uses to pick a slot): each page's link "
+        "name, status (open/closed/template/used), what it extends, guest, theme, open slots "
+        "and recent bookings; plus the preset themes.",
+        {},
+        [],
+    ),
+    _tool(
+        "get_booking_page",
+        "One booking page's file as written (YAML) and what it inherits. Read it before "
+        "proposing an update.",
+        {"slug": {"type": "string"}},
+        ["slug"],
+    ),
+    _tool(
+        "propose_booking_page",
+        "Make, change, open/close or delete a booking page; the user confirms the card. "
+        "`slug` is the link name (book.<domain>/<slug>, lower-case, digits, dashes; 'index' "
+        "is the generic page at the root). `fields` holds the page's fields for create/update "
+        "(null removes one on update): extends (a base page to inherit from), template (true = "
+        "a base only, never served), guest (their name, pre-filled), theme, once (true = a "
+        "one-time link), kicker, title (*word* in italics), lede, details (label: text), where, "
+        "minutes, event (calendar title), types, type_label, order_label, notes_label, "
+        "notes_hint, checks, checks_error, name_label, submit_label, stamp, done_text, fine, "
+        "ref_prefix, share_title, share_text, weekly ({mon..sun|weekdays|weekends|daily: "
+        '["13:00", ...]}), horizon (days ahead, default 14), from, until (dates), days '
+        "([{date, times, held: {time: note}, off}] overrides per date).",
+        {
+            "action": {
+                "type": "string",
+                "enum": ["create", "update", "open", "close", "delete"],
+            },
+            "slug": {"type": "string"},
+            "fields": {"type": "object"},
+            "summary": {"type": "string", "description": "One line for the confirm card."},
+        },
+        ["action", "slug", "summary"],
     ),
     _tool(
         "start_ranking",
@@ -461,6 +501,60 @@ class Tools:
 
     def t_propose_focus_edit(self, **change: Any) -> str:
         return self._propose("focus", change)
+
+    def t_list_booking_pages(self) -> str:
+        pages = booking.overview(self.v, datetime.now(tz()))
+        for p in pages:
+            p["bookings"] = [
+                {k: b[k] for k in ("name", "when", "status")} for b in p["bookings"][:5]
+            ]
+        themes = {name: t["label"] for name, t in booking.THEMES.items()}
+        return json.dumps({"pages": pages, "themes": themes}, ensure_ascii=False)
+
+    def t_get_booking_page(self, slug: str) -> str:
+        own = booking.raw(self.v, slug)
+        if own is None:
+            return f"No booking page called {slug}."
+        inherited = {
+            k: val for k, val in (booking.resolve(self.v, slug) or {}).items() if k not in own
+        }
+        return (
+            f"booking/{slug}.yaml:\n{dump_yaml_text(own)}\n"
+            f"Inherited (not in the file):\n{dump_yaml_text(inherited) if inherited else '-'}"
+        )
+
+    def t_propose_booking_page(
+        self, action: str, slug: str, summary: str, fields: dict[str, Any] | None = None
+    ) -> str:
+        slug = str(slug).strip().lower()
+        try:
+            if action in ("create", "update"):
+                if not isinstance(fields, dict) or not fields:
+                    return "Can't propose that: give the page's fields."
+                spec = booking.preview_update(self.v, slug, fields, create=action == "create")
+                detail = booking.describe(slug, spec)
+            elif action in ("open", "close", "delete"):
+                if booking.raw(self.v, slug) is None:
+                    return f"Can't propose that: there's no booking page called {slug}."
+                kids = booking.children(self.v, slug) if action == "delete" else []
+                if kids:
+                    return f"Can't propose that: {', '.join(kids)} extend {slug}."
+                detail = f"Link: {booking.link_path(slug)}"
+            else:
+                return f"Can't propose that: unknown action {action!r}."
+        except booking.BookingError as exc:
+            return f"Can't propose that: {exc.message}"
+        self.proposals.append(
+            {
+                "edit": "booking",
+                "action": action,
+                "slug": slug,
+                "fields": fields or {},
+                "summary": summary,
+                "detail": detail,
+            }
+        )
+        return "Proposed — the user will see a confirm button after your reply."
 
     def t_start_ranking(self, place_id: str) -> str:
         if place_id not in self.index.by_id:
