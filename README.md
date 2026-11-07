@@ -95,7 +95,9 @@ progress or slipped dates are extracted automatically:
   a Confirm/Cancel card before writing a moved date.
 - **Counted** goals (`metric: sessions` with a `discipline`) aren't kept as
   a running total: progress is `baseline` plus the sessions logged under
-  that discipline, so fixing a day fixes the goal.
+  that discipline, so fixing a day fixes the goal. A session is one timed
+  session when an activity lists `sessions` (three Waco Surf hours in a day
+  are 3), else one activity.
 
 ### Day scores
 Each journal day can carry two 1–10 scores, kept apart:
