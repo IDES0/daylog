@@ -29,6 +29,8 @@ from importlib import resources
 from typing import Any
 from urllib.parse import parse_qs
 
+from daylog import booking
+
 SESSION_COOKIE = "daylog_session"
 SESSION_DAYS = 30
 # Failed attempts allowed across everyone in the window before every login
@@ -209,7 +211,11 @@ def booking_page(shown: dict[str, Any], base: str, image: bool = False) -> bytes
         tags += [("og:image", base + ".png"), ("og:image:width", "1200")]
         tags += [("og:image:height", "630"), ("twitter:card", "summary_large_image")]
     meta = "\n".join(f'<meta property="{k}" content="{html.escape(v)}">' for k, v in tags if v)
-    page = template.replace("<!--SHARE-->", meta, 1)
+    css, fonts = booking.theme_css(str(shown.get("theme") or booking.DEFAULT_THEME))
+    look = (f'<link rel="stylesheet" href="{html.escape(fonts)}">' if fonts else "") + (
+        f"<style>{css}</style>"
+    )
+    page = template.replace("<!--SHARE-->", meta, 1).replace("<!--THEME-->", look, 1)
     return page.replace('"__BOOKING__"', data, 1).encode("utf-8")
 
 

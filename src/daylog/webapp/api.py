@@ -61,7 +61,13 @@ from daylog.disciplines import Graph
 from daylog.places import PlaceIndex
 from daylog.rankings import Insertion
 from daylog.runtime import tz
-from daylog.vault import CorrectionConflictError, Vault, VaultError
+from daylog.vault import (
+    CorrectionConflictError,
+    Vault,
+    VaultError,
+    dump_yaml_text,
+    load_yaml_text,
+)
 from daylog.webapp.cards import Card, CardStore, Outcome, UnknownAction, action
 from daylog.webapp.chat_store import ChatStore
 from daylog.webapp.jobs import Jobs, key_for
@@ -193,6 +199,20 @@ def _text_field(data: Mapping[str, Any], name: str, limit: int = 20000) -> str:
     return value.strip()[:limit]
 
 
+def book_base(req: Request) -> str:
+    """Where booking links live: https://<BOOK_HOST>, else book.<the site's domain>
+    (book.example.com for app.example.com), else /book on this host."""
+    env = os.environ.get("BOOK_HOST", "").strip()
+    if env:
+        return f"https://{env}"
+    host = (req.headers.get("x-forwarded-host") or req.headers.get("host") or "").split(",")[0]
+    name = host.strip().split(":")[0]
+    labels = name.split(".")
+    if len(labels) >= 2 and not name.replace(".", "").isdigit() and name != "localhost":
+        return "https://book." + ".".join(labels[-2:])
+    return f"http://{host.strip()}/book" if host else "/book"
+
+
 Handler = Callable[[Request, re.Match[str]], Reply]
 
 
@@ -242,6 +262,8 @@ class Api:
             (r"/api/disciplines", self.disciplines),
             (r"/api/changes", self.changes),
             (r"/api/cards", self.open_cards),
+            (r"/api/booking", self.booking_list),
+            (r"/api/booking/pages/([a-z0-9-]{1,40})", self.booking_get),
         ]
         posts: list[tuple[str, Handler]] = [
             (r"/api/log", self.log),
@@ -263,6 +285,11 @@ class Api:
             (r"/api/review", self.make_review),
             (r"/api/changes/([0-9a-f]{4,40})/revert", self.revert),
             (r"/api/cards/(c_[0-9a-f]+)", self.answer_card),
+            (r"/api/booking/pages", self.booking_create),
+            (r"/api/booking/pages/([a-z0-9-]{1,40})", self.booking_save),
+            (r"/api/booking/pages/([a-z0-9-]{1,40})/open", self.booking_open),
+            (r"/api/booking/pages/([a-z0-9-]{1,40})/delete", self.booking_delete),
+            (r"/api/booking/(b_[0-9a-f]{4,20})/cancel", self.booking_cancel),
         ]
         self._routes: list[tuple[str, re.Pattern[str], Handler]] = [
             ("GET", re.compile(p), h) for p, h in gets
@@ -976,6 +1003,7 @@ class Api:
 
     def _proposal_card(self, proposal: dict[str, Any]) -> Card:
         summary = str(proposal.get("summary") or "Change")
+        link = str(proposal.get("link") or "")
 
         def apply(answer: str) -> Outcome:
             if answer == "cancel":
@@ -987,9 +1015,15 @@ class Api:
             except VaultError:
                 logger.exception("applying a chat proposal failed")
                 return Outcome("Saving failed — check the logs.", ok=False)
-            return Outcome(f"Done: {outcome or summary}")
+            done = f"Done: {outcome or summary}"
+            if link and proposal.get("action") != "delete":
+                done += f" · {link}"
+            return Outcome(done)
 
-        return self.cards.add("chat_proposal", summary, apply)
+        detail = str(proposal.get("detail") or "")
+        if link:
+            detail = detail.replace(f"Link: {urlsplit(link).path or '/'}", f"Link: {link}", 1)
+        return self.cards.add("chat_proposal", summary, apply, detail=detail)
 
     def waiting_decisions(self, v: Vault) -> int:
         """Card every pending proposal now; how many are waiting."""
@@ -1036,6 +1070,89 @@ class Api:
             key=f"booking:{booking_id}",
         )
 
+    # -- the Booking screen (You tab): the pages and what's been booked ---------------
+
+    def booking_list(self, req: Request, m: re.Match[str]) -> Reply:
+        v = self._vault()
+        themes = [
+            {"id": k, "label": t["label"], "accent": t["light"]["accent"], "bg": t["light"]["bg"]}
+            for k, t in booking.THEMES.items()
+        ]
+        return 200, {
+            "base": book_base(req),
+            "pages": booking.overview(v, self._now()),
+            "themes": themes,
+        }
+
+    def booking_get(self, req: Request, m: re.Match[str]) -> Reply:
+        v = self._vault()
+        own = booking.raw(v, m.group(1))
+        if own is None:
+            raise ApiError(404, "not_found", "No such booking page.")
+        resolved = booking.resolve(v, m.group(1)) or {}
+        inherited = {k: val for k, val in resolved.items() if k not in own}
+        return 200, {
+            "slug": m.group(1),
+            "yaml": dump_yaml_text(own),
+            "inherited": dump_yaml_text(inherited) if inherited else "",
+        }
+
+    def _booking_call(self, call: Callable[[], str]) -> Reply:
+        try:
+            message = call()
+        except booking.BookingError as exc:
+            raise ApiError(exc.status, "booking", exc.message) from exc
+        return 200, {"ok": True, "message": message}
+
+    def booking_create(self, req: Request, m: re.Match[str]) -> Reply:
+        """A new page from the app's form: a link name, and optionally the page it
+        extends, the guest's name, a theme and a title. The rest is edited after."""
+        data = self._json(req)
+        slug = str(data.get("slug") or "").strip().lower()
+        fields: dict[str, Any] = {}
+        for key in ("extends", "guest", "theme", "title"):
+            value = data.get(key)
+            if isinstance(value, str) and value.strip():
+                fields[key] = value.strip()
+        if data.get("once") is True:
+            fields["once"] = True
+        if data.get("template") is True:
+            fields["template"] = True
+        if "extends" not in fields:
+            fields.setdefault("title", "Book a *time*")
+            fields["weekly"] = {"weekdays": ["12:00", "13:00"]}
+        return self._booking_call(lambda: booking.update(self._vault(), slug, fields, create=True))
+
+    def booking_save(self, req: Request, m: re.Match[str]) -> Reply:
+        """The whole page file, edited as YAML in the app."""
+        text = _text_field(self._json(req), "yaml", limit=40000)
+        try:
+            spec = load_yaml_text(text)
+        except ValueError as exc:
+            raise ApiError(400, "bad_yaml", f"That isn't valid YAML: {exc}") from exc
+        v = self._vault()
+        if booking.raw(v, m.group(1)) is None:
+            raise ApiError(404, "not_found", "No such booking page.")
+        return self._booking_call(lambda: booking.save(v, m.group(1), spec))
+
+    def booking_open(self, req: Request, m: re.Match[str]) -> Reply:
+        is_open = self._json(req).get("open")
+        if not isinstance(is_open, bool):
+            raise ApiError(400, "missing_field", "'open' must be true or false")
+        return self._booking_call(lambda: booking.set_open(self._vault(), m.group(1), is_open))
+
+    def booking_delete(self, req: Request, m: re.Match[str]) -> Reply:
+        return self._booking_call(lambda: booking.delete(self._vault(), m.group(1)))
+
+    def booking_cancel(self, req: Request, m: re.Match[str]) -> Reply:
+        done = booking.cancel(self._vault(), m.group(1), self._today())
+        if done is None:
+            raise ApiError(409, "booking", "That booking isn't pending or accepted any more.")
+        return 200, {
+            "ok": True,
+            "message": f"Cancelled {done['name']}, {booking.when(done)}. Let them know.",
+        }
+
     def answer_card(self, req: Request, m: re.Match[str]) -> Reply:
         answer = self._json(req).get("action")
         if not isinstance(answer, str) or not answer:
@@ -1066,6 +1183,9 @@ class Api:
         finally:
             llm.flush(v)
         self.chat.record(text, result.text, result.new_history, now)
+        for p in result.proposals:
+            if p.get("edit") == "booking":
+                p["link"] = book_base(req) + booking.link_path(str(p.get("slug")))
         cards = [self._proposal_card(p) for p in result.proposals]
         cards += [c for job in result.research_jobs if (c := self._research_job_card(job))]
         return 200, {
