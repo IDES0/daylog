@@ -63,8 +63,8 @@ class Totals:
     hours: float = 0.0
     last: date | None = None
 
-    def add(self, day: date, hours: Any) -> None:
-        self.sessions += 1
+    def add(self, day: date, hours: Any, sessions: int = 1) -> None:
+        self.sessions += sessions
         if isinstance(hours, int | float) and not isinstance(hours, bool):
             self.hours += float(hours)
         if self.last is None or day > self.last:
@@ -160,6 +160,13 @@ class Graph:
 # -- totals ----------------------------------------------------------------
 
 
+def session_count(activity: Mapping[str, Any]) -> int:
+    """How many sessions an activity was: one per timed session ("the 4pm, 6pm
+    and 7pm sessions" is three), else one."""
+    listed = activity.get("sessions")
+    return len(listed) if isinstance(listed, list) and listed else 1
+
+
 def totals(graph: Graph, days: Mapping[date, Mapping[str, Any]]) -> dict[str, Totals]:
     """Sessions and hours per discipline from journal frontmatter, rolled up the parents."""
     out: dict[str, Totals] = {}
@@ -171,7 +178,9 @@ def totals(graph: Graph, days: Mapping[date, Mapping[str, Any]]) -> dict[str, To
             if node_id is None:
                 continue
             for member in graph.lineage(node_id):
-                out.setdefault(member, Totals()).add(day, activity.get("hours"))
+                out.setdefault(member, Totals()).add(
+                    day, activity.get("hours"), session_count(activity)
+                )
     return out
 
 
@@ -230,14 +239,14 @@ def where(
             chain = [node, *places.ancestors(key)] if node is not None else []
             areas = [a["id"] for a in chain if a.get("kind") in AREA_KINDS]
             in_pool = node is not None and node.get("kind") == "wave_pool"
-            hours = activity.get("hours")
+            hours, n = activity.get("hours"), session_count(activity)
             for member in graph.lineage(node_id):
                 found = out.setdefault(member, Where())
-                found.spots.setdefault(key, Totals()).add(day, hours)
+                found.spots.setdefault(key, Totals()).add(day, hours, n)
                 for area in areas:
-                    found.areas.setdefault(area, Totals()).add(day, hours)
+                    found.areas.setdefault(area, Totals()).add(day, hours, n)
                 if in_pool:
-                    found.pool.add(day, hours)
+                    found.pool.add(day, hours, n)
     return out
 
 

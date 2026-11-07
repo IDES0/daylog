@@ -447,3 +447,15 @@ def test_where_snapshot_reads_places_from_the_vault(vault: Vault) -> None:
     places, by_node = disciplines.where_snapshot(vault, date(2026, 10, 2), _surf_graph())
     assert places.get("usa") is not None
     assert by_node["surf"].areas["usa"].sessions == 1
+
+
+def test_each_timed_session_counts_once() -> None:
+    graph = Graph({**_graph().nodes, "surf": {"name": "Surfing", "parents": ["water"]}})
+    three = [{"at": "16:00"}, {"at": "18:00"}, {"at": "19:00"}]
+    days = {
+        date(2026, 11, 2): {"activities": [{"type": "surf", "hours": 3, "sessions": three}]},
+        date(2026, 11, 3): {"activities": [{"type": "surf", "hours": 2, "sessions": []}]},
+    }
+    by_node = disciplines.totals(graph, days)
+    assert by_node["surf"].sessions == 4 and by_node["water"].sessions == 4
+    assert by_node["surf"].hours == 5
