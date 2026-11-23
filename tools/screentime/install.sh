@@ -41,25 +41,42 @@ if ! curl -fsS -m 3 "$AW_URL/api/0/info" >/dev/null; then
 fi
 echo "ActivityWatch is running at $AW_URL."
 
-# 2. A Python 3.9+.
-PYTHON="$(command -v python3 || true)"
+# 2. A Python 3.9+: macOS's own first (it doesn't move when a conda or brew
+#    install changes), else whatever python3 is on PATH.
+if [[ -x /usr/bin/python3 ]] && /usr/bin/python3 -c 'import sys' 2>/dev/null; then
+  PYTHON=/usr/bin/python3
+else
+  PYTHON="$(command -v python3 || true)"
+fi
 if [[ -z "$PYTHON" ]] || ! "$PYTHON" -c 'import sys; sys.exit(sys.version_info < (3, 9))'; then
   echo "Need python3 (3.9 or newer) on PATH." >&2
   exit 1
 fi
 echo "Using $PYTHON ($("$PYTHON" --version 2>&1))."
 
-# 3. The inlet URL, kept in config.json (mode 600), never in the plist.
+# 3. The inlet URL, kept in config.json (mode 600), never in the plist. Asked
+#    for (hidden) in a terminal; DAYLOG_INLET_URL=... skips the question.
 mkdir -p "$SUPPORT"
 KEEP=""
-if [[ -f "$CONFIG" ]]; then
-  read -r -p "Keep the inlet URL already configured? [Y/n] " KEEP
+INLET="${DAYLOG_INLET_URL:-}"
+if [[ -f "$CONFIG" && -z "$INLET" ]]; then
+  if [[ -t 0 ]]; then
+    read -r -p "Keep the inlet URL already configured? [Y/n] " KEEP
+  fi
 fi
-if [[ -f "$CONFIG" && ! "$KEEP" =~ ^[Nn] ]]; then
+if [[ -f "$CONFIG" && -z "$INLET" && ! "$KEEP" =~ ^[Nn] ]]; then
   echo "Keeping $CONFIG."
 else
-  read -r -s -p "daylog inlet URL (https://<host>/health/<secret>): " INLET
-  echo
+  if [[ -z "$INLET" ]]; then
+    if [[ ! -t 0 ]]; then
+      echo "This needs to ask for your inlet URL, but there's no terminal to type into." >&2
+      echo "Run it in the Terminal app:  bash \"$HERE/install.sh\"" >&2
+      echo "or pass it:  DAYLOG_INLET_URL='https://<host>/health/<secret>' bash \"$HERE/install.sh\"" >&2
+      exit 1
+    fi
+    read -r -s -p "daylog inlet URL (https://<host>/health/<secret>): " INLET
+    echo
+  fi
   if [[ "$INLET" != https://*/health/* ]]; then
     echo "That does not look like https://<host>/health/<secret>." >&2
     exit 1
