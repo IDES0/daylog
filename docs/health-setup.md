@@ -33,13 +33,17 @@ review and chat read the same numbers.
    - Aggregation / time grouping: **Day**. Leave *Summarize Data* on (sleep
      then arrives as one record per night with its stages; off works too,
      as stage segments).
-   - Date range: **Previous 7 Days** (each run re-sends full days, so a late
-     sync fills in; re-sending changes nothing in the vault). Avoid
+   - Date range: **Today**, sync every hour. "Previous 7 Days" stops at
+     yesterday, so on its own last night's sleep and today's numbers would
+     arrive a day late and the morning brief would never see them. Avoid
      hourly grouping with *Since Last Sync*: a partial day would overwrite
      the full one.
-   - Sync cadence: every hour or two is plenty.
-3. A second **REST API** automation for **Workouts**, same URL, JSON,
-   version 2, *Previous 7 Days*. Turn **off** route data and workout
+   - Then **duplicate it** with Date range **Previous 7 Days**, once a day:
+     the catch-up for anything a sync missed while the phone was locked.
+     Re-sending changes nothing in the vault.
+3. A **REST API** automation for **Workouts**, same URL, JSON, version 2,
+   Date range **Since Last Sync** (each workout has an id, so a re-send
+   just replaces it), every hour. Turn **off** route data and workout
    metrics (heart-rate series): the calendar only needs start, end, kind
    and the totals, and the payload stays small.
 4. Backfill: **Manual Export** with a start date as far back as you like,
