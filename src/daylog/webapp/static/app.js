@@ -2820,13 +2820,501 @@ function loadChanges(body) {
   });
 }
 
+// ================================================================ HEALTH
+
+// Trends from the watch, phone and computer (GET /api/health): facts and how
+// they drift from your own usual, never a score. Charts are plain inline SVG,
+// redrawn at their card's width; a day with nothing measured is a gap, not a 0.
+
+const HL_KEY = "daylog.healthDays";
+const HL = { days: "30", body: null, last: null, data: null };
+// One observer redraws every chart at its new width; a re-render starts it afresh.
+const hlDraw = new WeakMap();
+const hlSizes = new ResizeObserver(entries => entries.forEach(e => hlDraw.get(e.target)?.()));
+
+function svg(tag, attrs, ...kids) {
+  const el = document.createElementNS(NS, tag);
+  for (const [k, v] of Object.entries(attrs || {})) if (v != null && v !== false) el.setAttribute(k, String(v));
+  for (const k of kids.flat(Infinity)) {
+    if (k == null || k === false || k === "") continue;
+    el.append(k instanceof Node ? k : String(k)); // text nodes only
+  }
+  return el;
+}
+const tipOf = text => svg("title", null, text);
+
+const MINUS = "−";
+// A clock from hours on the wake day's axis: -0.5 is 23:30, 25 is 01:00.
+const clk = x => { const m = ((Math.round(x * 60) % 1440) + 1440) % 1440; return `${pad(Math.floor(m / 60))}:${pad(m % 60)}`; };
+const dur = x => { const m = Math.round(x); return m >= 60 ? `${Math.floor(m / 60)} h ${pad(m % 60)}` : `${m} min`; };
+const thou = x => Math.round(x).toLocaleString("en-US");
+const avgOf = (rows, key) => { const v = rows.map(r => r[key]).filter(x => typeof x === "number"); return v.length ? v.reduce((a, b) => a + b, 0) / v.length : null; };
+const has = (rows, key) => rows.some(r => typeof r[key] === "number");
+const dayLabel = s => `${weekday(s, 3)} ${short(s)}`;
+const when = r => (r._week ? `Week of ${short(r.date)}, avg of ${plural(r._n, "day")}` : dayLabel(r.date));
+
+// A year of days is too many slots for a phone: chart it by week (each value
+// the average of the days that had one), counted back from today.
+function weekly(rows) {
+  const out = [];
+  for (let end = rows.length; end > 0; end -= 7) {
+    const chunk = rows.slice(Math.max(0, end - 7), end);
+    const w = { date: chunk[0].date, _week: true, _n: chunk.filter(r => Object.keys(r).length > 1).length };
+    const keys = new Set(chunk.flatMap(r => Object.keys(r).filter(k => typeof r[k] === "number")));
+    for (const k of keys) w[k] = avgOf(chunk, k);
+    if (w.bed_h != null && w.wake_h != null) { w.bed = clk(w.bed_h); w.wake = clk(w.wake_h); }
+    out.unshift(w);
+  }
+  return out;
+}
+
+// How each key reads as a tile, and its change against the usual (neutral
+// words: "+12 min vs usual", "20 min later than usual"; never good or bad).
+const vsUsual = (c, text, unit = "") => (/^0( |$)/.test(text) ? "same as usual" : `${c > 0 ? "+" : MINUS}${text}${unit} vs usual`);
+const HK = {
+  sleep_h: { label: "Sleep", val: x => [num(x), "h"], delta: c => vsUsual(c, num(Math.abs(c)), " h") },
+  bed_h: {
+    label: "Fell asleep", val: x => [clk(x), null],
+    delta: c => { const m = Math.round(Math.abs(c) * 60); return m < 5 ? "same as usual" : `${dur(m)} ${c > 0 ? "later" : "earlier"} than usual`; },
+  },
+  resting_hr: { label: "Resting HR", val: x => [String(Math.round(x)), "bpm"], delta: c => vsUsual(c, String(Math.round(Math.abs(c))), " bpm") },
+  hrv: { label: "HRV", val: x => [String(Math.round(x)), "ms"], delta: c => vsUsual(c, String(Math.round(Math.abs(c))), " ms") },
+  steps: { label: "Steps", val: x => [thou(x), null], delta: c => vsUsual(c, thou(Math.abs(c))) },
+  exercise_min: { label: "Exercise", val: x => [String(Math.round(x)), "min"], delta: c => vsUsual(c, String(Math.round(Math.abs(c))), " min") },
+  // Averaged over the days that had any, so the tile says how many.
+  workout_min: { label: "Workouts", val: x => [String(Math.round(x)), "min"], delta: c => vsUsual(c, String(Math.round(Math.abs(c))), " min"), per: true },
+  screen_min: { label: "Screen time", val: x => [dur(x), null], delta: c => vsUsual(c, dur(Math.abs(c))), per: true },
+};
+
+function initHealth() {
+  const root = $("#health");
+  try { HL.days = localStorage.getItem(HL_KEY) || HL.days; } catch { /* private mode */ }
+  if (!["7", "30", "90", "365"].includes(HL.days)) HL.days = "30";
+  HL.last = h("span.hl-last");
+  HL.body = h("div.hl-body");
+  const range = seg([["7", "7 d"], ["30", "30 d"], ["90", "90 d"], ["365", "1 y"]], HL.days, v => {
+    HL.days = v;
+    try { localStorage.setItem(HL_KEY, v); } catch { /* private mode */ }
+    loadHealth(true);
+  }, "Range");
+  fill(root, h("div.hl-top", range, HL.last), HL.body);
+  loadHealth(false);
+}
+
+// First load shows a skeleton; a range change or a refresh keeps the old
+// charts up, dimmed, until the new numbers arrive.
+async function loadHealth(quiet) {
+  const days = HL.days;
+  if (quiet && HL.data) HL.body.classList.add("busy");
+  else fill(HL.body, skeleton("tiles"));
+  try {
+    const d = await api(`/api/health?days=${days}`);
+    if (days !== HL.days) return;
+    HL.data = d;
+    renderHealth(d);
+  } catch (e) {
+    if (days !== HL.days) return;
+    fill(HL.body, errorBox(e, () => loadHealth(false)));
+  } finally {
+    if (days === HL.days) HL.body.classList.remove("busy");
+  }
+}
+
+function renderHealth(d) {
+  const rows = d.series || [];
+  hlSizes.disconnect();
+  fill(HL.last, d.last_measured ? `Last measured ${short(d.last_measured)}` : "");
+  if (!d.last_measured) { fill(HL.body, h("div.grid", setupCard())); return; }
+  const label = k => ((d.labels || {})[k] || [words(k)])[0];
+  const week = card(1, "This week vs your usual", { cls: "wide" });
+  const sleepC = card(2, "Sleep");
+  const heart = card(3, "Heart");
+  const act = card(4, "Activity");
+  const screen = card(5, "Screen time");
+  const together = card(6, "How things move together");
+  const numbers = card(7, "Day by day");
+  fill(HL.body, h("div.grid", week, h("div.col", sleepC, act, numbers), h("div.col", heart, screen, together)),
+    h("p.cal-key.hl-src", "From Health Auto Export on the iPhone (Apple Watch), the Mac screen-time forwarder and the iPhone Screen Time shortcut. Setup: ", h("span.mono.hl-path", "docs/health-setup.md"), " in the repo."));
+  weekTiles(week.body, d.baselines || {});
+  const plot = rows.length > 120 ? weekly(rows) : rows;
+  sleepCard(sleepC.body, rows, plot);
+  heartCard(heart.body, rows, plot, d.baselines || {});
+  activityCard(act.body, rows, plot, d.workouts || []);
+  screenCard(screen.body, rows, plot, d.screen || {});
+  togetherCard(together.body, d.correlations || [], label);
+  numbersCard(numbers.body, rows);
+}
+
+function setupCard() {
+  const c = card(1, "Nothing measured yet", { cls: "wide" });
+  c.body.append(h("div.stack",
+    h("p", "This tab fills in once your devices send their numbers. Three feeds, each optional:"),
+    h("ul.list.hl-setup",
+      li("Health Auto Export on the iPhone", null, sub("Apple Watch: sleep and its stages, resting heart rate, HRV, steps, exercise and workouts.")),
+      li("Mac screen-time forwarder", null, sub("tools/screentime, reading ActivityWatch: apps and sites on the Mac.")),
+      li("iPhone Screen Time shortcut", null, sub("The day's iPhone screen time per app."))),
+    h("p.muted", "The setup guide is in the repo at ", h("span.mono.hl-path", "docs/health-setup.md"), ".")));
+  return c;
+}
+
+// ---- this week vs your usual
+
+function weekTiles(body, base) {
+  const keys = Object.keys(HK).filter(k => base[k] && base[k].recent != null);
+  if (!keys.length) { fill(body, empty(null, "Nothing measured in the last 7 days.")); return; }
+  fill(body,
+    h("div.tiles.hl-tiles", keys.map(k => {
+      const b = base[k], spec = HK[k];
+      const [v, unit] = spec.val(b.recent);
+      const delta = b.change == null ? "no usual yet" : spec.delta(b.change);
+      const usual = b.baseline == null ? "" : `; usual ${spec.val(b.baseline).filter(Boolean).join(" ")}`;
+      const per = spec.per ? `avg of the ${plural(b.days, "day")} with any` : "";
+      return h("div.tile.hl-tile", { title: `${spec.label}: last 7 days ${[v, unit].filter(Boolean).join(" ")}${usual}${per ? ` (${per})` : ""}` },
+        h("b", v, unit ? h("small", unit) : null),
+        h("span", spec.label),
+        h("em.hl-delta", delta),
+        per && b.days < 7 ? h("em.hl-note", `on ${b.days} of 7 days`) : null);
+    })),
+    h("p.cal-key", "The last 7 days' average against the 28 days before them."));
+}
+
+// ---- the chart frame
+
+const niceStep = (span, count) => {
+  const raw = span / count, p = 10 ** Math.floor(Math.log10(raw)), f = raw / p;
+  return (f <= 1 ? 1 : f <= 2 ? 2 : f <= 2.5 ? 2.5 : f <= 5 ? 5 : 10) * p;
+};
+function niceScale(lo, hi, count = 3) {
+  if (!(hi > lo)) { hi = lo + 1; lo = Math.max(0, lo - 1); }
+  const st = niceStep(hi - lo, count);
+  const a = Math.floor(lo / st) * st, b = Math.ceil(hi / st) * st;
+  const ticks = [];
+  for (let t = a; t <= b + st / 2; t += st) ticks.push(+t.toFixed(6));
+  return { domain: [a, b], ticks };
+}
+// One style per axis: in full under 10,000, compact on an axis that reaches it.
+const axisFmt = ticks => Math.max(...ticks) >= 10000 ? (t => `${+(t / 1000).toFixed(1)}K`) : (t => t.toLocaleString("en-US"));
+
+// A bar from a baseline: 4px round at the data end, square at the base.
+function colPath(x, w, yTop, yBase) {
+  const hgt = yBase - yTop;
+  if (hgt <= 0) return "";
+  const r = Math.min(4, w / 2, hgt);
+  if (w < 3) return `M${x},${yBase}V${yTop}H${x + w}V${yBase}Z`;
+  return `M${x},${yBase}V${yTop + r}Q${x},${yTop} ${x + r},${yTop}H${x + w - r}Q${x + w},${yTop} ${x + w},${yTop + r}V${yBase}Z`;
+}
+
+// A chart over the range's days, one slot per day: value axis on the left,
+// dates under it, and a readout line above that follows the pointer (or the
+// arrow keys once focused). `marks(g)` returns the SVG marks for geometry g.
+function dayPlot(rows, { label, height = 110, scale, down = false, tickFmt, marks, read, idle }) {
+  const readout = h("p.hl-read", idle);
+  const box = h("div.hl-plot");
+  const wrap = h("div.hl-chart", readout, box);
+  const n = rows.length;
+  const fmt = tickFmt || axisFmt(scale.ticks);
+  let geo = null, sel = null, band = null, drawnW = 0;
+  const show = (i, speak) => {
+    sel = i;
+    if (!geo) return;
+    if (i == null) { readout.textContent = idle; band.setAttribute("x", "-999"); return; }
+    const text = read(rows[i], i);
+    readout.textContent = text;
+    band.setAttribute("x", String(geo.x(i) - geo.step / 2));
+    if (speak) announce(text);
+  };
+  const lastWith = () => { for (let i = n - 1; i >= 0; i--) if (Object.keys(rows[i]).length > 1) return i; return n - 1; };
+  const draw = () => {
+    const W = Math.floor(box.clientWidth);
+    if (!W || W === drawnW) return;
+    drawnW = W;
+    const labels = scale.ticks.map(fmt);
+    const left = Math.max(...labels.map(t => t.length)) * 6.4 + 8, right = 4, top = 8, bottom = 20;
+    const pw = W - left - right, step = pw / n;
+    const [lo, hi] = scale.domain;
+    const frac = v => (v - lo) / (hi - lo);
+    const y = v => down ? top + frac(v) * height : top + height - frac(v) * height;
+    const bw = step >= 6 ? Math.min(24, step - 2) : Math.max(0.6, step * 0.72);
+    geo = { x: i => left + step * (i + 0.5), y, step, bw, top, height, left, W, base: top + height };
+    band = svg("rect", { class: "hl-band", x: -999, y: top, width: Math.max(step, 2), height });
+    const grid = svg("g", { class: "hl-grid", "aria-hidden": "true" }, scale.ticks.map((t, j) => [
+      svg("line", { x1: left, x2: W - right, y1: Math.round(y(t)) + 0.5, y2: Math.round(y(t)) + 0.5 }),
+      svg("text", { x: left - 6, y: y(t), dy: "0.32em", "text-anchor": "end" }, labels[j]),
+    ]));
+    const at = [0, n - 1];
+    if (pw > 280 && n > 2) at.splice(1, 0, Math.floor((n - 1) / 2));
+    const xs = svg("g", { class: "hl-x", "aria-hidden": "true" }, at.map((i, j) =>
+      svg("text", { x: j === 0 ? left : j === at.length - 1 ? W - right : geo.x(i), y: top + height + 15, "text-anchor": j === 0 ? "start" : j === at.length - 1 ? "end" : "middle" }, short(rows[i].date))));
+    const s = svg("svg", { class: "hl-svg", width: W, height: top + height + bottom, viewBox: `0 0 ${W} ${top + height + bottom}`, role: "img", "aria-label": label, tabindex: 0 },
+      band, grid, svg("g", null, marks(geo)), xs);
+    const idxAt = e => {
+      const r = s.getBoundingClientRect();
+      return Math.max(0, Math.min(n - 1, Math.floor((e.clientX - r.left - left) / step)));
+    };
+    s.addEventListener("pointermove", e => show(idxAt(e)));
+    s.addEventListener("pointerdown", e => show(idxAt(e)));
+    // A tap leaves its reading up; a mouse puts it back on the way out.
+    s.addEventListener("pointerleave", e => { if (e.pointerType === "mouse") show(null); });
+    s.addEventListener("focus", () => show(sel ?? lastWith(), true));
+    s.addEventListener("blur", () => show(null));
+    s.addEventListener("keydown", e => {
+      const moves = { ArrowLeft: -1, ArrowRight: 1, Home: -n, End: n };
+      if (!(e.key in moves)) return;
+      e.preventDefault();
+      show(Math.max(0, Math.min(n - 1, (sel ?? lastWith()) + moves[e.key])), true);
+    });
+    fill(box, s);
+    if (sel != null) show(sel);
+  };
+  hlDraw.set(box, draw);
+  hlSizes.observe(box);
+  return wrap;
+}
+
+// A line through the days that have a value: gaps stay gaps. Dots on every
+// point when there's room, and always on a point with no neighbour.
+function lineMarks(rows, key, g, cls, fmtV) {
+  const segs = [];
+  let cur = [];
+  rows.forEach((r, i) => {
+    if (typeof r[key] === "number") cur.push(i);
+    else if (cur.length) { segs.push(cur); cur = []; }
+  });
+  if (cur.length) segs.push(cur);
+  const dots = g.step >= 9;
+  const out = segs.filter(s => s.length > 1).map(s =>
+    svg("path", { class: `hl-line ${cls}`, d: s.map((i, j) => `${j ? "L" : "M"}${g.x(i).toFixed(1)},${g.y(rows[i][key]).toFixed(1)}`).join("") }));
+  for (const s of segs) {
+    if (!dots && s.length > 1) continue;
+    for (const i of s) out.push(svg("circle", { class: `hl-dot ${cls}`, cx: g.x(i), cy: g.y(rows[i][key]), r: dots ? 4 : 3 }, tipOf(`${when(rows[i])}: ${fmtV(rows[i][key])}`)));
+  }
+  return out;
+}
+
+// The usual as a dashed reference, labelled at the right end.
+// (Line first, label last: the label sits over the data, ringed in the surface.)
+function refMarks(g, value) {
+  if (value == null) return [[], []];
+  const y = Math.round(g.y(value)) + 0.5;
+  return [[svg("line", { class: "hl-ref", x1: g.left, x2: g.W - 4, y1: y, y2: y })],
+    [svg("text", { class: "hl-ref-label", x: g.W - 6, y: y - 5, "text-anchor": "end" }, `usual ${Math.round(value)}`)]];
+}
+
+function columnMarks(rows, key, g, cls, fmtV) {
+  return rows.flatMap((r, i) => typeof r[key] === "number" && r[key] > 0
+    ? [svg("path", { class: `hl-col ${cls}`, d: colPath(g.x(i) - g.bw / 2, g.bw, g.y(r[key]), g.base) }, tipOf(`${when(r)}: ${fmtV(r[key])}`))]
+    : []);
+}
+
+// Stacked from the base, bottom first; a 2px surface gap between parts.
+function stackMarks(rows, parts, g, tip) {
+  const out = [];
+  rows.forEach((r, i) => {
+    const vals = parts.map(p => (typeof r[p.key] === "number" ? Math.max(0, r[p.key]) : 0));
+    if (!vals.some(v => v > 0)) return;
+    const x0 = g.x(i) - g.bw / 2;
+    const title = tipOf(tip(r));
+    let acc = 0;
+    const top = vals.reduce((m, v, j) => (v > 0 ? j : m), 0);
+    vals.forEach((v, j) => {
+      if (!v) return;
+      const yBase = g.y(acc) - (acc > 0 && g.bw >= 3 ? 2 : 0);
+      acc += v;
+      const yTop = g.y(acc);
+      if (yBase - yTop <= 0.5) return;
+      const d = j === top ? colPath(x0, g.bw, yTop, yBase) : `M${x0},${yBase}V${yTop}H${x0 + g.bw}V${yBase}Z`;
+      out.push(svg("path", { class: `hl-col ${parts[j].cls}`, d }, title.cloneNode(true)));
+    });
+  });
+  return out;
+}
+
+const subHead = (text, aside) => h("div.rep-h", h("h3", text), aside ? h("span.mono.faint", aside) : null);
+const legend = items => h("div.hl-legend", items.map(([cls, text]) => h("span", h("i", { class: cls }), text)));
+const statRow = items => h("div.hl-avgs", items.filter(x => x[1] != null).map(([lab, v, unit]) => h("div", h("b", v, unit ? h("small", unit) : null), h("span", lab))));
+
+// ---- sleep
+
+function sleepCard(body, rows, plot) {
+  const nights = rows.filter(r => typeof r.bed_h === "number" && typeof r.wake_h === "number");
+  if (!has(rows, "sleep_h") && !nights.length) { fill(body, empty(null, "No sleep in this range. The Apple Watch sends it through Health Auto Export.")); return; }
+  const sleepText = r => typeof r.sleep_h === "number"
+    ? `${num(r.sleep_h)} h asleep${r.sleep_deep_h ? ` · deep ${num(r.sleep_deep_h)}` : ""}${r.sleep_rem_h ? ` · REM ${num(r.sleep_rem_h)}` : ""}` : "";
+  const parts = [];
+  if (nights.length) {
+    const lo = Math.min(-2, Math.floor(Math.min(...nights.map(r => r.bed_h)))), hi = Math.max(8, Math.ceil(Math.max(...nights.map(r => r.wake_h))));
+    const st = hi - lo > 12 ? 3 : 2;
+    const ticks = [];
+    for (let t = Math.ceil(lo / st) * st; t <= hi; t += st) ticks.push(t);
+    const tell = r => `${when(r)}: ${r.bed}–${r.wake}${typeof r.sleep_h === "number" ? ` · ${sleepText(r)}` : ""}`;
+    const spans = plot.filter(r => typeof r.bed_h === "number" && typeof r.wake_h === "number");
+    parts.push(h("section.hl-sec", subHead("Asleep to awake", plot === rows ? "by the morning" : "weekly averages"), dayPlot(plot, {
+      label: `Sleep each night, from falling asleep to waking, over ${plural(rows.length, "day")}`,
+      height: 150, down: true, scale: { domain: [lo, hi], ticks }, tickFmt: clk,
+      idle: `${plural(nights.length, "night")} measured · tap a ${plot === rows ? "night" : "week"}`,
+      read: r => (typeof r.bed_h === "number" ? tell(r) : `${when(r)}: no sleep times`),
+      marks: g => spans.map(r => {
+        const i = plot.indexOf(r), y0 = g.y(r.bed_h), y1 = g.y(r.wake_h);
+        return svg("rect", { class: "hl-col hl-sleep", x: g.x(i) - g.bw / 2, y: y0, width: g.bw, height: Math.max(1, y1 - y0), rx: Math.min(4, g.bw / 2) }, tipOf(tell(r)));
+      }),
+    })));
+  }
+  if (has(rows, "sleep_h")) {
+    const staged = has(rows, "sleep_deep_h") || has(rows, "sleep_rem_h");
+    const withRest = plot.map(r => {
+      if (typeof r.sleep_h !== "number") return r;
+      const dr = (r.sleep_deep_h || 0) + (r.sleep_rem_h || 0);
+      return { ...r, _dr: staged ? Math.min(dr, r.sleep_h) : 0, _rest: staged ? Math.max(0, r.sleep_h - dr) : r.sleep_h };
+    });
+    const max = Math.max(...rows.map(r => r.sleep_h || 0));
+    const scale = niceScale(0, max, 3);
+    parts.push(h("section.hl-sec", subHead("Hours asleep"), dayPlot(withRest, {
+      label: `Hours asleep each night${staged ? ", deep and REM sleep shown as the lower part" : ""}`,
+      scale, tickFmt: t => String(t),
+      idle: `${staged ? "Deep + REM at the base · tap" : "Tap"} a ${plot === rows ? "night" : "week"}`,
+      read: r => `${when(r)}: ${sleepText(r) || "no sleep measured"}`,
+      marks: g => stackMarks(withRest, [{ key: "_dr", cls: "hl-sleep" }, { key: "_rest", cls: staged ? "hl-sleep-soft" : "hl-sleep" }], g,
+        r => `${when(r)}: ${sleepText(r)}`),
+    }), staged ? legend([["hl-sleep", "Deep + REM"], ["hl-sleep-soft", "Core and other sleep"]]) : null));
+  }
+  const bed = avgOf(rows, "bed_h"), wake = avgOf(rows, "wake_h"), hrs = avgOf(rows, "sleep_h");
+  parts.push(statRow([["Avg asleep", hrs == null ? null : num(hrs), "h"], ["Avg fell asleep", bed == null ? null : clk(bed)], ["Avg woke", wake == null ? null : clk(wake)]]));
+  fill(body, parts);
+}
+
+// ---- heart
+
+function heartCard(body, rows, plot, base) {
+  const specs = [["resting_hr", "Resting heart rate", "bpm"], ["hrv", "HRV", "ms"]].filter(([k]) => has(rows, k));
+  if (!specs.length) { fill(body, empty(null, "No resting heart rate or HRV in this range. The Apple Watch sends them through Health Auto Export.")); return; }
+  fill(body, specs.map(([key, name, unit]) => {
+    const vals = plot.map(r => r[key]).filter(x => typeof x === "number");
+    const usual = base[key] && base[key].baseline;
+    const lo = Math.min(...vals, usual ?? Infinity), hi = Math.max(...vals, usual ?? -Infinity);
+    const padV = Math.max(1, (hi - lo) * 0.15);
+    const scale = niceScale(Math.max(0, lo - padV), hi + padV, 3);
+    const fmtV = v => `${Math.round(v)} ${unit}`;
+    const avg = avgOf(rows, key);
+    return h("section.hl-sec", subHead(`${name} · ${unit}`, avg == null ? null : `avg ${Math.round(avg)}`), dayPlot(plot, {
+      label: `${name} per day in ${unit}${usual != null ? `, against your usual of ${Math.round(usual)}` : ""}`,
+      scale, idle: `${usual != null ? `Dashed: your usual, ${fmtV(usual)} · tap` : "Tap"} a ${plot === rows ? "day" : "week"}`,
+      read: r => `${when(r)}: ${typeof r[key] === "number" ? fmtV(r[key]) : "not measured"}${usual != null ? ` · usual ${Math.round(usual)}` : ""}`,
+      marks: g => { const [line, text] = refMarks(g, usual); return [...line, ...lineMarks(plot, key, g, "", fmtV), ...text]; },
+    }));
+  }), h("p.cal-key", h("span.hl-refkey", { "aria-hidden": "true" }), " Your usual: the average of the 28 days before the last 7."));
+}
+
+// ---- activity
+
+function activityCard(body, rows, plot, workouts) {
+  const parts = [];
+  const bars = (key, name, fmtV, idle) => {
+    const scale = niceScale(0, Math.max(...plot.map(r => r[key] || 0)), 3);
+    const avg = avgOf(rows, key);
+    return h("section.hl-sec", subHead(name, avg == null ? null : `avg ${fmtV(avg)}`), dayPlot(plot, {
+      label: `${name} per day`, scale, idle,
+      read: r => `${when(r)}: ${typeof r[key] === "number" ? fmtV(r[key]) : "not measured"}`,
+      marks: g => columnMarks(plot, key, g, "hl-bar", fmtV),
+    }));
+  };
+  const tap = `tap a ${plot === rows ? "day" : "week"}`;
+  if (has(rows, "steps")) parts.push(bars("steps", "Steps", thou, `T${tap.slice(1)}`));
+  if (has(rows, "exercise_min")) parts.push(bars("exercise_min", "Exercise minutes", v => `${Math.round(v)} min`, `Apple's exercise ring minutes · ${tap}`));
+  if (workouts.length) {
+    parts.push(h("section.hl-sec", subHead("Workouts by kind", `${plural(workouts.reduce((a, w) => a + (w.sessions || 0), 0), "session")}`),
+      ranked(workouts.slice(0, 10).map(w => ({
+        name: words(w.kind), value: w.minutes || 0,
+        note: `${w.sessions} × · ${dur(w.minutes || 0)}`,
+        title: `${words(w.kind)}: ${plural(w.sessions, "session")}, ${dur(w.minutes || 0)}${w.kcal ? `, ${thou(w.kcal)} kcal` : ""}`,
+      })), "Workouts by kind, by time")));
+  }
+  fill(body, parts.length ? parts : empty(null, "No steps, exercise or workouts in this range. The Apple Watch sends them through Health Auto Export."));
+}
+
+// ---- screen time
+
+function screenCard(body, rows, plot, screen) {
+  const parts = [];
+  const split = has(rows, "screen_mac_min") || has(rows, "screen_iphone_min");
+  if (has(rows, "screen_min")) {
+    const max = Math.max(...plot.map(r => (split ? (r.screen_mac_min || 0) + (r.screen_iphone_min || 0) : r.screen_min || 0)));
+    const st = niceScale(0, max / 60, 3);
+    const scale = { domain: st.domain.map(x => x * 60), ticks: st.ticks.map(x => x * 60) };
+    const tell = r => {
+      const bits = [typeof r.screen_mac_min === "number" ? `Mac ${dur(r.screen_mac_min)}` : "", typeof r.screen_iphone_min === "number" ? `iPhone ${dur(r.screen_iphone_min)}` : ""].filter(Boolean);
+      return `${when(r)}: ${typeof r.screen_min === "number" ? `${dur(r.screen_min)}${bits.length ? ` (${bits.join(", ")})` : ""}` : "not measured"}`;
+    };
+    const avg = avgOf(rows, "screen_min");
+    parts.push(h("section.hl-sec", subHead("Per day · hours", avg == null ? null : `avg ${dur(avg)}`), dayPlot(plot, {
+      label: "Screen time per day, Mac and iPhone stacked", scale, tickFmt: t => `${+(t / 60).toFixed(1)}`,
+      idle: `Tap a ${plot === rows ? "day" : "week"}`, read: tell,
+      marks: g => split
+        ? stackMarks(plot, [{ key: "screen_mac_min", cls: "hl-mac" }, { key: "screen_iphone_min", cls: "hl-iphone" }], g, tell)
+        : columnMarks(plot, "screen_min", g, "hl-mac", dur),
+    }), split ? legend([["hl-mac", "Mac"], ["hl-iphone", "iPhone"]]) : null));
+  }
+  for (const [dev, name] of [["mac", "Mac"], ["iphone", "iPhone"]]) {
+    const s = screen[dev];
+    if (!s || !(s.top || []).length) continue;
+    const days = Math.max(1, s.days || 1);
+    parts.push(h("section.hl-sec", subHead(`${name}: top apps and sites`, `${dur(s.per_day || 0)} a day`),
+      ranked(s.top.slice(0, 8).map(a => ({
+        name: a.app, value: a.minutes || 0, note: `${dur((a.minutes || 0) / days)}/day`,
+        title: `${a.app}: ${dur(a.minutes || 0)} over ${plural(days, "day")}, ${dur((a.minutes || 0) / days)} a day`,
+      })), `${name} apps and sites by time`)));
+  }
+  fill(body, parts.length ? parts : empty(null, "No screen time in this range. It comes from the Mac forwarder (tools/screentime) and the iPhone Screen Time shortcut."));
+}
+
+// ---- how things move together
+
+function togetherCard(body, corr, label) {
+  const lower = s => (s.length > 1 && s[1] === s[1].toLowerCase() ? s[0].toLowerCase() + s.slice(1) : s);
+  const pair = c => `${label(c.x)} and ${lower(label(c.y))}${c.next_day ? " the next day" : ""}`;
+  const clear = corr.filter(c => Math.abs(c.r) >= 0.2), none = corr.filter(c => Math.abs(c.r) < 0.2);
+  fill(body,
+    clear.length ? h("ul.list", clear.map(c => li(pair(c), null,
+      sub(`${c.word}, r ${String(c.r).replace("-", MINUS)} over ${plural(c.n, "day")}`)))) : null,
+    none.length ? h("p.muted.hl-none", `${clear.length ? "No clear link for the rest" : "No clear link yet"}: ${none.map(c => lower(pair(c))).join("; ")}.`) : null,
+    corr.length ? null : empty(null, "Not enough days yet: a pair needs 10 days with both numbers."),
+    h("p.cal-key", "A glance, not a finding: two things moving together isn't one causing the other."));
+}
+
+// ---- the table view: every number the charts draw
+
+function numbersCard(body, rows) {
+  const cols = [
+    ["Sleep", r => (typeof r.sleep_h === "number" ? `${num(r.sleep_h)} h` : "")],
+    ["Asleep–awake", r => (r.bed ? `${r.bed}–${r.wake}` : "")],
+    ["Rest HR", r => (typeof r.resting_hr === "number" ? String(Math.round(r.resting_hr)) : "")],
+    ["HRV", r => (typeof r.hrv === "number" ? String(Math.round(r.hrv)) : "")],
+    ["Steps", r => (typeof r.steps === "number" ? thou(r.steps) : "")],
+    ["Exercise", r => (typeof r.exercise_min === "number" ? `${Math.round(r.exercise_min)} min` : "")],
+    ["Workouts", r => (r.workouts ? `${r.workouts} · ${dur(r.workout_min || 0)}` : "")],
+    ["Mac", r => (typeof r.screen_mac_min === "number" ? dur(r.screen_mac_min) : "")],
+    ["iPhone", r => (typeof r.screen_iphone_min === "number" ? dur(r.screen_iphone_min) : "")],
+  ];
+  const det = h("details.hl-table");
+  det.append(h("summary", "Show every day's numbers"));
+  det.addEventListener("toggle", () => {
+    if (!det.open || det.querySelector("table")) return;
+    const shown = rows.filter(r => Object.keys(r).length > 1).reverse();
+    const used = cols.filter(([, f]) => shown.some(r => f(r)));
+    det.append(h("div.hl-table-wrap", h("table",
+      h("thead", h("tr", h("th", { scope: "col" }, "Day"), used.map(([t]) => h("th", { scope: "col" }, t)))),
+      h("tbody", shown.map(r => h("tr", h("th", { scope: "row" }, dayLabel(r.date)), used.map(([, f]) => h("td", f(r)))))))));
+  });
+  fill(body, det);
+}
+
 // ================================================================ router & shell
 
-const VIEWS = { home: initHome, log: initLog, chat: initChat, trips: initTrips, you: initYou };
-const TITLES = { home: "Home", log: "Log", chat: "Assistant", trips: "Trips", you: "You" };
+const VIEWS = { home: initHome, log: initLog, chat: initChat, trips: initTrips, health: initHealth, you: initYou };
+const TITLES = { home: "Home", log: "Log", chat: "Assistant", trips: "Trips", health: "Health", you: "You" };
 const ON_SHOW = {
   home: () => { if (S.homeStale) { S.homeStale = false; loadHome(true); } },
   chat: () => scrollChat(false),
+  health: () => { if (HL.data) loadHealth(true); },
 };
 const inited = new Set();
 // Views scroll inside <main>, never the document (see app.css: the shell).

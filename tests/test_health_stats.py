@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from datetime import date, timedelta
+from typing import Any
 
 from daylog import health, health_stats, review
 from daylog.vault import Vault
@@ -11,7 +12,7 @@ from daylog.vault import Vault
 TODAY = date(2026, 11, 23)
 
 
-def _night(d: date, bed: str = "23:30", wake: str = "07:00", asleep: float = 7.0) -> dict:
+def _night(d: date, bed: str = "23:30", wake: str = "07:00", asleep: float = 7.0) -> dict[str, Any]:
     prev = d - timedelta(days=1)
     return {
         "start": f"{prev.isoformat()} {bed}:00 -0600",
@@ -55,7 +56,7 @@ def test_baselines_compare_the_last_week_with_the_four_before() -> None:
 
 def test_correlations_need_enough_days_and_can_look_a_day_ahead() -> None:
     start = date(2026, 10, 1)
-    rows = []
+    rows: list[dict[str, Any]] = []
     for i in range(14):
         sleep = 5 + (i % 5)
         rows.append(

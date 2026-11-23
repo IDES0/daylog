@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import date, datetime
+from typing import Any
 
 from daylog import measures, timeline
 from daylog.disciplines import Graph
@@ -24,7 +25,7 @@ def _graph() -> Graph:
     )
 
 
-def _w(kind: str, start: str, end: str, **extra: object) -> dict:
+def _w(kind: str, start: str, end: str, **extra: object) -> dict[str, Any]:
     return {"id": f"{kind}-{start}", "kind": kind, "start": start, "end": end, **extra}
 
 
@@ -114,7 +115,7 @@ def test_sleep_is_split_across_logical_days_and_guesses_avoid_it() -> None:
 
 
 def test_screen_time_is_a_coalesced_strip_including_after_midnight() -> None:
-    def s(app: str, start: str, end: str, site: str = "") -> dict:
+    def s(app: str, start: str, end: str, site: str = "") -> dict[str, Any]:
         return {"device": "mac", "app": app, "site": site, "start": start, "end": end}
 
     today = {

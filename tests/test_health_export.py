@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from datetime import date
+from typing import Any
 
 import pytest
 
@@ -13,7 +14,7 @@ from daylog.vault import Vault
 TODAY = date(2026, 11, 20)
 
 
-def _hae(metrics: list | None = None, workouts: list | None = None) -> dict:
+def _hae(metrics: list[Any] | None = None, workouts: list[Any] | None = None) -> dict[str, Any]:
     return {"data": {"metrics": metrics or [], "workouts": workouts or []}}
 
 
@@ -131,7 +132,7 @@ def test_summarised_sleep_files_under_the_morning() -> None:
 
 
 def test_sleep_segments_group_into_nights_and_prefer_the_watch() -> None:
-    def seg(start: str, end: str, value: str, source: str = "Watch") -> dict:
+    def seg(start: str, end: str, value: str, source: str = "Watch") -> dict[str, Any]:
         return {"startDate": start, "endDate": end, "value": value, "qty": 0, "source": source}
 
     batch = health.parse_export(
