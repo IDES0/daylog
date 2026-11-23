@@ -597,8 +597,6 @@ def parse_export(data: dict[str, Any], today: date | None = None) -> Batch:
         if len(metrics) > MAX_EXPORT_METRICS:
             raise HealthError(f"too many metrics for {day}")
     _sleep_totals(batch)
-    if not batch.daily and not batch.days:
-        raise HealthError("nothing usable in the export")
     return batch
 
 
@@ -749,6 +747,11 @@ def ingest(vault: Vault, body: bytes, today: date) -> str:
         return f"saved {', '.join(metrics)} for {day.isoformat()}{note}"
 
     batch = parse_export(data, today)
+    if not batch.daily and not batch.days:
+        # A run with nothing new (no workouts this week) or only types daylog
+        # doesn't read is fine, not an error: the app would flag every run.
+        note = f"; ignored: {', '.join(batch.ignored[:8])}" if batch.ignored else ""
+        return f"nothing new to save{note}"
     with _LOCK:
         files: dict[str, Any] = {}
         if batch.daily:

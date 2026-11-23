@@ -299,7 +299,36 @@ def test_ingest_still_takes_the_simple_shape_and_refuses_junk(vault: Vault) -> N
     assert health.ingest(vault, b'{"date": "2026-11-20", "steps": 9}', TODAY).startswith(
         "saved steps for 2026-11-20"
     )
-    with pytest.raises(health.HealthError):
-        health.ingest(vault, b'{"data": {"metrics": []}}', TODAY)
+    assert health.ingest(vault, b'{"data": {"metrics": [], "workouts": []}}', TODAY) == (
+        "nothing new to save"
+    )
+    assert health.ingest(vault, b'{"data": {"stateOfMind": [{"x": 1}]}}', TODAY) == (
+        "nothing new to save"
+    )
     with pytest.raises(health.HealthError):
         health.ingest(vault, b"nope", TODAY)
+
+
+def test_the_inlet_answers_a_url_check(vault: Vault, monkeypatch: pytest.MonkeyPatch) -> None:
+    import http.client
+    import threading
+    from http.server import ThreadingHTTPServer
+
+    from daylog import calendar_server
+
+    monkeypatch.setenv("VAULT_PATH", str(vault.path))
+    handler = calendar_server._make_handler(None, "/health/s3cret")
+    httpd = ThreadingHTTPServer(("127.0.0.1", 0), handler)
+    threading.Thread(target=httpd.serve_forever, daemon=True).start()
+    try:
+        for method, path, code in (
+            ("GET", "/health/s3cret", 200),
+            ("HEAD", "/health/s3cret", 200),
+            ("GET", "/health/wrong", 404),
+            ("HEAD", "/health/wrong", 404),
+        ):
+            conn = http.client.HTTPConnection("127.0.0.1", httpd.server_address[1], timeout=5)
+            conn.request(method, path)
+            assert conn.getresponse().status == code, (method, path)
+    finally:
+        httpd.shutdown()

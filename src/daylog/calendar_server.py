@@ -238,6 +238,10 @@ def _make_handler(
                 return
             elif feed_path and path == feed_path:
                 build, content_type = _build_feed_bytes, "text/calendar; charset=utf-8"
+            elif health_path and path == health_path:
+                # An app checking the URL before saving it gets an OK; data is POSTed.
+                self._reply(200, "daylog health inlet: POST JSON here\n")
+                return
             elif api and path.startswith("/api/"):
                 self._api("GET")
                 return
@@ -299,6 +303,12 @@ def _make_handler(
             if not 0 < length <= limit:
                 return None
             return self.rfile.read(length)
+
+        def do_HEAD(self) -> None:
+            path = urlsplit(self.path).path
+            self.send_response(200 if health_path and path == health_path else 404)
+            self.send_header("Content-Length", "0")
+            self.end_headers()
 
         def do_POST(self) -> None:
             path = urlsplit(self.path).path
