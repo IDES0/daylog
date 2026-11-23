@@ -726,8 +726,11 @@ _NOUNS = {
 
 
 def _count(n: int, noun: str) -> str:
-    head, _, tail = noun.partition(" ")
-    return f"{n} {head}{'' if n == 1 else 's'}{' ' + tail if tail else ''}"
+    """ "1 workout", "2 screen sessions", "3 nights of sleep"."""
+    if n == 1:
+        return f"1 {noun}"
+    head, of, tail = noun.partition(" of ")
+    return f"{n} {head}s{of}{tail}"
 
 
 def ingest(vault: Vault, body: bytes, today: date) -> str:

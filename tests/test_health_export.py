@@ -346,3 +346,10 @@ def test_zero_in_bed_is_unknown_and_long_metric_names_are_kept() -> None:
     assert "in_bed_h" not in batch.days[TODAY]["sleep"][0]
     assert "in_bed_h" not in batch.daily[TODAY]
     assert batch.daily[TODAY]["walking_double_support_percentage"] == 27.5
+
+
+def test_reply_counts_read_naturally() -> None:
+    assert health._count(1, "night of sleep") == "1 night of sleep"
+    assert health._count(3, "night of sleep") == "3 nights of sleep"
+    assert health._count(5, "screen session") == "5 screen sessions"
+    assert health._count(2, "workout") == "2 workouts"
