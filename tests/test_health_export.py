@@ -353,3 +353,24 @@ def test_reply_counts_read_naturally() -> None:
     assert health._count(3, "night of sleep") == "3 nights of sleep"
     assert health._count(5, "screen session") == "5 screen sessions"
     assert health._count(2, "workout") == "2 workouts"
+
+
+def test_unreadable_screen_totals_say_why() -> None:
+    def why(totals: Any) -> list[str]:
+        return health.parse_export({"screen_totals": totals}, TODAY).ignored
+
+    assert why({"date": "2026-11-20", "apps": "Instagram\nYouTube"}) == [
+        "screen_totals: 2 lines in apps but none with a time "
+        "(want 'App: 1h 23m'; first line was 'Instagram')"
+    ]
+    assert why({"apps": ""}) == ["screen_totals: apps was empty"]
+    assert why("Instagram: 1h") == [
+        "screen_totals should be an object with date, device and apps, got str"
+    ]
+    listed = health.parse_export(
+        {"screen_totals": {"date": "2026-11-20", "apps": ["Maps: 9 min", "Safari: 1h 2m"]}}, TODAY
+    )
+    assert [(t["app"], t["minutes"]) for t in listed.days[TODAY]["screen_totals"]] == [
+        ("Maps", 9.0),
+        ("Safari", 62.0),
+    ]

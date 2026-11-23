@@ -7,6 +7,7 @@ vault only as a SHA-256 hash (`devices.yaml`) and revocable there:
 
     POST /watch/log   Authorization: Bearer <token>   {"text": "..."}
     POST /watch/ask   Authorization: Bearer <token>   {"text": "..."}
+    POST /watch/brief Authorization: Bearer <token>   (no body)
 
 Outside /api/* on purpose: the session-and-CSRF rule stays whole for the
 app, and a token can do exactly two things. `log` runs the same pipeline as
@@ -17,7 +18,10 @@ Chat tab: if the answer is ready within WAIT_SECONDS it comes back as
 plain text for the watch to show or speak, else the watch hears "thinking"
 and the answer arrives as one notification. Anything inferred (a goal
 change, a new place) still waits as a card in the app: the watch can't
-confirm, so nothing it says is applied without a tap.
+confirm, so nothing it says is applied without a tap. `brief` makes the
+morning brief now, for a Shortcut run when the user wakes (after it has
+synced last night's sleep): once a day, announced by the brief's usual
+notification; the clock's 7am brief then skips the day.
 
 Replies are plain text, since that's what a Shortcut shows best. Bodies,
 tokens and transcripts are never logged.
@@ -61,6 +65,7 @@ RATE_WINDOW_S = 600.0
 MAX_MISSES = 10
 MISS_WINDOW_S = 900.0
 PUSH_BODY_CHARS = 900
+PATHS = ("/watch/log", "/watch/ask", "/watch/brief")
 
 Reply = tuple[int, str]
 
@@ -193,6 +198,7 @@ class Watch:
         self._lock = threading.Lock()
         self._misses: deque[float] = deque()
         self._recent: dict[str, deque[float]] = {}
+        self._briefing = False
 
     def _too_many_misses(self, now: float) -> bool:
         while self._misses and self._misses[0] <= now - MISS_WINDOW_S:
@@ -209,7 +215,7 @@ class Watch:
         return False
 
     def handle(self, req: Request) -> Reply:
-        if req.path not in ("/watch/log", "/watch/ask"):
+        if req.path not in PATHS:
             return 404, "not found"
         now = self._clock()
         v = self.api._vault()
@@ -226,6 +232,9 @@ class Watch:
                 return 429, "That's a lot at once. Try again in a few minutes."
         if len(req.body) > MAX_BODY_BYTES:
             return 413, "That's too long for one note."
+        if req.path == "/watch/brief":
+            logger.info("watch inlet: brief from %s", device.get("name"))
+            return self._brief(v)
         text = said(req.body, req.headers.get("content-type", ""))
         if not text:
             return 400, "I didn't catch anything to send."
@@ -259,6 +268,30 @@ class Watch:
         key = key_for(None, "log", text.encode(), "watch")
         api.jobs.submit(key, "log", work, {"text": text, "date": None})
         return 202, "Got it. Logging now; you'll get a notification when it's in."
+
+    def _brief(self, v: Vault) -> Reply:
+        from daylog import scheduler, services
+
+        now = self.api._now()
+        last = services.last_brief(v)
+        if last is not None and last.date == now.date():
+            return 200, "Today's brief is already in the app."
+        with self._lock:
+            if self._briefing:
+                return 202, "Already making it."
+            self._briefing = True
+
+        def work() -> None:
+            try:
+                scheduler.morning_brief(self.api, v, now)
+            except Exception:
+                logger.exception("watch brief failed")
+            finally:
+                with self._lock:
+                    self._briefing = False
+
+        self._spawn(work)
+        return 202, "Good morning. Making your brief; it'll arrive as a notification in a minute."
 
     def _ask(self, v: Vault, text: str, links: str) -> Reply:
         done = threading.Event()

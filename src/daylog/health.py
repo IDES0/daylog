@@ -541,15 +541,25 @@ def minutes(value: Any) -> float | None:
 
 def _add_screen_totals(batch: Batch, data: Any, today: date) -> None:
     """Per-app daily totals: {"date", "device", "apps"}, apps being {name: duration},
-    [{app, minutes}] or a Shortcut's text, one "App: 1h 23m" per line."""
+    [{app, minutes}], a list of lines or a Shortcut's text, one "App: 1h 23m" per line.
+
+    When nothing in it can be read, `ignored` says what came instead, so the
+    Shortcut's result shows why (the reply goes only to the sender)."""
     if not isinstance(data, dict):
+        batch.ignored.append(
+            "screen_totals should be an object with date, device and apps, "
+            f"got {type(data).__name__}"
+        )
         return
     day = _day(data.get("date"), today)
     device = _label(data.get("device"), 20).lower() or "iphone"
     apps = data.get("apps")
     pairs: list[tuple[Any, Any]] = []
+    lines: list[str] = []
     if isinstance(apps, dict):
         pairs = list(apps.items())
+    elif isinstance(apps, list) and all(isinstance(a, str) for a in apps):
+        lines = [line for a in apps for line in a.splitlines()]
     elif isinstance(apps, list):
         pairs = [
             (a.get("app") or a.get("name"), a.get("minutes", a.get("duration")))
@@ -557,11 +567,24 @@ def _add_screen_totals(batch: Batch, data: Any, today: date) -> None:
             if isinstance(a, dict)
         ]
     elif isinstance(apps, str):
-        # A Shortcut's text output, one "App: 1h 23m" (or "App - 23 min") per line.
-        for line in apps.splitlines():
-            match = _TOTAL_LINE.match(line.strip())
-            if match:
-                pairs.append((match.group(1), match.group(2)))
+        lines = apps.splitlines()
+    # A Shortcut's text: one "App: 1h 23m" (or "App - 23 min") per line.
+    lines = [line.strip() for line in lines if line.strip()]
+    for line in lines:
+        match = _TOTAL_LINE.match(line)
+        if match:
+            pairs.append((match.group(1), match.group(2)))
+    if not pairs:
+        if lines:
+            batch.ignored.append(
+                f"screen_totals: {len(lines)} lines in apps but none with a time "
+                f"(want 'App: 1h 23m'; first line was {lines[0][:60]!r})"
+            )
+        elif apps in (None, "", [], {}):
+            batch.ignored.append("screen_totals: apps was empty")
+        else:
+            batch.ignored.append(f"screen_totals: apps was a {type(apps).__name__} it can't read")
+        return
     for name, value in pairs:
         app, mins = _label(name), minutes(value)
         if app and mins is not None and 0 < mins <= 24 * 60:
@@ -591,9 +614,10 @@ def parse_export(data: dict[str, Any], today: date | None = None) -> Batch:
     for e in events:
         if isinstance(e, dict):
             _add_screen_event(batch, e)
-    totals = data.get("screen_totals")
-    for t in totals if isinstance(totals, list) else [totals]:
-        _add_screen_totals(batch, t, today or date.today())
+    if "screen_totals" in data:
+        totals = data["screen_totals"]
+        for t in totals if isinstance(totals, list) else [totals]:
+            _add_screen_totals(batch, t, today or date.today())
     for day, metrics in batch.daily.items():
         if len(metrics) > MAX_EXPORT_METRICS:
             raise HealthError(f"too many metrics for {day}")

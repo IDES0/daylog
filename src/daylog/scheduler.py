@@ -45,10 +45,20 @@ def _setup(v: Vault | None, now: datetime | None) -> tuple[Vault, datetime]:
 # -- the jobs --------------------------------------------------------------------------
 
 
-def morning_brief(api: Api, v: Vault | None = None, now: datetime | None = None) -> None:
-    """Build and save the brief, notify it, then say how many decisions wait."""
+def morning_brief(
+    api: Api, v: Vault | None = None, now: datetime | None = None, skip_if_made: bool = False
+) -> None:
+    """Build and save the brief, notify it, then say how many decisions wait.
+
+    `skip_if_made` (the clock's run): leave a day alone that already has its
+    brief, made when the user woke (webapp/watch.py) or on demand."""
     v, now = _setup(v, now)
     today = now.date()
+    if skip_if_made:
+        last = services.last_brief(v)
+        if last is not None and last.date == today:
+            logger.info("brief: today's is already made; the scheduled one is skipped")
+            return
     try:
         text = services.build_brief(v, today)
     except Exception:
@@ -133,7 +143,11 @@ def weekly_plan(api: Api, v: Vault, now: datetime) -> None:
 def jobs(api: Api) -> list[tuple[str, Callable[[], None], dict[str, Any]]]:
     """(id, callable, cron fields) for every scheduled job."""
     return [
-        ("brief", lambda: morning_brief(api), {"hour": brief_hour(), "minute": 0}),
+        (
+            "brief",
+            lambda: morning_brief(api, skip_if_made=True),
+            {"hour": brief_hour(), "minute": 0},
+        ),
         (
             "reconcile",
             lambda: end_of_day(api),

@@ -153,7 +153,9 @@ _ICONS = {"/icon-180.png": 180, "/icon-192.png": 192, "/icon-512.png": 512}
 
 def _store_health(body: bytes) -> str:
     reply = health.ingest(_vault(), body, daily.logical_day(datetime.now(tz())))
-    logger.info("health inlet: %s", reply)
+    # The log keeps the gist; what was ignored can quote the sender's data.
+    gist, _, ignored = reply.partition("; ignored: ")
+    logger.info("health inlet: %s%s", gist, " (some ignored)" if ignored else "")
     return reply + "\n"
 
 
@@ -320,7 +322,7 @@ def _make_handler(
                 self._not_found()
             elif health_path and path == health_path:
                 self._store_health()
-            elif watch_inlet and path in ("/watch/log", "/watch/ask"):
+            elif watch_inlet and path in watch.PATHS:
                 self._watch(path)
             elif site and path == "/login":
                 self._login()

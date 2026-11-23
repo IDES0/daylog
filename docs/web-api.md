@@ -71,7 +71,7 @@ The status site is the app, and the only interface (Telegram was retired on
 - `GET /api/devices` → `{"devices": [{"id", "name", "created", "revoked"}], "urls": {"log", "ask"}}`;
   `POST /api/devices` `{"name"}` → `{"device", "token", "urls"}` (the token only here; 409 past 10 devices);
   `POST /api/devices/{id}/revoke` → `{"ok": true}` (404 if unknown or already revoked). The watch
-  itself calls `POST /watch/log` / `/watch/ask` (not under `/api/`) with `Authorization: Bearer <token>`
+  itself calls `POST /watch/log` / `/watch/ask` / `/watch/brief` (not under `/api/`) with `Authorization: Bearer <token>`
   and `{"text"}`, and gets plain text back: 202 for a note accepted or an answer still coming (as a
   notification), 200 with the answer, 400/401/413/429 otherwise.
 
