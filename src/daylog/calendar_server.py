@@ -30,6 +30,7 @@ from daylog.disciplines import Graph
 from daylog.runtime import tz
 from daylog.vault import Vault
 from daylog.webapp import api as webapi
+from daylog.webapp import watch
 
 logger = logging.getLogger(__name__)
 
@@ -167,6 +168,8 @@ def _make_handler(
     guard = web.LoginGuard(password) if password and site else None
     # One API per server too: it holds the open cards and the web chat.
     api = (app or webapi.Api()) if site else None
+    # The watch inlet shares the app's jobs, chat and cards (webapp/watch.py).
+    watch_inlet = watch.Watch(api) if api is not None else None
     if api is not None and app is None:
         # Web notes a restart interrupted are logged now (see webapp/jobs.py).
         try:
@@ -307,6 +310,8 @@ def _make_handler(
                 self._not_found()
             elif health_path and path == health_path:
                 self._store_health()
+            elif watch_inlet and path in ("/watch/log", "/watch/ask"):
+                self._watch(path)
             elif site and path == "/login":
                 self._login()
             elif site and path == "/logout":
@@ -413,6 +418,22 @@ def _make_handler(
                 return
             logger.warning("status login refused")
             self._land()
+
+        def _watch(self, path: str) -> None:
+            # Its own token per device (webapp/watch.py); never the session.
+            assert watch_inlet is not None
+            headers = {k.lower(): v for k, v in self.headers.items()}
+            body = self._body(watch.MAX_BODY_BYTES)
+            if body is None:
+                self._reply(413, "That's too long for one note.\n")
+                return
+            links = webapi.book_base(webapi.Request("POST", path, headers=headers))
+            try:
+                code, text = watch_inlet.handle(watch.Request(path, headers, body, links))
+            except Exception:
+                logger.exception("watch inlet failed")
+                code, text = 500, "Something went wrong. Try the app."
+            self._reply(code, text + "\n")
 
         def _store_health(self) -> None:
             body = self._body(health.MAX_EXPORT_BYTES)

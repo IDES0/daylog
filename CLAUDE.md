@@ -20,7 +20,10 @@ interface; Telegram was retired on 2026-10-24.
   slot; it's a pending card until the user accepts). The web
   app writes only behind the session + `X-Daylog` CSRF header, through the
   service functions and confirm cards (docs/web-api.md).
-- Every `/api/*` handler checks the session first.
+- Every `/api/*` handler checks the session first. The one other way in is
+  the watch inlet (`/watch/log`, `/watch/ask`; webapp/watch.py): a key per
+  device, stored hashed, revocable in the app, able only to log a note or
+  ask the assistant. Anything inferred still waits as a card.
 - The app never contacts anyone but the user. Notifications (Web Push) go
   only to the user's own devices, one per event. It may draft a message to
   someone else, and send it only after the user taps Confirm on the exact

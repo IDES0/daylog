@@ -41,7 +41,10 @@ The ledger is the foundation; the assistant is only as good as its grounding.
 - **Every `/api/*` handler checks the session first.** The app and every
   `/api/*` call need the session cookie the password line sets, and every
   write also the `X-Daylog: 1` header with a same-host Origin; the health
-  inlet and the calendar feed have their own secrets.
+  inlet and the calendar feed have their own secrets. The watch inlet
+  (`/watch/log`, `/watch/ask`) is the one other way in: a bearer key per
+  device, kept only as a hash and revocable in the app, that can log a note
+  or ask the assistant and nothing else.
 - **Hard dates never move silently.** A hard goal or itinerary date changes
   only after a Confirm card. Soft dates move freely and record every
   move in `slip_history`; a goal that has slipped four times is the signal.
@@ -194,6 +197,7 @@ The ledger is the foundation; the assistant is only as good as its grounding.
 | 2026-11-06 | Booking pages grow into a tool: pages `extends` a base (a `template: true` page never served itself), so a personal link is a few lines over shared times and wording; times are a `weekly` pattern over a `horizon` plus per-date overrides; six preset `theme`s (colours and fonts only, no freeform CSS on a page strangers see); `once: true` one-time links; `guest` pre-fills the name; `book.<domain>/` serves `booking/index.yaml` as the generic page. A slot booked on any page is now taken on all, since they share one person's time. The user can manage them in the app (You → Booking pages: links, bookings, YAML edit, open/close, delete, cancel a booking) and chat proposes new or changed pages as confirm cards. Considered keying the custom page on `?name=` and kept one link per page instead: a name is guessable and collides, and one link can be closed alone; `?name=` stays a pre-fill. The user asked for something more versatile than one hand-written page per person |
 | 2026-11-07 | Discipline totals (and the goals and Where breakdowns counted from them) count sessions, not logged activities: an activity with timed `sessions` counts one per session, so three hour-long Waco Surf sessions in a day are 3, not 1. Days done stay the unit for the weekly summaries |
 | 2026-11-23 | The user's devices become the source of truth for when and how long. Apple Watch data arrives through **Health Auto Export** (an iOS app that pushes Apple Health to a URL on a schedule) instead of the hand-built Shortcut the To do sketched: a Shortcut can't read sleep stages or heart-rate summaries reliably and needs rebuilding per metric, while the app sends metrics, sleep (summarised or as stage segments) and workouts as JSON, and backfills any range. The one inlet also takes screen time: Mac sessions per app and site from **ActivityWatch** (free, local, handles idle and lock; `tools/screentime` forwards app + bare domain + times, never titles or URLs), iPhone per-app daily totals from the iOS 26 Shortcuts action "Get App & Website Data", and optional opened/closed events for a few apps when the exact time matters. iPhone usage can't be exported any other way: Apple's Screen Time API keeps raw data inside a sandbox, and the Biome files that sync it to the Mac are undocumented. Timed records live in one file per day (`health/days/`), so a year's backfill doesn't grow one file without bound, and a post touching many days is one commit. The week calendar draws a told activity matched to a workout (same sport through the discipline graph, nearest in time; a generic "Other" or "Water Sports" only by overlap) at the watch's times, a workout never told as its own block, sleep full width under the day (tonight's night split at the 4am cutoff), and screen time as a strip at the column's edge so it never squeezes the activities. A Health tab shows trends against the user's own 28-day usual and correlations worth a glance (sleep vs energy, screen tonight vs sleep tomorrow), labelled as a glance, not a finding; nothing measured is scored. The brief gets a few measured lines (one line at most in the brief, only when it changes the day), the weekly review the week's averages, chat a `get_health` tool. The subscribed calendar feed gets the same day as timed events for the last 120 days (told activities marked by how sure their time is, workouts, each night once, screen stretches over half an hour), so Google or Apple Calendar shows what the day actually held. The measured data stays private: not on the guest view, and the matched times are derived, never written back into the journal |
+| 2026-11-23 | Voice from the Apple Watch, through two Shortcuts rather than a native app. watchOS has no browser and a Shortcut can't keep the session cookie, so the user approved a second way in: `POST /watch/log` and `/watch/ask` with a bearer key per device, made in the app (You → Watch & Shortcuts), shown once, stored as a SHA-256 hash in `devices.yaml`, revocable there. Outside `/api/*`, so the session-and-CSRF rule stays whole; a key can only log a note (the Log tab's pipeline, spooled, answered at once, then one notification with what was logged) or ask (the Chat tab's conversation; an answer within ~20 s comes back as plain text to show or speak, a slower one as one notification). The watch can't confirm, so cards wait in the app and the notification says how many. 30 requests per device per 10 minutes, and after 10 bad keys in 15 minutes the inlet refuses everyone, since chat spends money. Text only: watch Shortcuts can't record audio, so watch notes use Apple's dictation. A native watch app (real audio, Keychain) stays the next step if this sees daily use |
 
 ## Not built
 
@@ -219,15 +223,11 @@ breaks its terms).
   journal time from email is an inferred fact, so it goes through a
   confirm card ("Surf on Nov 2 at 16:00, 18:00, 19:00 from 3 Waco Surf
   bookings?"); flights also feed the trail (transit legs) the same way.
-- **Voice from the Apple Watch.** watchOS has no browser, so the PWA can't
-  run there. Cheapest: two watch Shortcuts (Dictate Text → POST; "Log" and
-  "Ask", on a complication, Siri phrase or the Action button) against a new
-  token-authenticated path outside `/api/*` (per-device token, hashed,
-  revocable, log/chat only), with chat's reply arriving as one Web Push
-  (the PWA's notifications already mirror to the watch). A native watch app
-  (real audio to `/api/voice`, Keychain token) is the step after, at $99/yr
-  and a few days of Swift. Needs the user's decision: it is a second way in
-  besides the session cookie.
+- **A native watch app.** Real audio to `/api/voice` (Whisper with the
+  vocabulary instead of Apple's dictation), the key in the Keychain, a
+  complication; $99/yr and a few days of Swift. Only if the Shortcuts see
+  daily use and dictation proves the limit. It could also replace Health
+  Auto Export, since it would need the developer account anyway.
 - **"Log this" for a workout the journal never mentioned.** One tap on the
   calendar's measured block to add it as an activity (a confirm card, since
   it writes the journal).

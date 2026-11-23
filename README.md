@@ -59,7 +59,8 @@ told before it in the first free stretch (or just before the first timed
 thing, when it was told first). Overlaps sit side by side in lanes. Each
 block shows its name and, when tall enough, its start; tapping a day
 opens an hour-by-hour column with every block's times, session ("2/3")
-and detail, then the summary. Times from email and from a watch are
+and detail, then the summary. Apple Watch workouts replace these
+estimates with measured times (see **Health** below); times from email are
 designed in `docs/DESIGN.md` (To do), not built.
 - **Corrections**: say a correction out loud ("actually I only surfed 1
   hour, not 2") and extraction is given the day's entry so far to resolve
@@ -345,6 +346,16 @@ the measurements are the source of truth for when and how long:
   the weekly review the week's averages and workouts; chat a `get_health`
   tool.
 
+### From the Apple Watch
+Two Shortcuts, **Log to daylog** and **Ask daylog** (setup:
+[`docs/watch-setup.md`](docs/watch-setup.md)), run on the watch from Siri, a
+complication or the Action button. They post dictated text to `/watch/log`
+or `/watch/ask` with a per-device key made in You → Watch & Shortcuts
+(shown once, stored hashed, revocable). A note goes through the Log tab's
+pipeline and one notification says what was logged; a question goes into
+the Chat tab's conversation and the answer is spoken back if it's quick,
+else sent as one notification. Cards still wait in the app.
+
 ### Notifications
 What the app does on its own arrives as a Web Push notification on the
 devices that turned it on (You → Session; needs the VAPID keys below), one
@@ -422,6 +433,7 @@ src/daylog/
   booking.py       Booking pages: the slots a page offers, a guest's
                    booking, Accept/Decline; the page is webapp/static/book.html.
   dashboard.py     The read-only status page (one static HTML page).
+  webapp/watch.py  The watch inlet: per-device keys, /watch/log, /watch/ask.
   health.py        The device inlet: Health Auto Export, screen time and the
                    simple daily shape, merged into health.yaml and health/days/.
   measures.py      Derived from the day files: screen sessions and blocks,

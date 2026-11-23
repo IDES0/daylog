@@ -68,6 +68,12 @@ The status site is the app, and the only interface (Telegram was retired on
 - `GET /api/map` → the same payload `dashboard.future_map` builds (`{"here": {...}, "stops": [...]}`).
 - `GET /api/calendar?week=YYYY-MM-DD` → `{"week_of": "2026-10-12", "days": [{"date": "…", "summary": "…", "blocks": [{"label": "surf", "start": 6.0, "hours": 2, "guess": false, "hue": 200}]}], "prev": "2026-10-05", "next": null}`
 - `GET /api/health?days=30` → trends from the watch, phone and computer (shape below).
+- `GET /api/devices` → `{"devices": [{"id", "name", "created", "revoked"}], "urls": {"log", "ask"}}`;
+  `POST /api/devices` `{"name"}` → `{"device", "token", "urls"}` (the token only here; 409 past 10 devices);
+  `POST /api/devices/{id}/revoke` → `{"ok": true}` (404 if unknown or already revoked). The watch
+  itself calls `POST /watch/log` / `/watch/ask` (not under `/api/`) with `Authorization: Bearer <token>`
+  and `{"text"}`, and gets plain text back: 202 for a note accepted or an answer still coming (as a
+  notification), 200 with the answer, 400/401/413/429 otherwise.
 
 ### Journal
 - `GET /api/journal?from=YYYY-MM-DD&to=YYYY-MM-DD` → `{"days": [{"date", "summary", "activities", "meals", "felt", "milestones", "location", "notes": <count of ### HH:MM notes>}]}` (default: last 14 days, newest first)

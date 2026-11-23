@@ -1622,7 +1622,9 @@ function initYou() {
   const reports = card(6, "Reports");
   const changes = card(7, "Recent changes");
   const account = card(8, "Session");
-  fill(root, h("div.grid", disc, h("div.col", goals, ranks, book), h("div.col", miles, review, reports, changes, account)));
+  const watchCard = card(8, "Watch & Shortcuts");
+  fill(root, h("div.grid", disc, h("div.col", goals, ranks, book), h("div.col", miles, review, reports, changes, watchCard, account)));
+  initDevices(watchCard);
   initBooking(book);
 
   initDisciplines(disc);
@@ -1838,6 +1840,61 @@ function initNotifications(box) {
     show();
   };
   show();
+}
+
+// ---- watch & shortcuts (webapp/watch.py): a key per device, shown once,
+// for the two Shortcuts that log a note or ask the assistant from the watch.
+
+function initDevices(c) {
+  const reload = () => load(c.body, () => api("/api/devices"), d => renderDevices(c.body, d, reload));
+  reload();
+}
+
+function renderDevices(body, d, reload) {
+  const live = (d.devices || []).filter(x => !x.revoked);
+  const name = h("input.input", { type: "text", placeholder: "Apple Watch", maxlength: "40", "aria-label": "Device name" });
+  const out = h("div", { "aria-live": "polite" });
+  const add = h("button.btn.primary", { type: "button" }, icon("plus"), "Add a device");
+  add.addEventListener("click", async () => {
+    add.disabled = true;
+    try {
+      const r = await post("/api/devices", { name: name.value }, NORMAL);
+      fill(out, newKey(r));
+      name.value = "";
+    } catch (e) {
+      fill(out, errorBox(e));
+    } finally { add.disabled = false; }
+  });
+  const revoke = async x => {
+    if (!await confirmSheet(`Revoke ${x.name}?`, "Its Shortcuts stop working at once. You can add it again with a new key.", "Revoke", true)) return;
+    try { await post(`/api/devices/${x.id}/revoke`, {}, NORMAL); announce("Revoked."); reload(); } catch (e) { fill(out, errorBox(e)); }
+  };
+  fill(body,
+    h("p.muted", { style: { "font-size": "14px" } },
+      "Log a note or ask the assistant from your Apple Watch (or Siri, or the Action button) with two Shortcuts. Each device gets its own key; revoke it here if one is lost. What it logs is checked the same way: anything to confirm waits here as a card."),
+    live.length ? h("ul.list", live.map(x => li(x.name, `since ${short(x.created)}`,
+      h("button.btn.ghost.sm", { type: "button", onclick: () => revoke(x) }, "Revoke")))) : null,
+    h("div.row", { style: { "margin-top": "12px", gap: "8px" } }, name, add),
+    out);
+}
+
+function newKey(r) {
+  const key = r.token;
+  const copy = h("button.btn.sm", { type: "button" }, "Copy key");
+  copy.addEventListener("click", async () => {
+    try { await navigator.clipboard.writeText(key); announce("Key copied."); copy.textContent = "Copied"; } catch { announce("Select the key and copy it."); }
+  });
+  const urls = r.urls || {};
+  return h("div.stack", { style: { "margin-top": "12px" } },
+    okMsg(`${r.device.name} added. This key is shown once.`),
+    h("code.key-box", { style: { display: "block", "word-break": "break-all", padding: "8px", "user-select": "all" } }, key),
+    h("div.btns", copy),
+    h("dl.kv.measured",
+      h("dt", "Log"), h("dd", urls.log || "/watch/log"),
+      h("dt", "Ask"), h("dd", urls.ask || "/watch/ask"),
+      h("dt", "Header"), h("dd", "Authorization: Bearer <key>")),
+    h("p.muted", { style: { "font-size": "13px" } },
+      "In Shortcuts: Dictate Text → Get Contents of URL (POST, the header above, JSON body text = Dictated Text) → Show Result or Speak Text. Turn on Show on Apple Watch. Step by step: docs/watch-setup.md in the repo."));
 }
 
 function b64urlBytes(s) {
