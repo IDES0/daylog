@@ -946,7 +946,7 @@ class Api:
             def apply(answer: str, i: int = i, name: str = str(proposal.get("name"))) -> Outcome:
                 if answer == "skip":
                     return Outcome(f"Skipped {name}.")
-                return self._add_places(batch, [i])
+                return self._add_places(batch, [i], rank=True)
 
             cards.append(
                 self.cards.add(
@@ -959,7 +959,9 @@ class Api:
             )
         return cards
 
-    def _add_places(self, batch: dict[str, Any], indexes: list[int]) -> Outcome:
+    def _add_places(self, batch: dict[str, Any], indexes: list[int], rank: bool = False) -> Outcome:
+        """Add the chosen proposals; with `rank`, offer to rank a rankable one right away
+        (a new restaurant from a note is otherwise never asked about)."""
         v = self._vault()
         try:
             new_ids = research_flow.add_proposals(v, batch, indexes)
@@ -967,8 +969,17 @@ class Api:
             logger.exception("adding places failed")
             return Outcome("Saving failed — nothing was added.", ok=False)
         index = PlaceIndex(v.read_places())
+        cards = []
+        if rank:
+            ranked = v.read_yaml(rankings.RANKINGS_FILE, {})
+            for pid in new_ids:
+                node = index.get(pid)
+                category = rankings.category_for(node.get("kind")) if node else None
+                if node and category and pid not in rankings.ranked(ranked, category):
+                    cards.append(self._rank_card(pid, category, str(node.get("name", pid))))
         return Outcome(
-            f"Added: {', '.join(index.path_name(p) for p in new_ids) or 'already added'}"
+            f"Added: {', '.join(index.path_name(p) for p in new_ids) or 'already added'}",
+            cards=cards,
         )
 
     def _mentions_in_background(self, days: list[date]) -> None:

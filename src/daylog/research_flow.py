@@ -19,7 +19,7 @@ from dataclasses import dataclass
 from datetime import date, datetime
 from typing import Any
 
-from daylog import brief, goals, llm, research, trail
+from daylog import brief, goals, llm, rankings, research, trail
 from daylog.places import PlaceIndex
 from daylog.runtime import tz
 from daylog.vault import Vault
@@ -225,6 +225,36 @@ def _where(v: Vault, index: PlaceIndex) -> tuple[Any | None, str]:
     return node, str(label)
 
 
+def _offers(
+    v: Vault, mentions: list[research.Mention], focus: Any | None
+) -> research.Findings | None:
+    """Free Add proposals for named, rankable places the tree doesn't know yet."""
+    rankable = [m for m in mentions if rankings.category_for(m.kind)]
+    if not rankable or focus is None:
+        return None
+    proposals = []
+    seen: set[str] = set()
+    for i, m in enumerate(rankable):
+        name = m.text.strip()
+        if name.lower() in seen:
+            continue
+        seen.add(name.lower())
+        what = f": {m.detail}" if m.detail else ""
+        proposals.append(
+            {
+                "ref": f"note{i}",
+                "name": name,
+                "kind": m.kind,
+                "parent_id": focus["id"],
+                "mention": m.text,
+                "confidence": "inferred",
+                "description": f"From your note on {m.day.isoformat()}{what}"[:240],
+            }
+        )
+    _mark_looked_up(v, rankable)
+    return research.Findings(new_places=proposals)
+
+
 def lookup_mentions(
     v: Vault, days: list[date], quiet: bool = True
 ) -> tuple[str | None, research.Findings | None]:
@@ -235,7 +265,11 @@ def lookup_mentions(
     `quiet` is the automatic run after a note: it only matches names against
     places already known, which is free. Searching the web for a new place
     costs money and runs only when asked (/backfill, the assistant) — a
-    passing mention of a 1am shisha bar once cost ~$4 in automatic lookups."""
+    passing mention of a 1am shisha bar once cost ~$4 in automatic lookups.
+    What it can still do for free: offer a named restaurant, bar or other
+    rankable place it doesn't know as a new place under where the user is
+    (confidence `inferred`, no web), so it can be added and ranked. Each name
+    is offered once (stamped like a lookup), so skipping it ends it."""
     mentions: list[research.Mention] = []
     for day in days:
         entry = v.read_journal_entry(day)
@@ -252,9 +286,9 @@ def lookup_mentions(
         if (ids := index.resolve(m.text, within=region["id"] if region else None))
     ]
     linked_free = apply_matches(v, known, days) if known else []
-    if quiet:
-        return None, None
     matched = {k["mention"] for k in known}
+    if quiet:
+        return None, _offers(v, [m for m in mentions if m.text not in matched], focus)
     mentions = [m for m in mentions if m.text not in matched]
     with _in_flight_lock:
         mentions = [m for m in mentions if (m.day, m.text) not in _in_flight]
