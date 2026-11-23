@@ -49,7 +49,7 @@ MAX_METRICS = 24
 MAX_EXPORT_METRICS = 80
 MAX_DAY_SCREEN = 4000
 MAX_SESSION_HOURS = 16
-_KEY = re.compile(r"^[a-z][a-z0-9_]{0,31}$")
+_KEY = re.compile(r"^[a-z][a-z0-9_]{0,47}$")
 _NUMBER = re.compile(r"-?\d+(?:\.\d+)?")
 _STAMP = re.compile(
     r"^(\d{4}-\d{2}-\d{2})[ T](\d{2}):(\d{2})(?::(\d{2}))?(?:\.\d+)?\s*(Z|[+-]\d{2}:?\d{2})?$"
@@ -324,7 +324,8 @@ def _sleep_record(
         "rem_h": _round(stages.get("rem")),
         "core_h": _round(stages.get("core")),
         "awake_h": _round(stages.get("awake")),
-        "in_bed_h": _round(in_bed),
+        # The phone sends 0 when it has no in-bed data; that's unknown, not zero.
+        "in_bed_h": _round(in_bed) if in_bed else None,
         "source": _label(source),
     }
 

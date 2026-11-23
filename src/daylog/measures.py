@@ -35,6 +35,7 @@ MATCH_WINDOW_HOURS = 2.0
 # (or one under it); names not listed are tried as they are.
 WORKOUT_LABELS: dict[str, tuple[str, ...]] = {
     "surfing": ("surf", "surfing"),
+    "surfing sports": ("surf", "surfing"),
     "swimming": ("swim", "swimming"),
     "pool swim": ("swim", "swimming"),
     "open water swim": ("swim", "swimming"),
@@ -62,7 +63,15 @@ WORKOUT_LABELS: dict[str, tuple[str, ...]] = {
     "boxing": ("boxing",),
     "kickboxing": ("kickboxing", "boxing"),
     "martial arts": ("martial_arts",),
+    "underwater diving": ("dive", "freedive", "scuba", "diving"),
+    "snow sports": ("snow", "snowboard", "ski"),
 }
+# Shorter than this is an accidental start (a 1-minute "surf" at 1am), not a session.
+MIN_WORKOUT_MINUTES = 3.0
+# Same-kind workouts this close are one session told in pieces (a Surfline
+# session saved as two after a pause), joined before matching.
+JOIN_GAP_MINUTES = 15.0
+
 # Workouts that say nothing about the sport: matched by time alone.
 GENERIC_WORKOUTS = {"other", "water sports", "mixed cardio", "cross training", "water fitness"}
 
@@ -179,9 +188,59 @@ def screen_minutes(records: dict[str, Any] | None) -> dict[str, dict[str, float]
     }
 
 
+def sessions(workouts: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """The day's workouts as sessions: accidental blips dropped, and same-kind
+    pieces less than JOIN_GAP_MINUTES apart joined (minutes and kcal added,
+    the higher max heart rate kept, the average weighted by minutes)."""
+    timed, untimed = [], []
+    for w in workouts:
+        start, end = wall(w.get("start")), wall(w.get("end"))
+        if not start or not end:
+            untimed.append(dict(w))  # nothing to join or measure: kept as it came
+        elif (end - start).total_seconds() >= MIN_WORKOUT_MINUTES * 60:
+            timed.append((start, end, dict(w)))
+    timed.sort(key=lambda t: t[0])
+    out: list[tuple[datetime, datetime, dict[str, Any]]] = []
+    for start, end, w in timed:
+        if out:
+            p_start, p_end, prev = out[-1]
+            same = str(prev.get("kind")).lower() == str(w.get("kind")).lower()
+            if same and (start - p_end).total_seconds() <= JOIN_GAP_MINUTES * 60:
+                out[-1] = (p_start, max(p_end, end), _join(prev, w, end))
+                continue
+        out.append((start, end, w))
+    return [w for _, _, w in out] + untimed
+
+
+def _join(a: dict[str, Any], b: dict[str, Any], end: datetime) -> dict[str, Any]:
+    def num(w: dict[str, Any], key: str) -> float:
+        value = w.get(key)
+        return (
+            float(value) if isinstance(value, int | float) and not isinstance(value, bool) else 0.0
+        )
+
+    joined = dict(a)
+    joined["end"] = (
+        b["end"] if (wall(b.get("end")) or end) >= (wall(a.get("end")) or end) else a["end"]
+    )
+    joined["pieces"] = int(a.get("pieces") or 1) + 1
+    for key in ("minutes", "kcal", "distance_km"):
+        if a.get(key) is not None or b.get(key) is not None:
+            joined[key] = round(num(a, key) + num(b, key), 2)
+    if a.get("hr_max") is not None or b.get("hr_max") is not None:
+        joined["hr_max"] = max(num(a, "hr_max"), num(b, "hr_max"))
+    ma, mb = num(a, "minutes"), num(b, "minutes")
+    if a.get("hr_avg") is not None and b.get("hr_avg") is not None and ma + mb > 0:
+        joined["hr_avg"] = round((num(a, "hr_avg") * ma + num(b, "hr_avg") * mb) / (ma + mb))
+    return joined
+
+
 def _labels(kind: str) -> tuple[str, ...]:
     key = kind.strip().lower()
-    return WORKOUT_LABELS.get(key, (key, slug(key)))
+    if key in WORKOUT_LABELS:
+        return WORKOUT_LABELS[key]
+    base = key.removesuffix(" sports").removesuffix(" sport")  # Apple's "Paddle Sports"
+    return WORKOUT_LABELS.get(base, (key, slug(key), base, slug(base)))
 
 
 def same_sport(graph: Graph | None, activity_type: str, workout_kind: str) -> bool:

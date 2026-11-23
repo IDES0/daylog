@@ -332,3 +332,17 @@ def test_the_inlet_answers_a_url_check(vault: Vault, monkeypatch: pytest.MonkeyP
             assert conn.getresponse().status == code, (method, path)
     finally:
         httpd.shutdown()
+
+
+def test_zero_in_bed_is_unknown_and_long_metric_names_are_kept() -> None:
+    first: dict[str, Any] = SLEEP_SUMMARY["data"][0]  # type: ignore[assignment]
+    night = {**first, "inBed": 0}
+    metric = {
+        "name": "walking_double_support_percentage",
+        "units": "%",
+        "data": [{"date": "2026-11-20 00:00:00 -0600", "qty": 27.5}],
+    }
+    batch = health.parse_export(_hae([dict(SLEEP_SUMMARY, data=[night]), metric]))
+    assert "in_bed_h" not in batch.days[TODAY]["sleep"][0]
+    assert "in_bed_h" not in batch.daily[TODAY]
+    assert batch.daily[TODAY]["walking_double_support_percentage"] == 27.5
