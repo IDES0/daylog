@@ -717,6 +717,20 @@ def read_days(vault: Vault, start: date, end: date) -> dict[date, dict[str, Any]
 # -- the inlet ------------------------------------------------------------------------
 
 
+_NOUNS = {
+    "sleep": "night of sleep",
+    "workouts": "workout",
+    "screen": "screen session",
+    "screen_events": "screen event",
+    "screen_totals": "app total",
+}
+
+
+def _count(n: int, noun: str) -> str:
+    head, _, tail = noun.partition(" ")
+    return f"{n} {head}{'' if n == 1 else 's'}{' ' + tail if tail else ''}"
+
+
 def ingest(vault: Vault, body: bytes, today: date) -> str:
     """Store one post to the inlet (any of the three shapes); returns the reply line."""
     if len(body) > MAX_EXPORT_BYTES:
@@ -758,8 +772,8 @@ def ingest(vault: Vault, body: bytes, today: date) -> str:
         if files:
             vault.write_yaml_many(files, f"health: {span}")
     counts = batch.counts()
-    parts = [f"{len(batch.daily)} days of numbers"] if batch.daily else []
-    parts += [f"{n} {kind.replace('_', ' ')}" for kind, n in sorted(counts.items())]
+    parts = [_count(len(batch.daily), "day") + " of numbers"] if batch.daily else []
+    parts += [_count(n, _NOUNS[kind]) for kind, n in sorted(counts.items())]
     note = f"; ignored: {', '.join(batch.ignored[:8])}" if batch.ignored else ""
     changed = "" if files else " (nothing new)"
     return f"saved {', '.join(parts)} for {span}{changed}{note}"

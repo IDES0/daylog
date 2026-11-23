@@ -282,7 +282,7 @@ def test_ingest_writes_one_commit_and_reports(vault: Vault) -> None:
     body = json.dumps(_hae([STEPS, SLEEP_SUMMARY], [SURF_V2])).encode()
     reply = health.ingest(vault, body, TODAY)
     assert reply.startswith(
-        "saved 2 days of numbers, 1 sleep, 1 workouts for 2026-11-19..2026-11-20"
+        "saved 2 days of numbers, 1 night of sleep, 1 workout for 2026-11-19..2026-11-20"
     )
     assert vault.read_yaml(health.FILE, {})["2026-11-20"]["sleep_h"] == 7.1
     days = health.read_days(vault, date(2026, 11, 18), TODAY)

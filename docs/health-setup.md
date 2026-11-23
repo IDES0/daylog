@@ -46,7 +46,7 @@ review and chat read the same numbers.
    to the same URL, once for metrics and once for workouts. It is safe to
    repeat.
 5. Check: the app shows the reply text, e.g. `saved 7 days of numbers, 7
-   sleep, 3 workouts for 2026-11-16..2026-11-22`. Anything it couldn't
+   nights of sleep, 3 workouts for 2026-11-16..2026-11-22`. Anything it couldn't
    read is listed after `ignored:`.
 
 iOS only lets apps read Health while the phone is unlocked, so syncs
