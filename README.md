@@ -206,8 +206,11 @@ until its variable is set, and 404s everything else:
 
 - **Calendar feed** at `/calendar/<CALENDAR_FEED_SECRET>.ics`. Google and
   Apple Calendar subscribe to it by URL. Built fresh on every request: goal
-  and itinerary dates as all-day events, and one event per journal day with
-  the day's summary. Read-only: editing an event in the calendar app changes
+  and itinerary dates as all-day events, one event per journal day with
+  the day's summary, and, for the last 120 days, the day itself as timed
+  events: each told activity (`~` estimated, `≈` placed by order), watch
+  workouts at their real times (⌚, with heart rate and kcal), each night of
+  sleep, and screen-time stretches of half an hour or more. Read-only: editing an event in the calendar app changes
   nothing in the vault. Refresh is the calendar app's own polling interval.
   It carries journal summaries, so treat the URL like a password.
 - **Status site** at `/`, meant for its own domain

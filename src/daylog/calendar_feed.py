@@ -3,7 +3,9 @@
 Pure logic — no filesystem access (vault.py owns that; the caller passes
 in already-loaded data). One VEVENT per goal/itinerary deadline or
 target, plus one all-day VEVENT per day with a journal entry, plus a timed
-VEVENT per accepted booking. This is a
+VEVENT per accepted booking and, for recent days, one per block of the
+week calendar (see `block_events`): what was told, the watch's workouts,
+sleep and long stretches of screen time. This is a
 view into daylog's data for a calendar app to render: nothing here
 writes back to the vault, and a subscribed calendar is read-only by
 construction — editing an event in Google/Apple Calendar has no effect
@@ -14,11 +16,13 @@ from __future__ import annotations
 
 import logging
 import re
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta, tzinfo
 from typing import Any
 
 from icalendar import Calendar, Event
 
+from daylog.health import wall
+from daylog.timeline import Block
 from daylog.vault import JournalEntry
 
 logger = logging.getLogger(__name__)
@@ -117,6 +121,87 @@ def _timed_events(cal: Calendar, timed: list[dict[str, Any]]) -> None:
         if item.get("description"):
             event.add("description", item["description"])
         cal.add_component(event)
+
+
+# A screen-time stretch shorter than this stays off the subscribed calendar.
+FEED_SCREEN_MIN_HOURS = 0.5
+_TIME_MARK = {"measured": "", "said": "", "estimated": "~", "guessed": "≈"}
+_TIME_NOTE = {
+    "measured": "Measured by your watch.",
+    "said": "At the time you said.",
+    "estimated": "Time estimated from what you said.",
+    "guessed": "No time said: placed after what you told before it.",
+}
+
+
+def _block_title(b: Block) -> str:
+    if b.layer == "sleep":
+        asleep = b.facts.get("asleep_h")
+        return f"Sleep {asleep:.1f} h" if isinstance(asleep, int | float) else "Sleep"
+    if b.layer == "screen":
+        device = "iPhone" if b.source == "iphone" else "Mac"
+        minutes = b.facts.get("minutes") or 0
+        return f"{device}: {b.detail} ({int(minutes) // 60} h {int(minutes) % 60:02d})"
+    name = b.kind.replace("_", " ") + (f" {b.session}" if b.session else "")
+    return f"{_TIME_MARK.get(b.time, '')}{name}" + (" ⌚" if b.time == "measured" else "")
+
+
+def _block_description(b: Block) -> str:
+    if b.layer == "screen":
+        apps = b.facts.get("apps") or {}
+        return "Screen time: " + ", ".join(f"{a} {m} min" for a, m in apps.items())
+    if b.layer == "sleep":
+        stages = [
+            f"{k} {b.facts[f'{k}_h']:.1f} h"
+            for k in ("deep", "rem", "core")
+            if b.facts.get(f"{k}_h")
+        ]
+        return "Measured by your watch." + (f" {', '.join(stages)}." if stages else "")
+    facts = [f"{k.replace('_', ' ')} {v}" for k, v in b.facts.items() if k != "kind"]
+    lines = [b.detail, _TIME_NOTE.get(b.time, ""), ", ".join(facts)]
+    return "\n".join(line for line in lines if line)
+
+
+def block_events(day: date, blocks: list[Block], tz: tzinfo) -> list[dict[str, Any]]:
+    """The day's calendar blocks as timed events for the feed (hours past 24 run
+    into the next morning). Short screen stretches are left out, and so is
+    sleep: the calendar splits a night at the day cutoff, the feed doesn't
+    (see `sleep_events`)."""
+    midnight = datetime.combine(day, datetime.min.time())
+    out = []
+    for i, b in enumerate(sorted(blocks, key=lambda b: (b.start, b.layer))):
+        if b.layer == "sleep" or (b.layer == "screen" and b.end - b.start < FEED_SCREEN_MIN_HOURS):
+            continue
+        out.append(
+            {
+                "uid": f"block-{day.isoformat()}-{b.layer}-{i}@daylog",
+                "summary": _block_title(b),
+                "start": (midnight + timedelta(hours=b.start)).replace(tzinfo=tz),
+                "end": (midnight + timedelta(hours=b.end)).replace(tzinfo=tz),
+                "description": _block_description(b),
+            }
+        )
+    return out
+
+
+def sleep_events(nights: list[dict[str, Any]], tz: tzinfo) -> list[dict[str, Any]]:
+    """Each measured night once, at its real start and end."""
+    out = []
+    for night in nights:
+        start, end = wall(night.get("start")), wall(night.get("end"))
+        if not start or not end or end <= start:
+            continue
+        b = Block("sleep", "", 0, 0, "measured", layer="sleep", facts=dict(night))
+        out.append(
+            {
+                "uid": f"sleep-{start:%Y%m%dT%H%M}@daylog",
+                "summary": _block_title(b),
+                "start": start.replace(tzinfo=tz),
+                "end": end.replace(tzinfo=tz),
+                "description": _block_description(b),
+            }
+        )
+    return out
 
 
 def _journal_summary_line(entry: JournalEntry) -> str:

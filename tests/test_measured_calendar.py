@@ -200,3 +200,55 @@ def test_same_sport_through_the_graph() -> None:
     assert not measures.same_sport(g, "wing_foil", "Surfing")
     assert not measures.same_sport(g, "surf", "Other")
     assert measures.clock_hours(datetime(2026, 11, 21, 1, 30), DAY) == 25.5
+
+
+def test_feed_events_for_blocks_and_nights() -> None:
+    from zoneinfo import ZoneInfo
+
+    from daylog import calendar_feed
+
+    tz = ZoneInfo("America/Chicago")
+    fm = {"activities": [{"type": "surf", "at": "08:00", "hours": 2}, {"type": "gym"}]}
+    night = {
+        "start": "2026-11-19 23:30:00 -0600",
+        "end": "2026-11-20 08:30:00 -0600",
+        "asleep_h": 8.2,
+    }
+    records = {
+        "workouts": [SURF],
+        "sleep": [night],
+        "screen": [
+            {
+                "device": "mac",
+                "app": "Code",
+                "start": "2026-11-20 13:00:00",
+                "end": "2026-11-20 13:20:00",
+            },
+            {
+                "device": "mac",
+                "app": "Dia",
+                "site": "youtube.com",
+                "start": "2026-11-20 23:00:00",
+                "end": "2026-11-21 00:00:00",
+            },
+        ],
+    }
+    blocks = timeline.day_blocks(fm, records, None, _graph(), DAY)
+    events = calendar_feed.block_events(DAY, blocks, tz)
+    titles = [e["summary"] for e in events]
+    assert titles == [
+        "surf ⌚",
+        "≈gym",
+        "Mac: youtube.com (1 h 00)",
+    ]  # short Code stretch and sleep left out
+    surf = events[0]
+    assert surf["start"] == datetime(2026, 11, 20, 6, 40, tzinfo=tz)
+    assert "Measured by your watch." in surf["description"] and "hr avg 128" in surf["description"]
+    (sleep,) = calendar_feed.sleep_events([night], tz)
+    assert sleep["summary"] == "Sleep 8.2 h"
+    assert (sleep["start"], sleep["end"]) == (
+        datetime(2026, 11, 19, 23, 30, tzinfo=tz),
+        datetime(2026, 11, 20, 8, 30, tzinfo=tz),
+    )
+    feed = calendar_feed.build_feed([], [], [], events + [sleep]).decode()
+    assert feed.count("BEGIN:VEVENT") == 4

@@ -19,13 +19,14 @@ import logging
 import os
 import re
 import threading
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs, urlsplit
 
-from daylog import booking, calendar_feed, daily, dashboard, health, push, web
+from daylog import booking, calendar_feed, daily, dashboard, health, push, timeline, web
+from daylog.disciplines import Graph
 from daylog.runtime import tz
 from daylog.vault import Vault
 from daylog.webapp import api as webapi
@@ -37,6 +38,31 @@ def _vault() -> Vault:
     return Vault(Path(os.environ.get("VAULT_PATH", "../daylog-vault")))
 
 
+# Days back the feed carries each day's blocks (told, watch, sleep, screen) as timed events.
+FEED_BLOCK_DAYS = 120
+
+
+def _day_blocks_events(vault: Vault, journal_entries: list[Any]) -> list[dict[str, Any]]:
+    today = daily.logical_day(datetime.now(tz()))
+    start = today - timedelta(days=FEED_BLOCK_DAYS)
+    by_day = {e.date: e for e in journal_entries if start <= e.date <= today}
+    measured = health.read_days(vault, start, today + timedelta(days=1))
+    graph = Graph(vault.read_disciplines())
+    events: list[dict[str, Any]] = []
+    for day in sorted({*by_day, *(d for d in measured if d <= today)}):
+        entry = by_day.get(day)
+        blocks = timeline.day_blocks(
+            entry.frontmatter if entry else None,
+            measured.get(day),
+            measured.get(day + timedelta(days=1)),
+            graph,
+            day,
+        )
+        events += calendar_feed.block_events(day, blocks, tz())
+    nights = [n for d, rec in measured.items() if d <= today for n in rec.get("sleep") or []]
+    return events + calendar_feed.sleep_events(nights, tz())
+
+
 def _build_feed_bytes() -> bytes:
     vault = _vault()
     journal_entries = [
@@ -44,11 +70,16 @@ def _build_feed_bytes() -> bytes:
         for entry_date in vault.list_journal_dates()
         if (entry := vault.read_journal_entry(entry_date)) is not None
     ]
+    try:
+        blocks = _day_blocks_events(vault, journal_entries)
+    except Exception:
+        logger.exception("feed: day blocks failed; serving without them")
+        blocks = []
     return calendar_feed.build_feed(
         vault.read_goals(),
         vault.read_itinerary(),
         journal_entries,
-        booking.events(booking.bookings(vault), tz()),
+        booking.events(booking.bookings(vault), tz()) + blocks,
     )
 
 
