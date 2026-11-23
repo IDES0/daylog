@@ -215,6 +215,9 @@ def test_devices_are_managed_in_the_app_and_used_by_the_watch(
         server, "POST", "/watch/ask", {"text": "hi"}, {"Authorization": f"Bearer {made['token']}"}
     )
     assert code == 200 and raw.decode().startswith("Yes. You slept")
+    conn = http.client.HTTPConnection("127.0.0.1", server, timeout=10)
+    conn.request("POST", "/watch/brief", headers={"Authorization": "Bearer dl_nope"})
+    assert conn.getresponse().status == 401  # no body, still reaches the key check
     did = made["device"]["id"]
     assert _http(server, "POST", f"/api/devices/{did}/revoke", {}, signed)[0] == 200
     assert (
