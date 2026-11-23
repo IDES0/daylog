@@ -374,3 +374,20 @@ def test_unreadable_screen_totals_say_why() -> None:
         ("Maps", 9.0),
         ("Safari", 62.0),
     ]
+
+
+def test_ios_screen_time_lines_with_times_in_brackets() -> None:
+    text = "YouTube (54m)\nSafari (1h 2m)\nyoutube.com (20m)\nMessages (45s)"
+    batch = health.parse_export({"screen_totals": {"date": "2026-11-20", "apps": text}}, TODAY)
+    assert batch.ignored == []
+    assert batch.days[TODAY]["screen_totals"] == [
+        {"device": "iphone", "app": "YouTube", "minutes": 54.0},
+        {"device": "iphone", "app": "Safari", "minutes": 62.0},
+        {"device": "iphone", "app": "youtube.com", "minutes": 20.0, "site": True},
+        {"device": "iphone", "app": "Messages", "minutes": 0.8},
+    ]
+    from daylog import measures
+
+    day = health.merge_records({}, batch.days[TODAY])
+    # The website isn't added on top of Safari's time.
+    assert sum(measures.screen_minutes(day)["iphone"].values()) == 116.8
