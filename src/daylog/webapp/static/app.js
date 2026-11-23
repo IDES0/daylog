@@ -722,12 +722,16 @@ function loadCalendar(week) {
   api(`/api/calendar${q}`).then(renderCalendar, e => fill(c.body, errorBox(e, () => loadCalendar(week))));
 }
 
-// How sure a block's time is: said (exact), estimated (~), or placed by order (≈).
-// Lanes for overlaps come from the server (timeline.py).
-const MARK = { said: "", estimated: "~", guessed: "≈" };
+// How sure a block's time is: measured by a device, said (exact), estimated (~),
+// or placed by order (≈). Lanes for overlaps come from the server (timeline.py).
+// Sleep is drawn full width under everything; screen time is a strip at the edge.
+const MARK = { measured: "", said: "", estimated: "~", guessed: "≈" };
 const timeKind = b => b.time || (b.guess ? "guessed" : "estimated");
-const blkClass = b => ({ said: "", estimated: ".est", guessed: ".guess" })[timeKind(b)];
-const blkName = b => words(b.label) + (b.session ? ` ${b.session}` : "");
+const blkClass = b => ({ measured: ".meas", said: "", estimated: ".est", guessed: ".guess" })[timeKind(b)]
+  + (b.layer === "sleep" ? ".sleep" : b.layer === "screen" ? ".screen" : "");
+const SCREEN_W = 14; // % of a day column kept for the screen-time strip
+const blkName = b => b.layer === "screen" ? `${b.source === "iphone" ? "iPhone" : "Mac"}: ${b.detail}`
+  : words(b.label) + (b.session ? ` ${b.session}` : "");
 const blkEnd = b => b.end ?? b.start + (b.hours || 1);
 const blkWhen = b => `${MARK[timeKind(b)]}${clock(b.start)}–${clock(blkEnd(b))}`;
 
@@ -745,18 +749,34 @@ function hourGutter(lo, hi, step) {
   return gutter;
 }
 
-function blockEl(b, lo, inner) {
+// What a measured block's device said: "128 bpm avg · 500 kcal", "deep 1.1 h".
+function blkFacts(b) {
+  const f = b.facts || {};
+  if (b.layer === "sleep") return [f.asleep_h != null ? `${num(f.asleep_h)} h asleep` : "", f.deep_h ? `deep ${num(f.deep_h)}` : "", f.rem_h ? `REM ${num(f.rem_h)}` : ""].filter(Boolean).join(" · ");
+  if (b.layer === "screen") return Object.entries(f.apps || {}).map(([a, m]) => `${a} ${m} min`).join(" · ");
+  if (b.time !== "measured") return "";
+  return [f.kind && words(f.kind).toLowerCase() !== words(b.label).toLowerCase() ? `watch: ${f.kind}` : "watch",
+    f.hr_avg ? `${f.hr_avg} bpm avg` : "", f.hr_max ? `max ${f.hr_max}` : "",
+    f.kcal ? `${f.kcal} kcal` : "", f.distance_km ? `${num(f.distance_km)} km` : ""].filter(Boolean).join(" · ");
+}
+
+function blockEl(b, lo, inner, screen = false) {
   const hours = blkEnd(b) - b.start;
+  // Activities share the column left of the screen strip, when the day has one.
+  const room = b.layer === "activity" || !b.layer ? (screen ? 100 - SCREEN_W : 100) : 100;
+  const box = b.layer === "sleep" ? { left: "0%", width: "100%" }
+    : b.layer === "screen" ? { left: `${100 - SCREEN_W}%`, width: `${SCREEN_W}%` }
+    : { left: `${(room * (b.lane || 0) / (b.lanes || 1)).toFixed(2)}%`, width: `${(room / (b.lanes || 1)).toFixed(2)}%` };
+  const facts = blkFacts(b);
   return h("span.blk" + blkClass(b), {
-    title: `${blkWhen(b)} ${blkName(b)}${b.detail ? ` · ${b.detail}` : ""}`,
+    title: `${blkWhen(b)} ${blkName(b)}${b.detail && b.layer !== "screen" ? ` · ${b.detail}` : ""}${facts ? ` · ${facts}` : ""}`,
     style: {
-      "--h": String(b.hue ?? 210),
+      "--h": String(b.layer === "sleep" ? 250 : b.layer === "screen" ? (b.source === "iphone" ? 330 : 25) : b.hue ?? 210),
       top: `calc(${b.start - lo} * var(--hour))`,
       height: `calc(${hours} * var(--hour) - 2px)`,
-      left: `${(100 * (b.lane || 0) / (b.lanes || 1)).toFixed(2)}%`,
-      width: `${(100 / (b.lanes || 1)).toFixed(2)}%`,
+      ...box,
     },
-  }, inner(hours));
+  }, b.layer === "screen" ? null : inner(hours));
 }
 
 function renderCalendar(d) {
@@ -775,11 +795,12 @@ function renderCalendar(d) {
   const today = todayIso();
   for (const day of days) {
     const head = h("span.cal-head", weekday(day.date, 3), h("b", String(parseD(day.date)?.getDate() ?? "")), scoreBadges(day));
+    const screen = day.blocks.some(b => b.layer === "screen");
     const bodyEl = h("span.cal-body", day.blocks.map(b => blockEl(b, lo, hours => [
       h("span.blk-name", blkName(b)),
       hours >= 0.9 ? h("span.blk-time", `${MARK[timeKind(b)]}${clock(b.start)}`) : null,
-    ])));
-    const has = day.summary || day.blocks.length;
+    ], screen)));
+    const has = day.summary || day.blocks.length || Object.keys(day.measured || {}).length;
     const cls = (has ? "" : ".empty") + (day.date === today ? ".today" : "");
     grid.append(has
       ? h("button.cal-day" + cls, { type: "button", "aria-label": `${weekday(day.date)} ${short(day.date)}`, onclick: () => daySheet(day) }, head, bodyEl)
@@ -789,7 +810,9 @@ function renderCalendar(d) {
   const avgText = [avg.rating != null ? `you ${avg.rating}` : "", avg.assessment != null ? `assistant ${avg.assessment}` : ""].filter(Boolean).join(" · ");
   fill(c.body, grid,
     h("p.cal-key",
-      h("span.key", "Solid"), " where you said the time, ",
+      h("span.key.meas", "Measured"), " by your watch, ",
+      h("span.key.sleep", "sleep"), " and ", h("span.key.screen", "screen time"), " (the strip at the edge) from your devices; ",
+      h("span.key", "solid"), " where you said the time, ",
       h("span.key.est", "~ estimated"), " from what you said, ",
       h("span.key.guess", "≈ placed"), " by the order you told it. Tap a day for its times."),
     h("p.cal-key", h("span.score.you", "7"), " your rating, when you give one · ", h("span.score.ai", "6"), " the assistant's, for how the day's time went toward your goals",
@@ -818,22 +841,43 @@ function scoreRows(day) {
 // One day on a taller clock: every hour marked, each block with its times.
 function dayTimeline(blocks) {
   const [lo, hi] = hourSpan(blocks, Math.min(...blocks.map(b => b.start)), Math.max(...blocks.map(blkEnd)));
+  const screen = blocks.some(b => b.layer === "screen");
   return h("div.day-clock", { style: { "--span": String(hi - lo) }, "aria-hidden": "true" },
     hourGutter(lo, hi, 1),
     h("span.cal-body", blocks.map(b => blockEl(b, lo, hours => [
       h("span.blk-time", blkWhen(b)), " ",
       h("span.blk-name", blkName(b)),
       b.detail && hours >= 0.9 ? h("span.blk-detail", b.detail) : null,
-    ]))));
+      hours >= 1.2 && blkFacts(b) ? h("span.blk-detail", blkFacts(b)) : null,
+    ], screen))));
+}
+
+// The day's numbers from the watch, phone and computer, when any came in.
+function measuredRows(m) {
+  if (!m || !Object.keys(m).length) return null;
+  const mins = x => x >= 60 ? `${Math.floor(x / 60)} h ${pad(Math.round(x % 60))}` : `${Math.round(x)} min`;
+  const rows = [
+    m.sleep_h != null ? ["Sleep", `${num(m.sleep_h)} h${m.bed ? ` · ${m.bed}–${m.wake}` : ""}${m.sleep_deep_h ? ` · deep ${num(m.sleep_deep_h)}` : ""}${m.sleep_rem_h ? ` · REM ${num(m.sleep_rem_h)}` : ""}`] : null,
+    m.resting_hr != null ? ["Resting HR", `${Math.round(m.resting_hr)} bpm`] : null,
+    m.hrv != null ? ["HRV", `${Math.round(m.hrv)} ms`] : null,
+    m.steps != null ? ["Steps", Math.round(m.steps).toLocaleString()] : null,
+    m.active_kcal != null ? ["Active energy", `${Math.round(m.active_kcal)} kcal`] : null,
+    m.exercise_min != null ? ["Exercise", mins(m.exercise_min)] : null,
+    m.workout_min != null ? ["Workouts", `${m.workouts} · ${mins(m.workout_min)}`] : null,
+    m.screen_mac_min != null ? ["Mac screen", mins(m.screen_mac_min)] : null,
+    m.screen_iphone_min != null ? ["iPhone screen", mins(m.screen_iphone_min)] : null,
+  ].filter(Boolean);
+  return rows.length ? h("dl.kv.measured", rows.flatMap(([k, v]) => [h("dt", k), h("dd", v)])) : null;
 }
 
 function daySheet(day) {
   const blocks = [...day.blocks].sort((a, b) => a.start - b.start);
-  const times = blocks.map(b => h("li", `${blkWhen(b)} ${blkName(b)}`));
+  const times = blocks.map(b => h("li", `${blkWhen(b)} ${blkName(b)}${blkFacts(b) ? ` (${blkFacts(b)})` : ""}`));
   const more = h("div");
   const btn = h("button.btn", { type: "button", onclick: () => { btn.remove(); load(more, () => api(`/api/journal/${day.date}`), j => more.append(dayDetail(j, { summary: false, scores: false }))); } }, "Details & transcript");
   openSheet(`${weekday(day.date)}, ${short(day.date)}`, h("div.stack-lg",
     scoreRows(day),
+    measuredRows(day.measured),
     blocks.length ? dayTimeline(blocks) : null,
     times.length ? h("ul.times.sr-only", times) : null,
     day.summary ? md(day.summary) : empty(null, "No summary."),

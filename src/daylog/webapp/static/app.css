@@ -390,6 +390,23 @@ body.kb main { padding-bottom: 0; }
   .cal-key .key.guess { background: hsl(210 30% 17%); border-color: hsl(210 35% 45%); color: hsl(210 30% 70%); }
 }
 /* The day sheet: one column, every hour labelled. */
+/* Measured blocks: a device said when. Sleep sits under everything, full width;
+   screen time is a strip at the right edge of the column. */
+.blk.meas { box-shadow: inset 3px 0 0 hsl(var(--h) 70% 38%), inset 0 0 0 1px hsl(var(--h) 55% 55%); }
+.blk.sleep { z-index: 0; background: repeating-linear-gradient(135deg, hsl(250 40% 92%) 0 6px, hsl(250 40% 89%) 6px 12px); border: 0; box-shadow: none; color: hsl(250 30% 38%); border-radius: 4px; }
+.blk.screen { z-index: 2; padding: 0; border: 0; border-radius: 3px; box-shadow: none; background: hsl(var(--h) 70% 62% / .75); }
+.blk:not(.sleep):not(.screen) { z-index: 1; }
+.cal-key .key.meas { box-shadow: inset 3px 0 0 hsl(210 70% 38%), inset 0 0 0 1px hsl(210 55% 55%); }
+.cal-key .key.sleep { background: hsl(250 40% 90%); color: hsl(250 30% 38%); box-shadow: none; }
+.cal-key .key.screen { background: hsl(25 70% 62% / .75); color: hsl(25 50% 20%); box-shadow: none; }
+@media (prefers-color-scheme: dark) {
+  .blk.sleep { background: repeating-linear-gradient(135deg, hsl(250 22% 18%) 0 6px, hsl(250 22% 15%) 6px 12px); color: hsl(250 40% 78%); }
+  .blk.screen { background: hsl(var(--h) 55% 50% / .7); }
+  .cal-key .key.sleep { background: hsl(250 22% 18%); color: hsl(250 40% 78%); }
+}
+.kv.measured { display: grid; grid-template-columns: max-content 1fr; gap: 4px 14px; margin: 0; font-size: 14px; }
+.kv.measured dt { color: var(--muted); }
+.kv.measured dd { margin: 0; font-family: var(--mono); font-size: 13px; }
 .day-clock { --hour: 44px; display: grid; grid-template-columns: 34px minmax(0, 1fr); gap: 6px; }
 .day-clock .cal-gutter { margin-top: 0; }
 .day-clock .cal-body { background-color: var(--bg); box-shadow: inset 0 0 0 1px var(--line); }

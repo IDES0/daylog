@@ -41,6 +41,8 @@ from daylog import (
     disciplines,
     edits,
     extract,
+    health,
+    health_stats,
     itinerary,
     journal_service,
     llm,
@@ -242,6 +244,7 @@ class Api:
             (r"/api/home", self.home),
             (r"/api/map", self.map),
             (r"/api/calendar", self.calendar),
+            (r"/api/health", self.health_view),
             (r"/api/journal", self.journal),
             (r"/api/journal/(\d{4}-\d{2}-\d{2})", self.journal_day),
             (r"/api/chat", self.chat_history),
@@ -469,10 +472,19 @@ class Api:
         monday = dashboard.week_start(min(week_of, today))
         days = [monday + timedelta(days=i) for i in range(7)]
         entries = v.read_journal_range(monday, days[-1])
+        measured = health.read_days(v, monday, days[-1] + timedelta(days=1))
+        numbers = v.read_yaml(health.FILE, {})
+        graph = Graph(v.read_disciplines())
         out = []
         for d in days:
             entry = entries.get(d)
-            blocks = timeline.day_blocks(entry.frontmatter) if entry else []
+            blocks = timeline.day_blocks(
+                entry.frontmatter if entry else None,
+                measured.get(d),
+                measured.get(d + timedelta(days=1)),
+                graph,
+                d,
+            )
             out.append(
                 {
                     "date": d.isoformat(),
@@ -489,10 +501,16 @@ class Api:
                             "session": b.session,
                             "lane": b.lane,
                             "lanes": b.lanes,
+                            "layer": b.layer,
+                            "source": b.source,
+                            "facts": plain(b.facts),
                             "hue": dashboard._hue(b.kind),
                         }
                         for b in blocks
                     ],
+                    "measured": health_stats.day_numbers(
+                        health.for_day(numbers, d), measured.get(d)
+                    ),
                     **day_scores(entry.frontmatter if entry else None),
                 }
             )
@@ -504,6 +522,35 @@ class Api:
             "averages": {key: review.score_avg(frontmatters, key) for key in extract.SCORE_FIELDS},
             "prev": (monday - timedelta(days=7)).isoformat(),
             "next": nxt.isoformat() if nxt <= today else None,
+        }
+
+    def health_view(self, req: Request, m: re.Match[str]) -> Reply:
+        """Trends from the watch, phone and computer (health_stats.py); `days` 7..400."""
+        v = self._vault()
+        today = self._today()
+        n = _int(req.arg("days"), 30, 7, 400)
+        # Enough history behind the range for its last week's 28-day baseline.
+        span = max(n, health_stats.BASELINE_RECENT + health_stats.BASELINE_BEFORE)
+        start = today - timedelta(days=span - 1)
+        dates = [start + timedelta(days=i) for i in range(span)]
+        records = health.read_days(v, start, today)
+        journal = {d: e.frontmatter for d, e in v.read_journal_range(start, today).items()}
+        rows = health_stats.series(dates, v.read_yaml(health.FILE, {}), records, journal)
+        shown = rows[-n:]
+        in_range = {d: r for d, r in records.items() if d >= today - timedelta(days=n - 1)}
+        measured = [r["date"] for r in rows if set(r) - {"date", "energy", "mood", "focus"}]
+        labels = {k: [label, unit] for k, (label, unit, _) in health_stats.DAILY.items()}
+        labels.update({k: [label, unit] for k, (label, unit) in health_stats.DERIVED.items()})
+        return 200, {
+            "today": today.isoformat(),
+            "days": n,
+            "series": shown,
+            "baselines": health_stats.baselines(rows),
+            "correlations": health_stats.correlations(shown),
+            "workouts": health_stats.workout_totals(in_range),
+            "screen": health_stats.screen_totals(in_range),
+            "labels": labels,
+            "last_measured": measured[-1] if measured else None,
         }
 
     # -- journal ----------------------------------------------------------------------

@@ -337,6 +337,20 @@ class Vault:
         self._push()
         return path
 
+    def write_yaml_many(self, files: dict[str, Any], commit_message: str) -> list[Path]:
+        """Several yaml docs in one commit (a health export touches many days)."""
+        if not files:
+            return []
+        paths = []
+        for name, data in files.items():
+            path = self.path / name
+            path.parent.mkdir(parents=True, exist_ok=True)
+            self._dump(data, path)
+            paths.append(path)
+        self._commit(*paths, message=commit_message)
+        self._push()
+        return paths
+
     # -- disciplines -----------------------------------------------------------
 
     def read_disciplines(self) -> Any:

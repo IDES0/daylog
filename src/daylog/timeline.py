@@ -25,15 +25,28 @@ A block's length comes from `until`, else its hours (an activity's hours
 shared across its sessions), else DEFAULT_HOURS. Overlaps that remain (a
 call during a long beach day) are split into side-by-side lanes.
 
-Measured times (a watch workout with a real start and end) would slot in
-here later as a fourth kind, firmer than all three.
+Measured times are a fourth kind, firmer than all three: `measured`, from
+the user's devices (health.py's day files, see measures.py). A told activity
+matched to a watch workout is drawn at the workout's real start and end
+with the journal's words; a workout the journal never mentioned gets a
+block of its own. Sleep and screen use are measured too, but sit on their
+own layers so they never squeeze the activities into narrower lanes:
+`sleep` (drawn full width, under everything) and `screen` (a thin strip at
+the edge). A measured record is placed on the logical day it falls in: a
+1am screen session is the end of the day before, and tonight's sleep, filed
+under tomorrow, shows from bedtime to 4am here and from 4am to waking there.
 """
 
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from datetime import date
 from typing import Any
+
+from daylog import measures
+from daylog.disciplines import Graph
+from daylog.health import wall
 
 CUTOFF = 4.0  # daily.DAY_CUTOFF_HOUR's default: the logical day starts here
 DAY_START = CUTOFF
@@ -44,7 +57,8 @@ MIN_HOURS = 0.5  # shorter is too thin to see or tap
 # Logged, but not something you'd put on a calendar.
 OFF_CALENDAR = ("meal",)
 
-SAID, ESTIMATED, GUESSED = "said", "estimated", "guessed"
+SAID, ESTIMATED, GUESSED, MEASURED = "said", "estimated", "guessed", "measured"
+ACTIVITY, SLEEP, SCREEN = "activity", "sleep", "screen"  # layers
 TIME_FIELDS = ("at", "until", "sessions", "time")
 
 _CLOCK = re.compile(r"(\d{1,2}):(\d{2})")
@@ -56,10 +70,13 @@ class Block:
     detail: str
     start: float  # hours since midnight; past 24 is after midnight
     end: float
-    time: str = ESTIMATED  # SAID | ESTIMATED | GUESSED
+    time: str = ESTIMATED  # SAID | ESTIMATED | GUESSED | MEASURED
     session: str = ""  # "2/3" for the second of three sessions
     lane: int = 0
     lanes: int = 1
+    layer: str = ACTIVITY  # ACTIVITY | SLEEP | SCREEN
+    source: str = ""  # for measured blocks: watch | sleep | mac | iphone | ...
+    facts: dict[str, Any] = field(default_factory=dict)
 
     @property
     def guessed(self) -> bool:
@@ -162,23 +179,179 @@ def _free_from(start: float, length: float, taken: list[tuple[float, float]]) ->
     return start
 
 
-def day_blocks(frontmatter: dict[str, Any]) -> list[Block]:
+def _measured_span(start: Any, end: Any, day: date) -> tuple[float, float] | None:
+    """A measured record's start and end on `day`'s axis, clipped to it; None if outside."""
+    a, b = wall(start), wall(end)
+    if not a or not b:
+        return None
+    s, e = max(measures.clock_hours(a, day), DAY_START), min(measures.clock_hours(b, day), DAY_END)
+    return (s, e) if e - s > 0.01 else None
+
+
+def _on_day(records: list[dict[str, Any]], day: date) -> list[tuple[float, float, dict[str, Any]]]:
+    """Records whose start falls on `day`'s axis (cutoff to cutoff), with their span."""
+    out = []
+    for r in records:
+        a = wall(r.get("start"))
+        span = _measured_span(r.get("start"), r.get("end"), day)
+        if a and span and DAY_START <= measures.clock_hours(a, day) < DAY_END:
+            out.append((span[0], span[1], r))
+    return out
+
+
+def _workout_facts(w: dict[str, Any]) -> dict[str, Any]:
+    keys = ("kind", "minutes", "kcal", "distance_km", "hr_avg", "hr_max", "effort")
+    return {k: w[k] for k in keys if w.get(k) not in (None, "")}
+
+
+def _sleep_blocks(day: date, nights: list[dict[str, Any]]) -> list[Block]:
+    out = []
+    seen: set[tuple[Any, Any]] = set()
+    for night in nights:
+        key = (night.get("start"), night.get("end"))
+        span = _measured_span(night.get("start"), night.get("end"), day)
+        if key in seen or span is None:
+            continue
+        seen.add(key)
+        facts = {
+            k: night[k]
+            for k in ("asleep_h", "deep_h", "rem_h", "core_h", "awake_h")
+            if isinstance(night.get(k), int | float)
+        }
+        a, b = wall(night.get("start")), wall(night.get("end"))
+        if a and b:
+            facts["from"], facts["to"] = f"{a:%H:%M}", f"{b:%H:%M}"
+        out.append(Block("sleep", "", *span, MEASURED, layer=SLEEP, source="sleep", facts=facts))
+    return out
+
+
+def _screen_blocks(day: date, records: list[dict[str, Any]]) -> list[Block]:
+    out = []
+    sessions = [s for r in records for s in measures.screen_sessions(r)]
+    for b in measures.screen_blocks(sessions):
+        s, e = measures.clock_hours(b.start, day), measures.clock_hours(b.end, day)
+        if not DAY_START <= s < DAY_END:
+            continue
+        top = sorted(b.apps.items(), key=lambda kv: -kv[1])[:4]
+        facts = {
+            "device": b.device,
+            "apps": {name: round(m) for name, m in top},
+            "minutes": round(sum(b.apps.values())),
+        }
+        out.append(
+            Block(
+                "screen",
+                b.top,
+                s,
+                min(e, DAY_END),
+                MEASURED,
+                layer=SCREEN,
+                source=b.device,
+                facts=facts,
+            )
+        )
+    return out
+
+
+def day_blocks(
+    frontmatter: dict[str, Any] | None,
+    records: dict[str, Any] | None = None,
+    next_records: dict[str, Any] | None = None,
+    graph: Graph | None = None,
+    day: date | None = None,
+) -> list[Block]:
+    """The day's blocks, told and measured.
+
+    `records` and `next_records` are the measured files (health.read_days) for
+    `day`'s date and the one after: the logical day runs past midnight, and
+    tonight's sleep is filed under tomorrow. Without them, only the journal."""
     items = [
         item
-        for item in frontmatter.get("activities") or []
+        for item in (frontmatter or {}).get("activities") or []
         if isinstance(item, dict) and item.get("type") not in OFF_CALENDAR
     ]
     timed = [_timed(item) for item in items]
-    taken = [(s, e) for pieces in timed for s, e, _ in pieces]
+    files = [r for r in (records, next_records) if r]
+    if day is None or not files:
+        blocks = _journal_blocks(items, timed, {}, [])
+        _lay_out_lanes(blocks)
+        return blocks
+
+    workouts = _on_day([w for r in files for w in r.get("workouts") or []], day)
+    # Every piece the journal told, timed or not, may be a watch workout. A unit
+    # is activity * 100 + its piece (99 for an untimed activity).
+    units: list[tuple[int, str, float | None, float]] = []
+    for i, (item, pieces) in enumerate(zip(items, timed, strict=True)):
+        kind = str(item.get("type", "?"))
+        if pieces:
+            units += [(i * 100 + j, kind, s, e - s) for j, (s, e, _) in enumerate(pieces)]
+        else:
+            units.append((i * 100 + 99, kind, None, _number(item.get("hours")) or DEFAULT_HOURS))
+    matched = measures.match_workouts(units, [w for _, _, w in workouts], graph, day)
+    nights = [n for r in files for n in r.get("sleep") or []]
+    sleep = _sleep_blocks(day, nights)
+    blocks = _journal_blocks(items, timed, matched, [(b.start, b.end) for b in sleep], day)
+    used = {id(w) for w in matched.values()}
+    for start, end, w in workouts:
+        if id(w) not in used:
+            kind = str(w.get("kind") or "workout").strip().lower()
+            blocks.append(
+                Block(kind, "", start, end, MEASURED, source="watch", facts=_workout_facts(w))
+            )
+    _lay_out_lanes(blocks)
+    return blocks + sleep + _screen_blocks(day, files)
+
+
+def _journal_blocks(
+    items: list[dict[str, Any]],
+    timed: list[list[tuple[float, float, str]]],
+    matched: dict[int, dict[str, Any]],
+    asleep: list[tuple[float, float]],
+    day: date | None = None,
+) -> list[Block]:
+    """The told activities; a piece matched to a watch workout takes its real times."""
+
+    def measured(unit: int) -> tuple[float, float] | None:
+        w = matched.get(unit)
+        return _measured_span(w.get("start"), w.get("end"), day) if w and day else None
+
+    for i, pieces in enumerate(timed):
+        timed[i] = [
+            (*(measured(i * 100 + j) or (s, e)), label) for j, (s, e, label) in enumerate(pieces)
+        ]
+    taken = [(s, e) for pieces in timed for s, e, _ in pieces] + asleep
     blocks: list[Block] = []
     cursor: float | None = None  # where the thing told before ended
     for i, (item, pieces) in enumerate(zip(items, timed, strict=True)):
         kind, detail = str(item.get("type", "?")), str(item.get("detail") or "")
         if pieces:
             when = _time_kind(item)
-            for start, end, label in pieces:
-                blocks.append(Block(kind, detail, start, end, when, label))
+            for j, (start, end, label) in enumerate(pieces):
+                w = matched.get(i * 100 + j)
+                if w and day:
+                    blocks.append(
+                        Block(
+                            kind,
+                            detail,
+                            start,
+                            end,
+                            MEASURED,
+                            label,
+                            source="watch",
+                            facts=_workout_facts(w),
+                        )
+                    )
+                else:
+                    blocks.append(Block(kind, detail, start, end, when, label))
             cursor = max(e for _, e, _ in pieces)
+            continue
+        span = measured(i * 100 + 99)
+        if span:
+            w = matched[i * 100 + 99]
+            blocks.append(
+                Block(kind, detail, *span, MEASURED, source="watch", facts=_workout_facts(w))
+            )
+            cursor = span[1]
             continue
         length = max(MIN_HOURS, _number(item.get("hours")) or DEFAULT_HOURS)
         if cursor is None:
@@ -199,7 +372,6 @@ def day_blocks(frontmatter: dict[str, Any]) -> list[Block]:
         blocks.append(Block(kind, detail, start, end, GUESSED))
         taken.append((start, end))
         cursor = end
-    _lay_out_lanes(blocks)
     return blocks
 
 

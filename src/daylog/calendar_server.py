@@ -120,14 +120,9 @@ _ICONS = {"/icon-180.png": 180, "/icon-192.png": 192, "/icon-512.png": 512}
 
 
 def _store_health(body: bytes) -> str:
-    vault = _vault()
-    day, metrics = health.parse(body, daily.logical_day(datetime.now(tz())))
-    stored = health.merge(vault.read_yaml(health.FILE, {}), day, metrics)
-    vault.write_yaml(health.FILE, stored, f"health: {day.isoformat()}")
-    left_out = health.skipped(body, metrics)
-    note = f"; skipped (no number): {', '.join(left_out)}" if left_out else ""
-    logger.info("health saved for %s: %s%s", day, ", ".join(metrics), note)
-    return f"saved {', '.join(metrics)} for {day.isoformat()}{note}\n"
+    reply = health.ingest(_vault(), body, daily.logical_day(datetime.now(tz())))
+    logger.info("health inlet: %s", reply)
+    return reply + "\n"
 
 
 def _make_handler(
@@ -389,7 +384,7 @@ def _make_handler(
             self._land()
 
         def _store_health(self) -> None:
-            body = self._body(health.MAX_BODY_BYTES)
+            body = self._body(health.MAX_EXPORT_BYTES)
             if body is None:
                 self._reply(413, "body missing or too large\n")
                 return
