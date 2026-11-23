@@ -435,10 +435,15 @@ def _make_handler(
             # Its own token per device (webapp/watch.py); never the session.
             assert watch_inlet is not None
             headers = {k.lower(): v for k, v in self.headers.items()}
-            body = self._body(watch.MAX_BODY_BYTES)
-            if body is None:
+            try:
+                length = int(self.headers.get("Content-Length") or 0)
+            except ValueError:
+                length = -1
+            if not 0 <= length <= watch.MAX_BODY_BYTES:
                 self._reply(413, "That's too long for one note.\n")
                 return
+            # /watch/brief has no body; the others are checked for text by the inlet.
+            body = self.rfile.read(length) if length else b""
             links = webapi.book_base(webapi.Request("POST", path, headers=headers))
             try:
                 code, text = watch_inlet.handle(watch.Request(path, headers, body, links))
