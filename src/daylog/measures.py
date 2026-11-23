@@ -172,7 +172,10 @@ def screen_minutes(records: dict[str, Any] | None) -> dict[str, dict[str, float]
     (the phone) is counted from them; one with only timed sessions (the Mac) from those."""
     records = records or {}
     out: dict[str, dict[str, float]] = defaultdict(lambda: defaultdict(float))
-    totals = [t for t in records.get("screen_totals") or [] if isinstance(t, dict)]
+    # A website's total is already inside its browser's: counted once, as the app.
+    totals = [
+        t for t in records.get("screen_totals") or [] if isinstance(t, dict) and not t.get("site")
+    ]
     with_totals = {str(t.get("device") or "iphone") for t in totals}
     for t in totals:
         minutes = t.get("minutes")

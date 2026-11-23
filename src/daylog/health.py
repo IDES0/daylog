@@ -520,6 +520,10 @@ _DURATION_PART = re.compile(
 
 
 _TOTAL_LINE = re.compile(r"^(.+?)\s*(?::|\s-|–)\s*(\d.*)$")
+# iOS 26's Screen Time action writes "YouTube (54m)", "Safari (1h 2m)".
+_TOTAL_BRACKETS = re.compile(r"^(.+?)\s*\((\d[^)]*)\)\s*$")
+# A website among the apps ("youtube.com"): its time is inside the browser's already.
+_DOMAIN = re.compile(r"^(?:[a-z0-9-]+\.)+[a-z]{2,}$")
 
 
 def minutes(value: Any) -> float | None:
@@ -571,7 +575,7 @@ def _add_screen_totals(batch: Batch, data: Any, today: date) -> None:
     # A Shortcut's text: one "App: 1h 23m" (or "App - 23 min") per line.
     lines = [line.strip() for line in lines if line.strip()]
     for line in lines:
-        match = _TOTAL_LINE.match(line)
+        match = _TOTAL_BRACKETS.match(line) or _TOTAL_LINE.match(line)
         if match:
             pairs.append((match.group(1), match.group(2)))
     if not pairs:
@@ -588,9 +592,10 @@ def _add_screen_totals(batch: Batch, data: Any, today: date) -> None:
     for name, value in pairs:
         app, mins = _label(name), minutes(value)
         if app and mins is not None and 0 < mins <= 24 * 60:
-            batch.add(
-                day, "screen_totals", {"device": device, "app": app, "minutes": round(mins, 1)}
-            )
+            record: dict[str, Any] = {"device": device, "app": app, "minutes": round(mins, 1)}
+            if _DOMAIN.match(app.lower()):
+                record["site"] = True
+            batch.add(day, "screen_totals", record)
         else:
             batch.ignored.append(f"screen total {app or '?'}")
 
