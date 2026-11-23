@@ -321,7 +321,10 @@ contract is [`docs/web-api.md`](docs/web-api.md).
   `disciplines`, `changes` (+ `changes/{sha}/revert`), `cards`.
 - The frontend is plain HTML/CSS/JS in `src/daylog/webapp/static/`, shipped
   as package data. Rankings (one list per category, head-to-heads, drag to reorder) live in
-  the You tab; a note that mentions an unranked place offers a Rank card.
+  the You tab, the top five of each list until "Show all"; a note that mentions an
+  unranked place offers a Rank card, and one that names a restaurant, bar or other
+  rankable place the tree doesn't know offers it as a new place (free, no web lookup),
+  then a Rank card once it's added.
 
 ### Health (watch, phone, computer)
 Once the device feeds are set up ([`docs/health-setup.md`](docs/health-setup.md)),
@@ -563,7 +566,8 @@ speedwing:
 | Home | Today, the morning brief (and "make one now"), surf and fly conditions (rated, no LLM cost), the last 7 days, the week, goals, what's next, milestones, and the cards waiting on you |
 | Log | Record or type a note for today (before `DAY_CUTOFF_HOUR`, yesterday) or a picked day; recent days, each with a reconcile button |
 | Assistant | The chat (vault tools + web search); changes it proposes come back as confirm cards, research it offers runs only on a tap. `/help` lists the slash shortcuts (`/reconcile`, `/research`, `/explore`, `/trip`, `/backfill`, `/new`), which run without a model call |
-| Trips | The map of next legs, the plan (2-3 dated route options to pick from), "What changed?" (trace a decision through itinerary, goals and plan now, instead of waiting for the morning research run), places, the wishlist (with "research now"), where you've been |
+| Trips (under You) | Reached from the You · Trips switch at the top of You. The map of next legs, the plan (2-3 dated route options to pick from), "What changed?" (trace a decision through itinerary, goals and plan now, instead of waiting for the morning research run), places, the wishlist (with "research now"), where you've been |
+| Health | Sleep, heart, activity, workouts and screen time against your 28-day usual (see **Health** above) |
 | You | Disciplines, the weekly review (and "write it now"), goals, reports (API spend, site analytics), rankings, milestones, recent changes (undo one), the session and notifications |
 
 Research without a button yet (explore the area, reconstruct the last trip,

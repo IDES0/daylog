@@ -74,7 +74,7 @@ svg { display: block; }
 
 .tabs {
   position: fixed; z-index: 20; left: 0; right: 0; bottom: 0;
-  display: grid; grid-template-columns: repeat(6, minmax(0, 1fr));
+  display: grid; grid-template-columns: repeat(5, minmax(0, 1fr));
   padding: 0 var(--safe-r) var(--safe-b) var(--safe-l);
   background: color-mix(in srgb, var(--surface) 88%, transparent);
   -webkit-backdrop-filter: saturate(1.6) blur(16px); backdrop-filter: saturate(1.6) blur(16px);
@@ -546,8 +546,10 @@ body.kb .composer { bottom: 0; padding-bottom: var(--s2); }
 .rk-item .rk-score { color: var(--tc); }
 .btn.sm { min-height: 36px; padding: 0 var(--s3); font-size: 13.5px; }
 .btn.sm svg { width: 16px; height: 16px; }
-.rk-tabs { margin-bottom: var(--s4); }
+.rk-tabs { margin-bottom: var(--s3); }
+/* One row that scrolls sideways, smaller than the app's other switches. */
 .rk-tabs .seg { width: 100%; }
+.rk-tabs .seg button { min-height: 32px; padding: 0 10px; font-size: 12.5px; }
 .rk-count { margin-left: 5px; font: 500 11px/1 var(--mono); color: var(--faint); }
 .seg button[aria-pressed="true"] .rk-count { color: var(--accent); }
 .rk-list { list-style: none; }
@@ -778,3 +780,10 @@ details.rep-v > summary { padding: var(--s2) 0; gap: var(--s2); }
 .hl-path { font-size: .92em; white-space: nowrap; }
 .hl-none { font-size: 13.5px; margin-top: var(--s3); }
 .list + .hl-none { padding-top: var(--s3); border-top: 1px solid var(--line); }
+
+/* You | Trips: Trips lives under the You tab (a switch in both bars). */
+.subnav { display: inline-flex; padding: 3px; gap: 2px; border-radius: 999px; background: var(--surface-2); }
+.subnav a { padding: 5px 12px; border-radius: 999px; font: 500 13px var(--sans); color: var(--muted); text-decoration: none; }
+.subnav a[aria-current="page"] { background: var(--surface); color: var(--text); box-shadow: 0 1px 2px rgb(0 0 0 / .12); }
+/* Rankings, compact: the top few per list until "Show all". */
+.rk-all { margin-top: 8px; }

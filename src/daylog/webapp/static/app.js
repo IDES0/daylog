@@ -2626,7 +2626,7 @@ function initRankings(body) {
     const d = RK.data;
     const counts = d.counts || {};
     fill(tabs, seg((d.categories || []).map(c => [c, h("span", words(c), counts[c] ? h("small.rk-count", counts[c]) : null)]),
-      RK.cat, v => { RK.cat = v; try { localStorage.setItem("daylog.rankCat", v); } catch {} draw(); }, "Category", true));
+      RK.cat, v => { RK.cat = v; try { localStorage.setItem("daylog.rankCat", v); } catch {} draw(); }, "Category"));
     fill(box, rankList(d, RK.cat));
   };
   RK.reload = (cat) => {
@@ -2646,13 +2646,22 @@ function initRankings(body) {
 
 const rankItems = cat => (RK.data && (RK.data.lists || {})[cat]) || [];
 
+// Compact by default: the top RANK_PEEK of a list, the rest behind "Show all".
+const RANK_PEEK = 5;
 function rankList(d, cat) {
   const items = rankItems(cat);
-  const add = h("button.btn", { type: "button", onclick: () => rankFlow(null, { category: cat }) }, icon("plus"), `Rank ${words(cat)}`);
+  const add = h("button.btn.sm", { type: "button", onclick: () => rankFlow(null, { category: cat }) }, icon("plus"), `Rank ${words(cat)}`);
   if (!items.length) return h("div.rk-empty", empty(`No ${words(cat)} ranked yet.`, "Rank somewhere you've been."), add);
+  RK.open = RK.open || {};
+  const open = RK.open[cat] || items.length <= RANK_PEEK + 1;
+  const shown = open ? items : items.slice(0, RANK_PEEK);
+  const toggle = items.length > RANK_PEEK + 1 ? h("button.btn.ghost.sm.rk-all", { type: "button", onclick: () => {
+    RK.open[cat] = !open; const box = toggle.closest(".rk"); if (box) box.replaceWith(rankList(d, cat));
+  } }, open ? "Show fewer" : `Show all ${items.length}`) : null;
   return h("div.rk", { "data-cat": cat },
-    h("ol.rk-list", items.map(it => rankItem(cat, it))),
-    h("div.btns", { style: { "margin-top": "12px" } }, add));
+    h("ol.rk-list", shown.map(it => rankItem(cat, it))),
+    toggle,
+    h("div.btns", { style: { "margin-top": "10px" } }, add));
 }
 
 function rankItem(cat, it) {
@@ -3386,8 +3395,13 @@ function route() {
   if (current === tab) return;
   if (current) scrolls[current] = scroller.scrollTop;
   document.querySelectorAll(".view").forEach(v => { v.hidden = v.dataset.view !== tab; });
+  // Trips has no tab of its own: it sits under You, behind the You | Trips switch.
+  const tabOf = { trips: "you" };
   document.querySelectorAll(".tab").forEach(a => {
-    if (a.dataset.tab === tab) a.setAttribute("aria-current", "page"); else a.removeAttribute("aria-current");
+    if (a.dataset.tab === (tabOf[tab] || tab)) a.setAttribute("aria-current", "page"); else a.removeAttribute("aria-current");
+  });
+  document.querySelectorAll(".subnav a").forEach(a => {
+    if (a.dataset.sub === tab) a.setAttribute("aria-current", "page"); else a.removeAttribute("aria-current");
   });
   document.title = `${TITLES[tab]} · daylog`;
   current = tab;

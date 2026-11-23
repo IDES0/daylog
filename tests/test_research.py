@@ -305,3 +305,69 @@ def test_an_asked_for_lookup_runs_once_per_mention(vault: Vault, monkeypatch: An
     assert len(calls) == 1 and said == "Every place is already linked or looked up."
     entry = vault.read_journal_entry(TODAY)
     assert entry is not None and entry.frontmatter["activities"][0]["place_lookup"]
+
+
+def test_a_new_restaurant_from_a_note_is_offered_free_to_add_and_rank(
+    vault: Vault, monkeypatch: Any
+) -> None:
+    _seed(vault)
+    vault.write_yaml(
+        "location.yaml",
+        [{"place": "Kuta", "place_id": "kuta", "from": "2026-09-20", "to": None}],
+        "location",
+    )
+    vault.write_journal_entry(
+        datetime(2026, 9, 27, 21, 0),
+        {
+            "meals": [
+                {"items": ["black ink paella"], "place_mention": "Bola's", "place_kind": "food"},
+                {"items": ["noodles"], "place_mention": "Ramen Otaku", "place_kind": "food"},
+                {"items": ["snacks"], "place_mention": "Gas Station", "place_kind": "other"},
+            ]
+        },
+        "t",
+        "s",
+    )
+    calls = _forbid_research(monkeypatch)
+    headline, findings = research_flow.lookup_mentions(vault, [TODAY])
+    assert calls == [] and headline is None  # still free, still quiet
+    assert findings is not None
+    (offer,) = findings.new_places  # the known one linked, the "other" one not rankable
+    assert (offer["name"], offer["kind"], offer["parent_id"], offer["confidence"]) == (
+        "Bola's",
+        "food",
+        "kuta",
+        "inferred",
+    )
+    assert "black ink paella" in offer["description"]
+    # Offered once: the next note doesn't ask again.
+    assert research_flow.lookup_mentions(vault, [TODAY]) == (None, None)
+    batch = research_flow.new_batch(findings, [TODAY])
+    (new_id,) = research_flow.add_proposals(vault, batch, [0])
+    entry = vault.read_journal_entry(TODAY)
+    assert entry is not None
+    assert any(m.get("place") == new_id for m in entry.frontmatter["meals"])
+    assert PlaceIndex(vault.read_places()).get(new_id)["parent"] == "kuta"  # type: ignore[index]
+
+
+def test_adding_a_new_restaurant_card_offers_to_rank_it(vault: Vault) -> None:
+    from daylog.webapp import api as webapi
+
+    _seed(vault)
+    findings = research.Findings(
+        new_places=[
+            {
+                "ref": "n0",
+                "name": "Bola's",
+                "kind": "food",
+                "parent_id": "kuta",
+                "confidence": "inferred",
+            }
+        ]
+    )
+    app = webapi.Api(vault=lambda: vault, spawn=lambda fn: None, run_notes=lambda fn: fn())
+    (card,) = app._place_cards(findings, [TODAY])
+    outcome = app.cards.answer(card.id, "add")
+    assert outcome is not None and outcome.message.startswith("Added: ")
+    (rank,) = outcome.cards
+    assert rank.kind == "rank" and rank.title == "Rank Bola's?"
