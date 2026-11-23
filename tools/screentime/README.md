@@ -41,7 +41,11 @@ It goes only to your daylog inlet.
    (`https://<host>/health/<HEALTH_INGEST_SECRET>`; typing is hidden), saves it
    to `~/Library/Application Support/daylog-screentime/config.json` (mode 600),
    shows a dry run of the last hour, and loads the LaunchAgent
-   `com.daylog.screentime` (runs at login and every 15 minutes).
+   `com.daylog.screentime` (runs at login and every 15 minutes). Run it in the
+   Terminal app so it can ask; where nothing can be typed (a script, an
+   assistant's shell), pass the URL instead:
+   `DAYLOG_INLET_URL='https://…' tools/screentime/install.sh`. It uses macOS's
+   own `/usr/bin/python3` when there is one.
 
 The first run sends the last 26 hours. After that each run sends from two hours
 before the last successful one; the server replaces a session it already has, so
