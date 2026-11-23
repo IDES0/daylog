@@ -53,7 +53,31 @@ one — anything that searches the web — answers "Thinking", and the reply
 arrives as one notification; the full text is in the Chat tab. Turn on the
 app's notifications (You → Session) on the iPhone so they reach the watch.
 
-## 4. Starting it fast
+## 4. The brief when you wake up
+
+The brief normally comes at `BRIEF_HOUR` (7:00). With the same key, a
+Shortcuts automation can make it the moment you're up, after your phone
+has sent last night's sleep:
+
+1. Shortcuts → **Automation** → **+** → **Sleep** → **Waking Up** (fires
+   when your sleep schedule ends or you dismiss the wake alarm; **Alarm →
+   Is Stopped** works too if you don't use a sleep schedule). **Run
+   Immediately**.
+2. A **Health Auto Export** action that exports now (search "Health Auto
+   Export" in the action list; pick the one that runs your *Today* metrics
+   automation or exports today's data to your URL). This puts last night's
+   sleep in before the brief reads it.
+3. **Wait** 20 seconds.
+4. **Get Contents of URL** — `https://<your status site>/watch/brief`,
+   Method **POST**, Header `Authorization` = `Bearer dl_…`, no body.
+
+About a minute later the usual **☀️ Brief** notification arrives. It's made
+once a day: a second run says "Today's brief is already in the app", and
+the 7:00 brief skips a day you already woke up to. Set `BRIEF_HOUR` later
+(say 11) on Railway to keep 7:00 from beating you to it on a slow morning;
+it's still the fallback when the automation doesn't run.
+
+## 5. Starting it fast
 
 - **Siri:** "Hey Siri, log to daylog" / "Hey Siri, ask daylog".
 - **Complication:** edit the watch face → a slot → Shortcuts → pick one.

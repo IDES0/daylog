@@ -227,3 +227,35 @@ def test_devices_are_managed_in_the_app_and_used_by_the_watch(
         )[0]
         == 401
     )
+
+
+def test_brief_on_waking_is_made_once_and_the_clock_then_skips_it(
+    vault: Vault, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from daylog import push, scheduler, services
+
+    built: list[date] = []
+
+    def fake_build(v: Vault, today: date) -> str:
+        built.append(today)
+        services._last_brief = services.Brief(today, "Swell's up at the point.")
+        return "Swell's up at the point."
+
+    monkeypatch.setattr(services, "_last_brief", None)
+    monkeypatch.setattr(services, "build_brief", fake_build)
+    notes = Notes()
+    monkeypatch.setattr(push, "send", notes)
+    api = _api(vault)
+    monkeypatch.setattr(api, "waiting_decisions", lambda v: 0)
+    w = watch.Watch(api, spawn=lambda fn: fn(), notify=notes)
+    _, token = watch.add(vault, "Watch", TODAY)
+    code, text = w.handle(_req("/watch/brief", token, b""))
+    assert code == 202 and "Making your brief" in text
+    assert built == [TODAY]
+    assert notes.sent[0][0].startswith("☀️ Brief")
+    assert w.handle(_req("/watch/brief", token, b"")) == (
+        200,
+        "Today's brief is already in the app.",
+    )
+    scheduler.morning_brief(api, vault, NOW, skip_if_made=True)
+    assert built == [TODAY]  # the 7am run left the day alone

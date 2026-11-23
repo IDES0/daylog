@@ -354,7 +354,10 @@ or `/watch/ask` with a per-device key made in You → Watch & Shortcuts
 (shown once, stored hashed, revocable). A note goes through the Log tab's
 pipeline and one notification says what was logged; a question goes into
 the Chat tab's conversation and the answer is spoken back if it's quick,
-else sent as one notification. Cards still wait in the app.
+else sent as one notification. Cards still wait in the app. A third
+action, `/watch/brief`, lets an iOS "Waking Up" automation make the
+morning brief when you get up (once a day; the scheduled `BRIEF_HOUR`
+brief then skips that day).
 
 ### Notifications
 What the app does on its own arrives as a Web Push notification on the

@@ -74,7 +74,7 @@ def test_each_job_calls_its_function_with_the_shared_api(
 ) -> None:
     called: list[tuple[str, Any]] = []
     for name in ("morning_brief", "end_of_day", "weekly"):
-        monkeypatch.setattr(scheduler, name, lambda a, n=name: called.append((n, a)))
+        monkeypatch.setattr(scheduler, name, lambda a, n=name, **kw: called.append((n, a)))
     for _, func, _ in scheduler.jobs(api):
         func()
     assert called == [("morning_brief", api), ("end_of_day", api), ("weekly", api)]
