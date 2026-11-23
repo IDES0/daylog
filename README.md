@@ -248,10 +248,16 @@ until its variable is set, and 404s everything else:
     small page that sets the cookie and moves on to `/` rather than a
     redirect: an installed iPhone app dropped the cookie from the redirect,
     so the right password just showed the guest view again.
-- **Health inlet** at `POST /health/<HEALTH_INGEST_SECRET>`: one small JSON
-  object a day from an iOS Shortcut (`{"date": "2026-10-02", "steps": 8423}`),
-  merged into `health.yaml`. Numbers may carry units ("1.9 mi"); the reply
-  names what was saved and what was skipped.
+- **Health inlet** at `POST /health/<HEALTH_INGEST_SECRET>`: measurements
+  from the user's own devices (setup: [`docs/health-setup.md`](docs/health-setup.md)).
+  It takes a Health Auto Export payload (Apple Watch: daily metrics, sleep
+  with stages, workouts with real start and end), screen time (Mac sessions
+  per app and site from `tools/screentime`, iPhone per-app daily totals and
+  app opened/closed events from Shortcuts), or the old one-object-a-day
+  shape (`{"date": "2026-10-02", "steps": 8423}`). Daily numbers merge into
+  `health.yaml`, timed records into `health/days/YYYY-MM-DD.yaml`, one
+  commit per post; re-sending the same data changes nothing. Bodies up to
+  8 MB; the reply names what was saved and what was ignored.
 - **Web app** (with the status site): a JSON API under `/api/` and the app
   shell at `/` (signed in), `/app.js`, `/app.css`. See below.
 - **Booking pages** (with the status site): a link someone can use to pick
@@ -303,7 +309,7 @@ contract is [`docs/web-api.md`](docs/web-api.md).
   voice; never logged.
 - Anything inferred comes back as a **card** (server memory, 24 h) and is
   applied only when answered: `GET /api/cards`, `POST /api/cards/{id}`.
-- Endpoints: `me`, `home`, `map`, `calendar`, `journal`, `journal/{date}`,
+- Endpoints: `me`, `home`, `map`, `calendar`, `health`, `journal`, `journal/{date}`,
   `log`, `voice`, `reconcile`, `chat` (+ `chat/reset`), `brief`, `surf`,
   `fly`, `upcoming`, `status`, `usage`, `site`, `plan`, `ripple`, `trail`,
   `places`, `places/{id}`, `wishlist`, `rankings` (+ `rankings/session`,
@@ -312,6 +318,29 @@ contract is [`docs/web-api.md`](docs/web-api.md).
 - The frontend is plain HTML/CSS/JS in `src/daylog/webapp/static/`, shipped
   as package data. Rankings (one list per category, head-to-heads, drag to reorder) live in
   the You tab; a note that mentions an unranked place offers a Rank card.
+
+### Health (watch, phone, computer)
+Once the device feeds are set up ([`docs/health-setup.md`](docs/health-setup.md)),
+the measurements are the source of truth for when and how long:
+
+- **Week calendar**: a told activity matched to an Apple Watch workout of
+  the same sport (through the discipline graph, nearest in time) is drawn
+  at the watch's start and end with the journal's words, and its numbers
+  (heart rate, kcal, distance) show on a tap; a workout never told gets its
+  own block. Sleep is drawn under the day, full width (tonight's night
+  splits at the 4am cutoff), and screen time as a strip at each column's
+  edge (Mac and iPhone, coalesced into stretches; a tap lists the top apps
+  and sites). A day's sheet lists its measured numbers.
+- **Health tab** (`GET /api/health?days=`): sleep (bed → wake per night,
+  stages), resting HR and HRV against their 28-day usual, steps, exercise
+  and workouts by kind, screen time per device with the top apps and sites,
+  and correlations worth a glance (sleep vs energy, screen tonight vs
+  sleep tomorrow), with the journal's energy, mood and focus. Facts and
+  drift from your own usual, never a score.
+- **Assistant**: the brief gets a few measured lines (last night, heart vs
+  usual, yesterday's workouts, steps, screen time) and uses at most one;
+  the weekly review the week's averages and workouts; chat a `get_health`
+  tool.
 
 ### Notifications
 What the app does on its own arrives as a Web Push notification on the
@@ -390,7 +419,12 @@ src/daylog/
   booking.py       Booking pages: the slots a page offers, a guest's
                    booking, Accept/Decline; the page is webapp/static/book.html.
   dashboard.py     The read-only status page (one static HTML page).
-  health.py        Validates and merges the phone's daily numbers.
+  health.py        The device inlet: Health Auto Export, screen time and the
+                   simple daily shape, merged into health.yaml and health/days/.
+  measures.py      Derived from the day files: screen sessions and blocks,
+                   minutes per app, which workout is which told activity.
+  health_stats.py  Trends, 28-day baselines, correlations; the measured lines
+                   for the brief, the weekly review and chat.
   analytics.py     Read-only PostHog queries for the personal site;
                    site_flow.py: the brief's Site block.
   export.py        The journal as CSV tables for analysis; run from a shell
@@ -426,7 +460,9 @@ daylog-vault/
   plans/<date>.md          # planner output (+ the chosen option)
   reviews/<week>.md        # weekly reviews
   usage.yaml               # API spend per month and kind
-  health.yaml              # the phone's daily numbers (steps, distance, ...) by date
+  health.yaml              # daily numbers from the devices (steps, sleep_h, resting HR, ...) by date
+  health/days/<date>.yaml  # timed records: sleep, workouts, screen sessions/events/totals
+  health/units.yaml        # the units Health Auto Export sent each metric in
   research/proposals/      # proposed itinerary/goal/plan changes, answered by a tap
   site.yaml                # site analytics: one summary per day, written with the brief
   profile.yaml             # durable preferences (surf comfort, fly rules, vocabulary)
@@ -554,7 +590,7 @@ Requires a local clone of the private vault repo at the path set by
 | `STATUS_SITE` | Optional. `1` serves the status site's guest view at `/` without a password line; `STATUS_PASSWORD` turns the site on by itself |
 | `STATUS_PASSWORD` | Serves the status site at `/` with its password line, behind which is the web app — the only interface. Use a long passphrase |
 | `VAPID_PRIVATE_KEY`, `VAPID_PUBLIC_KEY` | Web Push keys (base64url): the notifications (see **Notifications**) on devices that turned them on in the app (You → Session); without them the app still works, it just never notifies. `VAPID_SUBJECT` (`mailto:…`) is optional |
-| `HEALTH_INGEST_SECRET` | Optional. Enables `POST /health/<secret>`: a JSON object of the day's numbers from the phone (`{"date": "2026-10-02", "steps": 8423, "sleep_h": 7.2}`), merged into `health.yaml` and joined by date into the export and the status page; unset disables it |
+| `HEALTH_INGEST_SECRET` | Optional. Enables `POST /health/<secret>`, the inlet for the watch, phone and computer (Health Auto Export, the Mac screen-time forwarder, iPhone Shortcuts; see docs/health-setup.md); unset disables it |
 | `POSTHOG_PERSONAL_API_KEY` | Optional. A read-only PostHog personal key (scopes `query:read` and friends). With `POSTHOG_PROJECT_ID`, enables a Site block at the end of the morning brief (last 24 h, including visitors who came through a company `?ref=` tag, i.e. not linkedin/github/test) and the Reports card's site breakdown (`GET /api/site`). Nothing polls. Never written to the vault or logs |
 | `POSTHOG_PROJECT_ID` | The PostHog project the site reports to |
 | `PORT` | For the web server. Railway injects this itself; default `8080` for local testing |

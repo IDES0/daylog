@@ -67,6 +67,7 @@ The status site is the app, and the only interface (Telegram was retired on
   ```
 - `GET /api/map` → the same payload `dashboard.future_map` builds (`{"here": {...}, "stops": [...]}`).
 - `GET /api/calendar?week=YYYY-MM-DD` → `{"week_of": "2026-10-12", "days": [{"date": "…", "summary": "…", "blocks": [{"label": "surf", "start": 6.0, "hours": 2, "guess": false, "hue": 200}]}], "prev": "2026-10-05", "next": null}`
+- `GET /api/health?days=30` → trends from the watch, phone and computer (shape below).
 
 ### Journal
 - `GET /api/journal?from=YYYY-MM-DD&to=YYYY-MM-DD` → `{"days": [{"date", "summary", "activities", "meals", "felt", "milestones", "location", "notes": <count of ### HH:MM notes>}]}` (default: last 14 days, newest first)
@@ -246,7 +247,25 @@ The You tab's Booking screen; see booking.py and the README.
 - `GET /api/home`: `where` is null when no location is known; `next` is at
   most 8 legs; goal `progress`/`target` are numbers or null.
 - `GET /api/calendar`: each block also has `"detail"`; a day without an
-  entry has `"summary": null, "blocks": []`. Each day also has `"rating"`
+  entry has `"summary": null, "blocks": []`. Each block has `"layer"`
+  (`activity` | `sleep` | `screen`), `"time"` (`measured` | `said` |
+  `estimated` | `guessed`), `"source"` (`watch`, `sleep`, `mac`, `iphone`
+  for measured blocks, else empty) and `"facts"` (a workout's `kind`,
+  `minutes`, `kcal`, `distance_km`, `hr_avg`, `hr_max`; a night's
+  `asleep_h`, `deep_h`, `rem_h`, `from`, `to`; a screen stretch's `device`,
+  `minutes`, `apps` {name: minutes}). Lanes are for the activity layer
+  only. Each day has `"measured"`: the day's numbers (`sleep_h`, `bed`,
+  `wake`, `resting_hr`, `hrv`, `steps`, `workout_min`, `screen_mac_min`,
+  ...; `{}` when nothing came in).
+- `GET /api/health?days=30` (7–400): `{"today", "days", "series": [one row
+  per day, oldest first, with any of the keys in "labels"], "baselines":
+  {key: {"recent", "baseline", "change", "days"}} (last 7 days vs the 28
+  before; baseline null under 7 days of history), "correlations": [{"x",
+  "y", "next_day", "r", "n", "word"}] (pairs with ≥ 10 days), "workouts":
+  [{"kind", "sessions", "minutes", "kcal"}], "screen": {device: {"minutes",
+  "days", "per_day", "top": [{"app", "minutes"}]}}, "labels": {key: [label,
+  unit]}, "last_measured": date | null}`. `bed_h` / `wake_h` are hours from
+  the wake day's midnight (23:30 is -0.5). Each day also has `"rating"`
   (the user's own, `{"score": 1-10, "note"?}`) and `"assessment"` (the
   assistant's, `{"score": 1-10, "why"}`), each null when absent or
   malformed; the week has `"averages": {"rating", "assessment"}` (null

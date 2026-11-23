@@ -27,7 +27,8 @@ The ledger is the foundation; the assistant is only as good as its grounding.
 - **The web app is the one interface.** The web surface: the calendar feed
   (secret path), the status site (one address on its own domain: a guest
   view, and the web app once one password line is answered), and one inlet
-  for the phone's daily health numbers (secret path). The web app writes
+  for measurements from the user's own devices — watch, phone and computer
+  (secret path). The web app writes
   only behind the session and a CSRF header, through the service functions
   and confirm cards. The status site installs as a home-screen app. What the
   app does on its own (the brief, the review, a plan, decisions and places
@@ -92,8 +93,16 @@ The ledger is the foundation; the assistant is only as good as its grounding.
   `rating: {score, note}` is the user's own 1-10 for the day, only when
   said; `assessment: {score, why}` is the assistant's 1-10 for how the
   day's time went toward the goals, written by the nightly reconcile.
-- **`health.yaml`**: the phone's daily numbers, kept beside the journal as
-  reference, joined by date.
+- **`health.yaml`** and **`health/days/YYYY-MM-DD.yaml`**: what the user's
+  devices measured, kept beside the journal and joined by date. The first
+  holds daily numbers (steps, resting HR, HRV, sleep hours...); the day
+  files hold timed records: `sleep` (filed under the morning woken),
+  `workouts` (Apple Watch, real start and end), `screen` sessions (Mac),
+  `screen_events` and `screen_totals` (iPhone). Times are the device's wall
+  clock with its offset. The journal says what and why; these say when and
+  how long. Matching a workout to a told activity, the calendar's layers,
+  trends and baselines are all derived on demand (`measures.py`,
+  `timeline.py`, `health_stats.py`).
 - **`site.yaml`**: summaries of the personal site's PostHog analytics —
   one entry per day, written with the brief: counts by ref and the
   company-ref visits (ref, pages, what they tried, country). No IPs,
@@ -184,6 +193,7 @@ The ledger is the foundation; the assistant is only as good as its grounding.
 | 2026-11-06 | The week calendar places things where the user said they were. Stated times win and are copied exactly (`time: said`); one activity can hold several timed `sessions` and an end (`until`); estimated times are drawn softer and untimed ones dashed, placed after what was told before them in the first free stretch instead of piling onto timed blocks. The day runs to the 4am cutoff, so "bed at 2am" is that night's end, not 2am that morning (they were clamped to 5am before). The reconcile keeps a said time when its re-read comes back vaguer. The grid gets hour lines and labels inside blocks, and a tapped day opens its own hour-by-hour column. Prompted by 2026-11-02, where "the 4pm, 6pm and 7pm sessions" became one 16:00–19:00 block drawn exactly like every rough guess, a 4-hour drive was stacked after the surf, and a 2am viewpoint sat at 5am. The last three weeks were backfilled from the transcripts in a session. Times from email and from a watch are designed (To do), not built |
 | 2026-11-06 | Booking pages grow into a tool: pages `extends` a base (a `template: true` page never served itself), so a personal link is a few lines over shared times and wording; times are a `weekly` pattern over a `horizon` plus per-date overrides; six preset `theme`s (colours and fonts only, no freeform CSS on a page strangers see); `once: true` one-time links; `guest` pre-fills the name; `book.<domain>/` serves `booking/index.yaml` as the generic page. A slot booked on any page is now taken on all, since they share one person's time. The user can manage them in the app (You → Booking pages: links, bookings, YAML edit, open/close, delete, cancel a booking) and chat proposes new or changed pages as confirm cards. Considered keying the custom page on `?name=` and kept one link per page instead: a name is guessable and collides, and one link can be closed alone; `?name=` stays a pre-fill. The user asked for something more versatile than one hand-written page per person |
 | 2026-11-07 | Discipline totals (and the goals and Where breakdowns counted from them) count sessions, not logged activities: an activity with timed `sessions` counts one per session, so three hour-long Waco Surf sessions in a day are 3, not 1. Days done stay the unit for the weekly summaries |
+| 2026-11-23 | The user's devices become the source of truth for when and how long. Apple Watch data arrives through **Health Auto Export** (an iOS app that pushes Apple Health to a URL on a schedule) instead of the hand-built Shortcut the To do sketched: a Shortcut can't read sleep stages or heart-rate summaries reliably and needs rebuilding per metric, while the app sends metrics, sleep (summarised or as stage segments) and workouts as JSON, and backfills any range. The one inlet also takes screen time: Mac sessions per app and site from **ActivityWatch** (free, local, handles idle and lock; `tools/screentime` forwards app + bare domain + times, never titles or URLs), iPhone per-app daily totals from the iOS 26 Shortcuts action "Get App & Website Data", and optional opened/closed events for a few apps when the exact time matters. iPhone usage can't be exported any other way: Apple's Screen Time API keeps raw data inside a sandbox, and the Biome files that sync it to the Mac are undocumented. Timed records live in one file per day (`health/days/`), so a year's backfill doesn't grow one file without bound, and a post touching many days is one commit. The week calendar draws a told activity matched to a workout (same sport through the discipline graph, nearest in time; a generic "Other" or "Water Sports" only by overlap) at the watch's times, a workout never told as its own block, sleep full width under the day (tonight's night split at the 4am cutoff), and screen time as a strip at the column's edge so it never squeezes the activities. A Health tab shows trends against the user's own 28-day usual and correlations worth a glance (sleep vs energy, screen tonight vs sleep tomorrow), labelled as a glance, not a finding; nothing measured is scored. The brief gets a few measured lines (one line at most in the brief, only when it changes the day), the weekly review the week's averages, chat a `get_health` tool. The measured data stays private: not on the guest view, and the matched times are derived, never written back into the journal |
 
 ## Not built
 
@@ -209,28 +219,26 @@ breaks its terms).
   journal time from email is an inferred fact, so it goes through a
   confirm card ("Surf on Nov 2 at 16:00, 18:00, 19:00 from 3 Waco Surf
   bookings?"); flights also feed the trail (transit legs) the same way.
-- **Watch workouts with real times.** An Apple Watch records each workout
-  with a start, an end and a type. An iOS Shortcut ("Find Health Samples
-  → Workouts", run at the day's end) posts them through the health inlet,
-  `POST /health/<secret>` with a `workouts` list beside the daily numbers:
-  `{"date": "2026-11-02", "steps": 9100, "workouts": [{"type": "Surfing",
-  "start": "2026-11-02T16:02:10-06:00", "end": "2026-11-02T16:58:40-06:00",
-  "kcal": 410, "avg_hr": 128}]}`. `health.py` keeps them in
-  `health.yaml` under the day as `workouts:` (local "HH:MM" start/end,
-  type, numbers), still measurements beside the journal. `timeline.py`
-  gains a `measured` kind, the firmest of all: a workout matched to a
-  logged activity (sport mapped from the Watch's type, overlapping or
-  nearest in time) replaces that activity's blocks on the calendar, and
-  an unmatched workout shows as its own measured block with a one-tap
-  "log this". Sleep (`sleep_start`/`sleep_end`) arrives the same way and
-  draws the night (see Sleep tracking).
-
-- **Sleep tracking.** Bed and wake times from notes ("hit the sack around
-  9"), plus sleep hours from the phone's health inlet when the Shortcut
-  sends them; show nights on the week calendar and averages in the numbers.
-- **Quantified analytics.** Trends over weeks and months: sessions and hours
-  per discipline, sleep, energy/mood/focus, food, spend; correlations worth
-  a glance (sleep vs. energy, sessions vs. mood). A tab in the web app.
+- **Voice from the Apple Watch.** watchOS has no browser, so the PWA can't
+  run there. Cheapest: two watch Shortcuts (Dictate Text → POST; "Log" and
+  "Ask", on a complication, Siri phrase or the Action button) against a new
+  token-authenticated path outside `/api/*` (per-device token, hashed,
+  revocable, log/chat only), with chat's reply arriving as one Web Push
+  (the PWA's notifications already mirror to the watch). A native watch app
+  (real audio to `/api/voice`, Keychain token) is the step after, at $99/yr
+  and a few days of Swift. Needs the user's decision: it is a second way in
+  besides the session cookie.
+- **"Log this" for a workout the journal never mentioned.** One tap on the
+  calendar's measured block to add it as an activity (a confirm card, since
+  it writes the journal).
+- **Discipline hours from the watch.** Totals count sessions and said hours;
+  a matched workout's measured minutes could fill the hours where nothing
+  was said.
+- **Bed and wake from notes** ("hit the sack around 9") on nights the watch
+  wasn't worn.
+- **Quantified analytics, the rest.** The Health tab covers sleep, heart,
+  activity, workouts and screen time; still wanted: sessions and hours per
+  discipline over months, food and spend trends.
 - **Periods.** Spans without daily entries ("10 days in Lombok, ~3 surfs"):
   coarse counts with sources, shown as bands, never as made-up days; backfill
   from email (flights, bookings, receipts) and photo locations, each as a
