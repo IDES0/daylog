@@ -117,7 +117,9 @@ def day_numbers(
             out["bed"], out["wake"] = f"{a:%H:%M}", f"{b:%H:%M}"
         if "sleep_h" not in out and (n := _num(night.get("asleep_h"))) is not None:
             out["sleep_h"] = n
-    workouts = [w for w in (records or {}).get("workouts") or [] if isinstance(w, Mapping)]
+    workouts = measures.sessions(
+        [dict(w) for w in (records or {}).get("workouts") or [] if isinstance(w, Mapping)]
+    )
     if workouts:
         out["workout_min"] = round(sum(_num(w.get("minutes")) or 0 for w in workouts))
         out["workouts"] = len(workouts)
@@ -239,9 +241,8 @@ def workout_totals(records: Mapping[date, Mapping[str, Any]]) -> list[dict[str, 
     """Per workout kind over the range: sessions, minutes, kcal."""
     totals: dict[str, dict[str, float]] = defaultdict(lambda: defaultdict(float))
     for rec in records.values():
-        for w in rec.get("workouts") or []:
-            if not isinstance(w, Mapping):
-                continue
+        day = [dict(w) for w in rec.get("workouts") or [] if isinstance(w, Mapping)]
+        for w in measures.sessions(day):
             t = totals[str(w.get("kind") or "?")]
             t["sessions"] += 1
             t["minutes"] += _num(w.get("minutes")) or 0
@@ -336,7 +337,9 @@ def brief_text(
         lines.append("Heart: " + "; ".join(heart) + ".")
     day_bits = []
     rec = records.get(today - timedelta(days=1)) or {}
-    workouts = [w for w in rec.get("workouts") or [] if isinstance(w, Mapping)]
+    workouts = measures.sessions(
+        [dict(w) for w in rec.get("workouts") or [] if isinstance(w, Mapping)]
+    )
     if workouts:
         kinds = ", ".join(
             f"{w.get('kind')} {duration(_num(w.get('minutes')) or 0)}" for w in workouts

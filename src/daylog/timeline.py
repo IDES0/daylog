@@ -277,7 +277,7 @@ def day_blocks(
         _lay_out_lanes(blocks)
         return blocks
 
-    workouts = _on_day([w for r in files for w in r.get("workouts") or []], day)
+    workouts = _on_day(measures.sessions([w for r in files for w in r.get("workouts") or []]), day)
     # Every piece the journal told, timed or not, may be a watch workout. A unit
     # is activity * 100 + its piece (99 for an untimed activity).
     units: list[tuple[int, str, float | None, float]] = []

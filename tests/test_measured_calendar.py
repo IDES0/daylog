@@ -253,3 +253,35 @@ def test_feed_events_for_blocks_and_nights() -> None:
     )
     feed = calendar_feed.build_feed([], [], [], events + [sleep]).decode()
     assert feed.count("BEGIN:VEVENT") == 4
+
+
+def test_real_watch_quirks_blips_split_sessions_and_apple_names() -> None:
+    surf = [
+        _w("Surfing Sports", "2026-11-20 01:08:56 -0600", "2026-11-20 01:10:11 -0600", minutes=1.3),
+        _w(
+            "Surfing Sports",
+            "2026-11-20 09:54:30 -0600",
+            "2026-11-20 10:19:12 -0600",
+            minutes=24.7,
+            kcal=220,
+            hr_avg=135,
+            hr_max=166,
+        ),
+        _w(
+            "Surfing Sports",
+            "2026-11-20 10:23:48 -0600",
+            "2026-11-20 10:50:27 -0600",
+            minutes=26.6,
+            kcal=224,
+            hr_avg=130,
+            hr_max=169,
+        ),
+    ]
+    (one,) = measures.sessions(surf)
+    assert (one["start"], one["end"], one["pieces"]) == (surf[1]["start"], surf[2]["end"], 2)
+    assert (one["minutes"], one["kcal"], one["hr_max"], one["hr_avg"]) == (51.3, 444.0, 169.0, 132)
+    fm = {"activities": [{"type": "surf", "hours": 1}]}
+    (block,) = timeline.day_blocks(fm, {"workouts": surf}, None, _graph(), DAY)
+    assert (block.kind, block.time, block.start) == ("surf", "measured", 9 + 54.5 / 60)
+    assert measures.same_sport(_graph(), "surf", "Surfing Sports")
+    assert measures.same_sport(None, "paddle", "Paddle Sports")
