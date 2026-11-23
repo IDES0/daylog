@@ -24,7 +24,18 @@ from typing import Any
 import anthropic
 from anthropic.types import MessageParam, ToolParam
 
-from daylog import booking, brief, disciplines, edits, goals, llm, rankings, trail
+from daylog import (
+    booking,
+    brief,
+    disciplines,
+    edits,
+    goals,
+    health_stats,
+    llm,
+    measures,
+    rankings,
+    trail,
+)
 from daylog.places import PlaceIndex
 from daylog.runtime import tz
 from daylog.vault import Vault, dump_yaml_text
@@ -63,6 +74,16 @@ TOOLS: list[ToolParam] = [
         "say about…', and to find days before reading them with get_journal.",
         {"query": {"type": "string"}, "limit": {"type": "integer"}},
         ["query"],
+    ),
+    _tool(
+        "get_health",
+        "What their own devices measured, per day, for a date range (max 31 days): sleep "
+        "(hours, bed and wake times, stages), resting heart rate, HRV, steps, exercise, each "
+        "Apple Watch workout with its real start and end, and screen time per device and "
+        "app. Plus the last 7 days against their 28-day usual. Exact, unlike the journal's "
+        "estimated times; the journal says what and why.",
+        {"start": {"type": "string"}, "end": {"type": "string"}},
+        ["start", "end"],
     ),
     _tool(
         "get_trail",
@@ -373,6 +394,35 @@ class Tools:
             if len(hits) >= cap:
                 break
         return "\n\n".join(hits) or f"Nothing in the journal mentions {query!r}."
+
+    def t_get_health(self, start: str, end: str) -> str:
+        s, e = self._range(start, end)
+        rows, records = health_stats.load(self.v, s - timedelta(days=35), e)
+        shown = [r for r in rows if r["date"] >= s.isoformat()]
+        days = []
+        for row in shown:
+            d = date.fromisoformat(row["date"])
+            rec = records.get(d) or {}
+            numbers = {k: v for k, v in row.items() if k != "date"}
+            workouts = [
+                {k: w.get(k) for k in ("kind", "start", "end", "minutes", "kcal", "hr_avg")}
+                for w in rec.get("workouts") or []
+            ]
+            screen = {
+                device: dict(list(apps.items())[:6])
+                for device, apps in measures.screen_minutes(rec).items()
+            }
+            if numbers or workouts or screen:
+                days.append(
+                    f"## {row['date']}\n"
+                    + json.dumps(
+                        {**numbers, "workouts": workouts, "screen_min": screen}, default=str
+                    )
+                )
+        if not days:
+            return "Nothing measured in that range (no watch, phone or computer data came in)."
+        drift = health_stats.baselines(rows)
+        return "\n\n".join(days) + "\n\n7 days vs 28-day usual: " + json.dumps(drift)
 
     def t_get_trail(self, start: str, end: str) -> str:
         s, e = self._range(start, end)

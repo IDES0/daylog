@@ -17,6 +17,7 @@ from daylog import (
     brief,
     disciplines,
     goals,
+    health_stats,
     itinerary,
     journal_service,
     llm,
@@ -141,6 +142,11 @@ def write_review(v: Vault, any_day: date) -> tuple[str, date, date, str] | None:
     if graph:
         week = disciplines.totals(graph, {d: e.frontmatter for d, e in entries.items()})
         stats["by_discipline"] = disciplines.numbers(graph, week)
+    try:
+        measured = health_stats.review_section(v, start, end)
+    except Exception:
+        logger.exception("measured section failed")
+        measured = ""
     review_input = review.build_input(
         entries,
         stats,
@@ -149,6 +155,7 @@ def write_review(v: Vault, any_day: date) -> tuple[str, date, date, str] | None:
         llm.format_usage(v),
         v.read_principles(),
         weekly_research,
+        measured,
     )
     try:
         text, _cost = review.write(review_input)

@@ -41,6 +41,8 @@ from daylog import (
     disciplines,
     edits,
     extract,
+    health,
+    health_stats,
     itinerary,
     journal_service,
     llm,
@@ -68,6 +70,7 @@ from daylog.vault import (
     dump_yaml_text,
     load_yaml_text,
 )
+from daylog.webapp import watch
 from daylog.webapp.cards import Card, CardStore, Outcome, UnknownAction, action
 from daylog.webapp.chat_store import ChatStore
 from daylog.webapp.jobs import Jobs, key_for
@@ -242,6 +245,8 @@ class Api:
             (r"/api/home", self.home),
             (r"/api/map", self.map),
             (r"/api/calendar", self.calendar),
+            (r"/api/health", self.health_view),
+            (r"/api/devices", self.device_list),
             (r"/api/journal", self.journal),
             (r"/api/journal/(\d{4}-\d{2}-\d{2})", self.journal_day),
             (r"/api/chat", self.chat_history),
@@ -272,6 +277,8 @@ class Api:
             (r"/api/chat", self.chat_send),
             (r"/api/chat/reset", self.chat_reset),
             (r"/api/push/subscribe", self.push_subscribe),
+            (r"/api/devices", self.device_add),
+            (r"/api/devices/([0-9a-f]{8})/revoke", self.device_revoke),
             (r"/api/push/test", self.push_test),
             (r"/api/brief", self.make_brief),
             (r"/api/plan", self.make_plan),
@@ -469,10 +476,19 @@ class Api:
         monday = dashboard.week_start(min(week_of, today))
         days = [monday + timedelta(days=i) for i in range(7)]
         entries = v.read_journal_range(monday, days[-1])
+        measured = health.read_days(v, monday, days[-1] + timedelta(days=1))
+        numbers = v.read_yaml(health.FILE, {})
+        graph = Graph(v.read_disciplines())
         out = []
         for d in days:
             entry = entries.get(d)
-            blocks = timeline.day_blocks(entry.frontmatter) if entry else []
+            blocks = timeline.day_blocks(
+                entry.frontmatter if entry else None,
+                measured.get(d),
+                measured.get(d + timedelta(days=1)),
+                graph,
+                d,
+            )
             out.append(
                 {
                     "date": d.isoformat(),
@@ -489,10 +505,16 @@ class Api:
                             "session": b.session,
                             "lane": b.lane,
                             "lanes": b.lanes,
+                            "layer": b.layer,
+                            "source": b.source,
+                            "facts": plain(b.facts),
                             "hue": dashboard._hue(b.kind),
                         }
                         for b in blocks
                     ],
+                    "measured": health_stats.day_numbers(
+                        health.for_day(numbers, d), measured.get(d)
+                    ),
                     **day_scores(entry.frontmatter if entry else None),
                 }
             )
@@ -504,6 +526,63 @@ class Api:
             "averages": {key: review.score_avg(frontmatters, key) for key in extract.SCORE_FIELDS},
             "prev": (monday - timedelta(days=7)).isoformat(),
             "next": nxt.isoformat() if nxt <= today else None,
+        }
+
+    # -- watch & shortcuts (webapp/watch.py) ----------------------------------------
+
+    @staticmethod
+    def _watch_urls(req: Request) -> dict[str, str]:
+        host = (req.headers.get("x-forwarded-host") or req.headers.get("host") or "").split(",")[0]
+        host = host.strip()
+        local = host.startswith(("localhost", "127.0.0.1"))
+        origin = f"{'http' if local else 'https'}://{host}" if host else ""
+        return {"log": f"{origin}/watch/log", "ask": f"{origin}/watch/ask"}
+
+    def device_list(self, req: Request, m: re.Match[str]) -> Reply:
+        found = [watch.public(d) for d in watch.devices(self._vault())]
+        return 200, {"devices": found, "urls": self._watch_urls(req)}
+
+    def device_add(self, req: Request, m: re.Match[str]) -> Reply:
+        name = str(self._json(req).get("name") or "")
+        try:
+            device, token = watch.add(self._vault(), name, self._today())
+        except ValueError as exc:
+            raise ApiError(409, "too_many", str(exc)) from exc
+        # The token exists in clear only in this reply; the vault keeps its hash.
+        return 200, {"device": watch.public(device), "token": token, "urls": self._watch_urls(req)}
+
+    def device_revoke(self, req: Request, m: re.Match[str]) -> Reply:
+        if not watch.revoke(self._vault(), m.group(1), self._today()):
+            raise ApiError(404, "not_found", "No such device, or already revoked.")
+        return 200, {"ok": True}
+
+    def health_view(self, req: Request, m: re.Match[str]) -> Reply:
+        """Trends from the watch, phone and computer (health_stats.py); `days` 7..400."""
+        v = self._vault()
+        today = self._today()
+        n = _int(req.arg("days"), 30, 7, 400)
+        # Enough history behind the range for its last week's 28-day baseline.
+        span = max(n, health_stats.BASELINE_RECENT + health_stats.BASELINE_BEFORE)
+        start = today - timedelta(days=span - 1)
+        dates = [start + timedelta(days=i) for i in range(span)]
+        records = health.read_days(v, start, today)
+        journal = {d: e.frontmatter for d, e in v.read_journal_range(start, today).items()}
+        rows = health_stats.series(dates, v.read_yaml(health.FILE, {}), records, journal)
+        shown = rows[-n:]
+        in_range = {d: r for d, r in records.items() if d >= today - timedelta(days=n - 1)}
+        measured = [r["date"] for r in rows if set(r) - {"date", "energy", "mood", "focus"}]
+        labels = {k: [label, unit] for k, (label, unit, _) in health_stats.DAILY.items()}
+        labels.update({k: [label, unit] for k, (label, unit) in health_stats.DERIVED.items()})
+        return 200, {
+            "today": today.isoformat(),
+            "days": n,
+            "series": shown,
+            "baselines": health_stats.baselines(rows),
+            "correlations": health_stats.correlations(shown),
+            "workouts": health_stats.workout_totals(in_range),
+            "screen": health_stats.screen_totals(in_range),
+            "labels": labels,
+            "last_measured": measured[-1] if measured else None,
         }
 
     # -- journal ----------------------------------------------------------------------
@@ -1176,6 +1255,12 @@ class Api:
 
     def chat_send(self, req: Request, m: re.Match[str]) -> Reply:
         text = _text_field(self._json(req), "text", limit=8000)
+        return 200, self.ask(text, book_base(req))
+
+    def ask(self, text: str, links: str) -> dict[str, Any]:
+        """One chat turn, shared by the web chat and the watch (webapp/watch.py):
+        the reply, and anything it proposes as cards in the app. `links` is
+        where booking links live (book_base)."""
         v = self._vault()
         now = self._now()
         try:
@@ -1185,10 +1270,10 @@ class Api:
         self.chat.record(text, result.text, result.new_history, now)
         for p in result.proposals:
             if p.get("edit") == "booking":
-                p["link"] = book_base(req) + booking.link_path(str(p.get("slug")))
+                p["link"] = links + booking.link_path(str(p.get("slug")))
         cards = [self._proposal_card(p) for p in result.proposals]
         cards += [c for job in result.research_jobs if (c := self._research_job_card(job))]
-        return 200, {
+        return {
             "reply": result.text,
             "cards": self._cards(cards),
             "cost": round(result.cost, 4),

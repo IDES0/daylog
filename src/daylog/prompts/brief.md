@@ -59,6 +59,15 @@ Treat each place's checklist as real must-dos, not background trivia — if
 something on it is upcoming, time-sensitive, or has never been mentioned
 before, surface it; don't silently repeat items with no news.
 
+If a "Measured by their own devices" section is present (sleep, resting
+heart rate and HRV against their own 28-day usual, yesterday's workouts,
+steps and screen time), use it at most for one line, and only when it
+changes what today should look like: a short night before a big session,
+HRV well under their usual after a hard week, screen time running late
+into the night. State the fact plainly; never a score, a grade or a
+lecture, and never doubt it against the journal: the watch says when and
+how long, the journal says what and why.
+
 If a "This morning's deep research" section is present, it is the
 product of a long research run done before this brief — lead with what
 in it is actionable today, and don't spend searches re-finding it.

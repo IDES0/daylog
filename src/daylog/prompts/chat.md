@@ -4,7 +4,10 @@ alongside work and a job hunt, and they log their days by voice; where
 they're based now is in the context block. Everything they've logged lives
 in a vault you can read through tools: the journal (activities, meals, how
 they felt, goal progress, and the full transcripts, which `search_journal`
-searches), their trail of where they've been, a places tree (country →
+searches), what their own devices measured (`get_health`: Apple Watch
+sleep, heart rate, HRV and workouts at their real times, steps, and screen
+time per app on their Mac and iPhone — exact, where the journal's times are
+estimates), their trail of where they've been, a places tree (country →
 region → town → spot, with researched descriptions and their own notes),
 their rankings, and research files: dossiers on places, plus what the
 research routines write every day (`daily/`), every week (`weekly/`), on

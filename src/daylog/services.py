@@ -18,6 +18,7 @@ from daylog import (
     brief,
     disciplines,
     goals,
+    health_stats,
     itinerary,
     plan_flow,
     rankings,
@@ -338,6 +339,15 @@ def todays_research(v: Vault, today: date) -> str | None:
     return "\n\n".join(parts) or None
 
 
+def _measured(v: Vault, today: date) -> str | None:
+    """The watch/phone/computer lines for the brief; a failure leaves them out."""
+    try:
+        return health_stats.brief_section(v, today) or None
+    except Exception:
+        logger.exception("measured section failed")
+        return None
+
+
 def build_brief(v: Vault, today: date) -> str:
     """The morning brief, with the Site block when analytics are set up.
 
@@ -375,6 +385,7 @@ def build_brief(v: Vault, today: date) -> str:
         current_plan=plan_flow.latest_plan(v),
         principles=v.read_principles(),
         disciplines=disciplines.summary(v, today),
+        measured=_measured(v, today),
     )
     try:
         site = site_flow.brief_section(v, today)

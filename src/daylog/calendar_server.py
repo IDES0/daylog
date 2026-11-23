@@ -19,22 +19,49 @@ import logging
 import os
 import re
 import threading
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs, urlsplit
 
-from daylog import booking, calendar_feed, daily, dashboard, health, push, web
+from daylog import booking, calendar_feed, daily, dashboard, health, push, timeline, web
+from daylog.disciplines import Graph
 from daylog.runtime import tz
 from daylog.vault import Vault
 from daylog.webapp import api as webapi
+from daylog.webapp import watch
 
 logger = logging.getLogger(__name__)
 
 
 def _vault() -> Vault:
     return Vault(Path(os.environ.get("VAULT_PATH", "../daylog-vault")))
+
+
+# Days back the feed carries each day's blocks (told, watch, sleep, screen) as timed events.
+FEED_BLOCK_DAYS = 120
+
+
+def _day_blocks_events(vault: Vault, journal_entries: list[Any]) -> list[dict[str, Any]]:
+    today = daily.logical_day(datetime.now(tz()))
+    start = today - timedelta(days=FEED_BLOCK_DAYS)
+    by_day = {e.date: e for e in journal_entries if start <= e.date <= today}
+    measured = health.read_days(vault, start, today + timedelta(days=1))
+    graph = Graph(vault.read_disciplines())
+    events: list[dict[str, Any]] = []
+    for day in sorted({*by_day, *(d for d in measured if d <= today)}):
+        entry = by_day.get(day)
+        blocks = timeline.day_blocks(
+            entry.frontmatter if entry else None,
+            measured.get(day),
+            measured.get(day + timedelta(days=1)),
+            graph,
+            day,
+        )
+        events += calendar_feed.block_events(day, blocks, tz())
+    nights = [n for d, rec in measured.items() if d <= today for n in rec.get("sleep") or []]
+    return events + calendar_feed.sleep_events(nights, tz())
 
 
 def _build_feed_bytes() -> bytes:
@@ -44,11 +71,16 @@ def _build_feed_bytes() -> bytes:
         for entry_date in vault.list_journal_dates()
         if (entry := vault.read_journal_entry(entry_date)) is not None
     ]
+    try:
+        blocks = _day_blocks_events(vault, journal_entries)
+    except Exception:
+        logger.exception("feed: day blocks failed; serving without them")
+        blocks = []
     return calendar_feed.build_feed(
         vault.read_goals(),
         vault.read_itinerary(),
         journal_entries,
-        booking.events(booking.bookings(vault), tz()),
+        booking.events(booking.bookings(vault), tz()) + blocks,
     )
 
 
@@ -120,14 +152,9 @@ _ICONS = {"/icon-180.png": 180, "/icon-192.png": 192, "/icon-512.png": 512}
 
 
 def _store_health(body: bytes) -> str:
-    vault = _vault()
-    day, metrics = health.parse(body, daily.logical_day(datetime.now(tz())))
-    stored = health.merge(vault.read_yaml(health.FILE, {}), day, metrics)
-    vault.write_yaml(health.FILE, stored, f"health: {day.isoformat()}")
-    left_out = health.skipped(body, metrics)
-    note = f"; skipped (no number): {', '.join(left_out)}" if left_out else ""
-    logger.info("health saved for %s: %s%s", day, ", ".join(metrics), note)
-    return f"saved {', '.join(metrics)} for {day.isoformat()}{note}\n"
+    reply = health.ingest(_vault(), body, daily.logical_day(datetime.now(tz())))
+    logger.info("health inlet: %s", reply)
+    return reply + "\n"
 
 
 def _make_handler(
@@ -141,6 +168,8 @@ def _make_handler(
     guard = web.LoginGuard(password) if password and site else None
     # One API per server too: it holds the open cards and the web chat.
     api = (app or webapi.Api()) if site else None
+    # The watch inlet shares the app's jobs, chat and cards (webapp/watch.py).
+    watch_inlet = watch.Watch(api) if api is not None else None
     if api is not None and app is None:
         # Web notes a restart interrupted are logged now (see webapp/jobs.py).
         try:
@@ -281,6 +310,8 @@ def _make_handler(
                 self._not_found()
             elif health_path and path == health_path:
                 self._store_health()
+            elif watch_inlet and path in ("/watch/log", "/watch/ask"):
+                self._watch(path)
             elif site and path == "/login":
                 self._login()
             elif site and path == "/logout":
@@ -388,8 +419,24 @@ def _make_handler(
             logger.warning("status login refused")
             self._land()
 
+        def _watch(self, path: str) -> None:
+            # Its own token per device (webapp/watch.py); never the session.
+            assert watch_inlet is not None
+            headers = {k.lower(): v for k, v in self.headers.items()}
+            body = self._body(watch.MAX_BODY_BYTES)
+            if body is None:
+                self._reply(413, "That's too long for one note.\n")
+                return
+            links = webapi.book_base(webapi.Request("POST", path, headers=headers))
+            try:
+                code, text = watch_inlet.handle(watch.Request(path, headers, body, links))
+            except Exception:
+                logger.exception("watch inlet failed")
+                code, text = 500, "Something went wrong. Try the app."
+            self._reply(code, text + "\n")
+
         def _store_health(self) -> None:
-            body = self._body(health.MAX_BODY_BYTES)
+            body = self._body(health.MAX_EXPORT_BYTES)
             if body is None:
                 self._reply(413, "body missing or too large\n")
                 return
