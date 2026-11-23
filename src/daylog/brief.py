@@ -149,6 +149,7 @@ def generate_brief(
     current_plan: str | None = None,
     principles: str | None = None,
     disciplines: str | None = None,
+    measured: str | None = None,
     client: anthropic.Anthropic | None = None,
 ) -> str:
     client = client or anthropic.Anthropic()
@@ -201,6 +202,10 @@ def generate_brief(
         )
     if disciplines:
         user_content += f"\n\nDisciplines (their sports as a graph, computed):\n{disciplines}"
+    if measured:
+        user_content += (
+            f"\n\nMeasured by their own devices (Apple Watch, phone, computer; exact):\n{measured}"
+        )
     if morning_research:
         user_content += (
             "\n\nThis morning's deep research (from the scheduled research routine — "

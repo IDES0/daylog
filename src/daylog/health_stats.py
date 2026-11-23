@@ -17,9 +17,12 @@ import math
 from collections import defaultdict
 from collections.abc import Mapping
 from datetime import date, datetime, timedelta
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from daylog import health, measures
+
+if TYPE_CHECKING:
+    from daylog.vault import Vault
 
 # key -> (label, unit, health.yaml names to read it from, best first)
 DAILY: dict[str, tuple[str, str, tuple[str, ...]]] = {
@@ -380,3 +383,27 @@ def review_text(rows: list[dict[str, Any]], records: Mapping[date, Mapping[str, 
     for t in workout_totals({d: r for d, r in records.items()})[:8]:
         lines.append(f"- {t['kind']}: {t['sessions']}× · {duration(t['minutes'])}")
     return "\n".join(lines)
+
+
+# -- reading the vault (through Vault, which does the file access) ---------------------
+
+
+def load(vault: Vault, start: date, end: date) -> tuple[list[dict[str, Any]], dict[date, Any]]:
+    """Rows for start..end and the measured day files behind them."""
+    dates = [start + timedelta(days=i) for i in range((end - start).days + 1)]
+    records = health.read_days(vault, start, end)
+    journal = {d: e.frontmatter for d, e in vault.read_journal_range(start, end).items()}
+    return series(dates, vault.read_yaml(health.FILE, {}), records, journal), records
+
+
+def brief_section(vault: Vault, today: date) -> str:
+    """The brief's measured lines (last night, yesterday, drift); '' when nothing came in."""
+    start = today - timedelta(days=BASELINE_RECENT + BASELINE_BEFORE)
+    rows, records = load(vault, start, today)
+    return brief_text(today, rows, records)
+
+
+def review_section(vault: Vault, start: date, end: date) -> str:
+    """The week's measured numbers for the weekly review; '' when nothing came in."""
+    rows, records = load(vault, start, end)
+    return review_text(rows, records)

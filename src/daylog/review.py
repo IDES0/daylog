@@ -172,6 +172,7 @@ def build_input(
     spend: str,
     principles: str = "",
     weekly_research: str | None = None,
+    measured: str = "",
 ) -> str:
     days = []
     for d, entry in sorted(entries.items()):
@@ -182,11 +183,15 @@ def build_input(
         }
         heading = f"## {d.isoformat()} ({d.strftime('%A')})"
         days.append(f"{heading}\n{entry.summary}\n{json.dumps(fm, default=str)}")
+    measured_block = (
+        f"Measured by their devices this week (exact):\n{measured}\n\n" if measured else ""
+    )
     return (
         f"Their own operating principles (the lens for this review):\n"
         f"{principles.strip() or '(none written)'}\n\n"
         f"Goals:\n{goals_lines}\n\n"
         f"This week's numbers (computed, exact):\n{json.dumps(stats, default=str, indent=1)}\n\n"
+        f"{measured_block}"
         f"API spend: {spend}\n\n"
         f"This week's research routine (focus guides, discovery, next-move check):\n"
         f"{(weekly_research or '(none this week)')[:4000]}\n\n"
