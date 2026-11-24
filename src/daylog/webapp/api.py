@@ -32,6 +32,7 @@ from urllib.parse import urlsplit
 
 from daylog import (
     analytics,
+    booked,
     booking,
     brief,
     chat,
@@ -477,6 +478,7 @@ class Api:
         days = [monday + timedelta(days=i) for i in range(7)]
         entries = v.read_journal_range(monday, days[-1])
         measured = health.read_days(v, monday, days[-1] + timedelta(days=1))
+        bookings = booked.read(v, monday, days[-1])
         numbers = v.read_yaml(health.FILE, {})
         graph = Graph(v.read_disciplines())
         out = []
@@ -488,6 +490,7 @@ class Api:
                 measured.get(d + timedelta(days=1)),
                 graph,
                 d,
+                bookings.get(d),
             )
             out.append(
                 {

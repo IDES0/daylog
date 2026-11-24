@@ -60,8 +60,12 @@ thing, when it was told first). Overlaps sit side by side in lanes. Each
 block shows its name and, when tall enough, its start; tapping a day
 opens an hour-by-hour column with every block's times, session ("2/3")
 and detail, then the summary. Apple Watch workouts replace these
-estimates with measured times (see **Health** below); times from email are
-designed in `docs/DESIGN.md` (To do), not built.
+estimates with measured times (see **Health** below), and bookings found in
+email (Waco Surf sessions, flights, tours, tables) show at their booked
+times: the nightly evening routine reads confirmations (Gmail read-only)
+into `research/times/<date>.yaml`, a told activity without a said time is
+drawn at its booking's time (marked ✉), and a booking nothing matches is
+its own planned block. The brief gets today's and tomorrow's bookings.
 - **Corrections**: say a correction out loud ("actually I only surfed 1
   hour, not 2") and extraction is given the day's entry so far to resolve
   it against, by index. Only `activities`/`skipped`/`open_questions` can be

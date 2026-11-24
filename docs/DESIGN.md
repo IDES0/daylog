@@ -200,6 +200,7 @@ The ledger is the foundation; the assistant is only as good as its grounding.
 | 2026-11-23 | Voice from the Apple Watch, through two Shortcuts rather than a native app. watchOS has no browser and a Shortcut can't keep the session cookie, so the user approved a second way in: `POST /watch/log` and `/watch/ask` with a bearer key per device, made in the app (You → Watch & Shortcuts), shown once, stored as a SHA-256 hash in `devices.yaml`, revocable there. Outside `/api/*`, so the session-and-CSRF rule stays whole; a key can only log a note (the Log tab's pipeline, spooled, answered at once, then one notification with what was logged) or ask (the Chat tab's conversation; an answer within ~20 s comes back as plain text to show or speak, a slower one as one notification). The watch can't confirm, so cards wait in the app and the notification says how many. 30 requests per device per 10 minutes, and after 10 bad keys in 15 minutes the inlet refuses everyone, since chat spends money. Text only: watch Shortcuts can't record audio, so watch notes use Apple's dictation. A native watch app (real audio, Keychain) stays the next step if this sees daily use |
 | 2026-11-23 | The brief can come when the user wakes instead of at a fixed hour: the watch key gains one more action, `POST /watch/brief`, for an iOS "Waking Up" automation that first has Health Auto Export send last night's sleep. It makes the brief once a day (a second call says it's already made) with the scheduled job's own notification, and the scheduled brief now skips a day that already has one, so `BRIEF_HOUR` becomes the fallback. Asked for so the brief reads the night just slept. The inlet also says why it couldn't read screen totals (what came, in the reply to the sender only; the server log keeps the gist), after the first iPhone Screen Time run saved nothing without saying why |
 | 2026-11-23 | A restaurant, bar or other rankable place named in a note but unknown to the places tree is offered as a new place right away: an Add card (confidence `inferred`, under where the user is, no web lookup, so still free), then a Rank card once added. Each name is offered once. Before this, a new place only came from a paid lookup that runs when asked, so about twenty restaurants told since October were never linked and never asked to be ranked. The tab bar goes back to five (Home, Log, Chat, Health, You): Trips, the least used, moves under You behind a You · Trips switch, and rankings show the top five of a list until "Show all" |
+| 2026-11-23 | Bookings from email reach the calendar and the brief. The app still has no mail access: the nightly evening routine (Gmail read-only) also writes `research/times/<date>.yaml` for yesterday through the next 14 days (kind, title, place, local start and end, status, which email). The week calendar draws a told activity that matches a booking at the booked time when no time was said (`booked`, drawn with a mail mark; a said time wins over a booking, the watch over both), and a booking nothing matches as its own block, planned rather than proof; the feed carries them too, and the brief gets today's and tomorrow's. Derived on display, so nothing is written to the journal and no confirm card is needed; the To do's confirm card for filling journal times waits until display alone proves not enough, and flights don't feed the trail yet |
 
 ## Not built
 
@@ -210,21 +211,6 @@ breaks its terms).
 
 ### To do (wanted, not started — roughly in order)
 
-- **Times from email.** The app has no Gmail access; the research
-  routines do (read-only). The evening sweep would read booking
-  confirmations and itineraries for the day just gone and the days ahead
-  (Waco Surf session bookings, flights, tours, restaurant bookings) and
-  write `research/times/<date>.yaml`: a list of
-  `{kind: surf, place: "Waco Surf", at: "16:00", until: "17:00", source:
-  "email: Waco Surf booking #1234", subject, received}`. The calendar
-  shows each as a fourth kind, `booked` (solid, a small mail mark), beside
-  the journal's blocks: a booking matching a logged activity of the same
-  kind that day fills in its `sessions` when the journal's times are
-  estimated or missing (a said time still wins), and one with no matching
-  activity shows as a planned block, never as something done. Filling a
-  journal time from email is an inferred fact, so it goes through a
-  confirm card ("Surf on Nov 2 at 16:00, 18:00, 19:00 from 3 Waco Surf
-  bookings?"); flights also feed the trail (transit legs) the same way.
 - **A native watch app.** Real audio to `/api/voice` (Whisper with the
   vocabulary instead of Apple's dictation), the key in the Keychain, a
   complication; $99/yr and a few days of Swift. Only if the Shortcuts see

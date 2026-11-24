@@ -21,3 +21,39 @@ tomorrow's brief has the answer. Take 15-25 minutes; depth beats breadth.
    Answer, options, recommendation, next step. Links.
    ```
    At most ~400 words; link the decision files for depth.
+
+## Also every night: what's booked (read-only Gmail)
+
+The app has no mail access; you are how bookings reach the calendar and the
+morning brief. After the requests, look through Gmail for confirmations and
+changes of things with a time: activity and lesson bookings (surf sessions,
+dives, classes), flights, trains and buses, tours, restaurant reservations,
+appointments, event tickets, check-ins. Cover yesterday through the next 14
+days; look back ~30 days of mail for ones made earlier.
+
+Write one file per day that has any, `research/times/<date>.yaml` (the date
+the booking happens, local to where it happens), a YAML list:
+
+```yaml
+- id: waco-surf-48213        # stable: the sender plus its booking reference
+  kind: surf                 # the word their journal uses for it (surf, dive,
+                             # paraglide, ...), else flight, tour, meal,
+                             # appointment, event, stay
+  title: Waco Surf session   # short, no personal details
+  place: Waco Surf
+  at: "16:00"                # local start, 24 h
+  until: "17:00"             # local end, when the email says it
+  status: booked             # booked | changed | cancelled
+  source: "email: Waco Surf booking confirmation"
+```
+
+- Rewrite a day's file whole each night from what the mail says now: a
+  changed time replaces the old one (same `id`), a cancelled booking stays
+  with `status: cancelled` so the app drops it.
+- Several sessions are several entries ("4pm, 6pm and 7pm" are three).
+- A flight is one entry on its departure day (`at` the local departure,
+  `until` the local arrival when it's the same day), `place` "AUS → SFO".
+- Only what has a confirmed date and time. Never codes, booking numbers
+  beyond what makes the `id` unique, addresses, prices or email addresses.
+- Don't touch files for days before yesterday.
+- Commit with the rest: `git add research && git commit -m "research: requests+times <date>"`.

@@ -25,7 +25,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs, urlsplit
 
-from daylog import booking, calendar_feed, daily, dashboard, health, push, timeline, web
+from daylog import booked, booking, calendar_feed, daily, dashboard, health, push, timeline, web
 from daylog.disciplines import Graph
 from daylog.runtime import tz
 from daylog.vault import Vault
@@ -48,9 +48,10 @@ def _day_blocks_events(vault: Vault, journal_entries: list[Any]) -> list[dict[st
     start = today - timedelta(days=FEED_BLOCK_DAYS)
     by_day = {e.date: e for e in journal_entries if start <= e.date <= today}
     measured = health.read_days(vault, start, today + timedelta(days=1))
+    bookings = booked.read(vault, start, today)
     graph = Graph(vault.read_disciplines())
     events: list[dict[str, Any]] = []
-    for day in sorted({*by_day, *(d for d in measured if d <= today)}):
+    for day in sorted({*by_day, *bookings, *(d for d in measured if d <= today)}):
         entry = by_day.get(day)
         blocks = timeline.day_blocks(
             entry.frontmatter if entry else None,
@@ -58,6 +59,7 @@ def _day_blocks_events(vault: Vault, journal_entries: list[Any]) -> list[dict[st
             measured.get(day + timedelta(days=1)),
             graph,
             day,
+            bookings.get(day),
         )
         events += calendar_feed.block_events(day, blocks, tz())
     nights = [n for d, rec in measured.items() if d <= today for n in rec.get("sleep") or []]
@@ -209,7 +211,16 @@ def _make_handler(
             self.wfile.write(web.LANDING)
 
         def _not_found(self) -> None:
+            # Read (and drop) a small unread body first: closing with it still
+            # unread resets the connection before the client reads the 404.
+            try:
+                length = int(self.headers.get("Content-Length") or 0)
+            except ValueError:
+                length = 0
+            if 0 < length <= 64 * 1024:
+                self.rfile.read(length)
             self.send_response(404)
+            self.send_header("Content-Length", "0")
             self.end_headers()
 
         def _signed_in(self) -> bool:
