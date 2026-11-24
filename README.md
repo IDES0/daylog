@@ -353,6 +353,13 @@ the measurements are the source of truth for when and how long:
   the weekly review the week's averages and workouts; chat a `get_health`
   tool.
 
+### Where you were
+With Overland on the iPhone posting to `/location/<HEALTH_INGEST_SECRET>`
+(setup in `docs/health-setup.md`), daylog keeps **visits**: stays of 10+
+minutes, named after a known place nearby. They show as a strip on the left
+edge of each calendar day, named ones go in the calendar feed, and chat can
+look them up. Raw points never reach the vault.
+
 ### Drafts you send yourself
 When you ask chat for a message to someone, or the brief has one worth
 sending, it comes as a draft card: the recipient, the exact text, and

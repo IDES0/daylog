@@ -105,3 +105,28 @@ Everything stays in your private vault. Nothing here is shown on the guest
 view of the status site. The Mac forwarder never sends titles or URLs. The
 inlet URL is the only key: if it leaks, change `HEALTH_INGEST_SECRET` and
 update the three senders.
+
+## 4. Where you were → Overland (iPhone)
+
+daylog turns your phone's location into **visits** (*Waco Surf 15:40–19:10*):
+a left-edge strip on the week calendar, named visits in your calendar feed,
+and chat can answer "where was I Tuesday afternoon". Only the visits are
+saved to the vault; raw GPS points stay on the server's disk until they
+become a visit, and are never committed. It doesn't change your base in
+`location.yaml`; that still follows what you say.
+
+1. Install **Overland** (free, open source) from the App Store and allow
+   location **Always**.
+2. Settings → **Receiver Endpoint**: the same secret as the health inlet,
+   with `/location/` instead of `/health/`:
+   `https://<status-site>/location/<HEALTH_INGEST_SECRET>`
+3. Start tracking. Sensible settings: desired accuracy ~100 m, points per
+   batch ~50, automatic pausing on. Overland batches points and sends them
+   when it can; daylog answers `{"result": "ok"}`, so the queue empties.
+   A stricter battery mode (significant changes only) still works, with
+   coarser visit times.
+
+A stay counts as a visit after 10 minutes within ~150 m, and takes the
+name of a known place within ~250 m (a spot, venue or restaurant with
+coordinates; not a whole town). OwnTracks in HTTP mode works with the same
+URL if you prefer it.

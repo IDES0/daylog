@@ -175,6 +175,28 @@ class Spool:
         self._file(job_id, ".json").unlink(missing_ok=True)
         self.drop_audio(job_id)
 
+    # Small working state that must survive a restart but never be committed
+    # (the location inlet's recent raw points: only visits reach the vault).
+
+    def save_state(self, name: str, data: Any) -> None:
+        if not re.fullmatch(r"[a-z_]{1,40}", name):
+            raise ValueError(f"not a state name: {name!r}")
+        state_dir = self.path / "state"
+        state_dir.mkdir(parents=True, exist_ok=True)
+        tmp = state_dir / f"{name}.json.tmp"
+        tmp.write_text(json.dumps(data))
+        os.replace(tmp, state_dir / f"{name}.json")
+
+    def load_state(self, name: str, default: Any) -> Any:
+        if not re.fullmatch(r"[a-z_]{1,40}", name):
+            raise ValueError(f"not a state name: {name!r}")
+        path = self.path / "state" / f"{name}.json"
+        try:
+            return json.loads(path.read_text()) if path.exists() else default
+        except (OSError, ValueError):
+            logger.warning("spool: unreadable state %s, starting fresh", name)
+            return default
+
     def jobs(self) -> list[dict[str, Any]]:
         """Every readable job record; a damaged one is logged and skipped."""
         if not self.path.is_dir():

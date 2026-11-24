@@ -25,8 +25,20 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs, urlsplit
 
-from daylog import booked, booking, calendar_feed, daily, dashboard, health, push, timeline, web
+from daylog import (
+    booked,
+    booking,
+    calendar_feed,
+    daily,
+    dashboard,
+    health,
+    location_feed,
+    push,
+    timeline,
+    web,
+)
 from daylog.disciplines import Graph
+from daylog.places import PlaceIndex
 from daylog.runtime import tz
 from daylog.vault import Vault
 from daylog.webapp import api as webapi
@@ -49,9 +61,17 @@ def _day_blocks_events(vault: Vault, journal_entries: list[Any]) -> list[dict[st
     by_day = {e.date: e for e in journal_entries if start <= e.date <= today}
     measured = health.read_days(vault, start, today + timedelta(days=1))
     bookings = booked.read(vault, start, today)
+    places = location_feed.read_days(vault, start, today + timedelta(days=1))
     graph = Graph(vault.read_disciplines())
     events: list[dict[str, Any]] = []
-    for day in sorted({*by_day, *bookings, *(d for d in measured if d <= today)}):
+    for day in sorted(
+        {
+            *by_day,
+            *bookings,
+            *(d for d in measured if d <= today),
+            *(d for d in places if d <= today),
+        }
+    ):
         entry = by_day.get(day)
         blocks = timeline.day_blocks(
             entry.frontmatter if entry else None,
@@ -60,6 +80,7 @@ def _day_blocks_events(vault: Vault, journal_entries: list[Any]) -> list[dict[st
             graph,
             day,
             bookings.get(day),
+            places.get(day, []) + places.get(day + timedelta(days=1), []),
         )
         events += calendar_feed.block_events(day, blocks, tz())
     nights = [n for d, rec in measured.items() if d <= today for n in rec.get("sleep") or []]
@@ -170,6 +191,8 @@ def _make_handler(
 ) -> type[BaseHTTPRequestHandler]:
     # One guard per server, so failed attempts are counted across requests.
     guard = web.LoginGuard(password) if password and site else None
+    # The phone's location logger shares the health inlet's secret.
+    location_path = health_path.replace("/health/", "/location/", 1) if health_path else None
     # One API per server too: it holds the open cards and the web chat.
     api = (app or webapi.Api()) if site else None
     # The watch inlet shares the app's jobs, chat and cards (webapp/watch.py).
@@ -333,6 +356,8 @@ def _make_handler(
                 self._not_found()
             elif health_path and path == health_path:
                 self._store_health()
+            elif location_path and path == location_path:
+                self._store_location()
             elif watch_inlet and path in watch.PATHS:
                 self._watch(path)
             elif site and path == "/login":
@@ -462,6 +487,27 @@ def _make_handler(
                 logger.exception("watch inlet failed")
                 code, text = 500, "Something went wrong. Try the app."
             self._reply(code, text + "\n")
+
+        def _store_location(self) -> None:
+            body = self._body(location_feed.MAX_BODY_BYTES)
+            if body is None:
+                self._reply(413, "body missing or too large\n")
+                return
+            try:
+                vault = _vault()
+                line, reply = location_feed.ingest(
+                    vault, body, PlaceIndex(vault.read_places()), tz()
+                )
+            except location_feed.LocationError as exc:
+                logger.warning("location post rejected: %s", exc)
+                self._reply(400, f"{exc}\n")
+                return
+            except Exception:
+                logger.exception("failed to store location")
+                self._reply(500, "could not save\n")
+                return
+            logger.info("location inlet: %s", line)
+            self._send(200, "application/json", json.dumps(reply).encode())
 
         def _store_health(self) -> None:
             body = self._body(health.MAX_EXPORT_BYTES)

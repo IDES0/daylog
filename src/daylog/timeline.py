@@ -59,7 +59,7 @@ OFF_CALENDAR = ("meal",)
 
 SAID, ESTIMATED, GUESSED, MEASURED = "said", "estimated", "guessed", "measured"
 BOOKED = "booked"  # from a booking confirmation in email (booked.py)
-ACTIVITY, SLEEP, SCREEN = "activity", "sleep", "screen"  # layers
+ACTIVITY, SLEEP, SCREEN, PLACE = "activity", "sleep", "screen", "place"  # layers
 TIME_FIELDS = ("at", "until", "sessions", "time")
 
 _CLOCK = re.compile(r"(\d{1,2}):(\d{2})")
@@ -261,6 +261,7 @@ def day_blocks(
     graph: Graph | None = None,
     day: date | None = None,
     bookings: list[dict[str, Any]] | None = None,
+    visits: list[dict[str, Any]] | None = None,
 ) -> list[Block]:
     """The day's blocks, told, measured and booked.
 
@@ -280,7 +281,7 @@ def day_blocks(
     ]
     timed = [_timed(item) for item in items]
     files = [r for r in (records, next_records) if r]
-    if day is None or not (files or bookings):
+    if day is None or not (files or bookings or visits):
         blocks = _journal_blocks(items, timed, {}, [])
         _lay_out_lanes(blocks)
         return blocks
@@ -327,7 +328,28 @@ def day_blocks(
                 )
             )
     _lay_out_lanes(blocks)
-    return blocks + sleep + _screen_blocks(day, files)
+    return blocks + sleep + _screen_blocks(day, files) + _place_blocks(day, visits or [])
+
+
+def _place_blocks(day: date, visits: list[dict[str, Any]]) -> list[Block]:
+    """Where the phone says the user was (location_feed.py), as a strip at the
+    column's left edge. `visits` covers `day`'s date and the one after."""
+    out = []
+    for start, end, v in _on_day(visits, day):
+        facts = {k: v[k] for k in ("place", "lat", "lon") if v.get(k) is not None}
+        out.append(
+            Block(
+                "place",
+                str(v.get("name") or ""),
+                start,
+                end,
+                MEASURED,
+                layer=PLACE,
+                source="phone",
+                facts=facts,
+            )
+        )
+    return out
 
 
 def _booking_facts(b: dict[str, Any]) -> dict[str, Any]:

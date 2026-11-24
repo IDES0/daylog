@@ -785,9 +785,11 @@ function loadCalendar(week) {
 const MARK = { measured: "", booked: "", said: "", estimated: "~", guessed: "≈" };
 const timeKind = b => b.time || (b.guess ? "guessed" : "estimated");
 const blkClass = b => ({ measured: ".meas", booked: ".booked", said: "", estimated: ".est", guessed: ".guess" })[timeKind(b)]
-  + (b.layer === "sleep" ? ".sleep" : b.layer === "screen" ? ".screen" : "");
-const SCREEN_W = 14; // % of a day column kept for the screen-time strip
-const blkName = b => b.layer === "screen" ? `${b.source === "iphone" ? "iPhone" : "Mac"}: ${b.detail}`
+  + (b.layer === "sleep" ? ".sleep" : b.layer === "screen" ? ".screen" : b.layer === "place" ? ".place" : "");
+const SCREEN_W = 14; // % of a day column kept for the screen-time strip (right edge)
+const PLACE_W = 10;  // % kept for where the phone says you were (left edge)
+const blkName = b => b.layer === "place" ? `📍 ${b.detail || "somewhere unnamed"}`
+  : b.layer === "screen" ? `${b.source === "iphone" ? "iPhone" : "Mac"}: ${b.detail}`
   : words(b.label) + (b.session ? ` ${b.session}` : "");
 const blkEnd = b => b.end ?? b.start + (b.hours || 1);
 const blkWhen = b => `${MARK[timeKind(b)]}${clock(b.start)}–${clock(blkEnd(b))}`;
@@ -811,6 +813,7 @@ function blkFacts(b) {
   const f = b.facts || {};
   if (b.layer === "sleep") return [f.asleep_h != null ? `${num(f.asleep_h)} h asleep` : "", f.deep_h ? `deep ${num(f.deep_h)}` : "", f.rem_h ? `REM ${num(f.rem_h)}` : ""].filter(Boolean).join(" · ");
   if (b.layer === "screen") return Object.entries(f.apps || {}).map(([a, m]) => `${a} ${m} min`).join(" · ");
+  if (b.layer === "place") return b.detail ? "where your phone was" : (f.lat != null ? `near ${num(f.lat, 3)}, ${num(f.lon, 3)}` : "");
   if (b.time === "booked") return ["booked", f.title && f.title !== b.detail ? f.title : "", f.place || "", f.source || ""].filter(Boolean).join(" · ");
   if (b.time !== "measured") return "";
   return [f.kind && words(f.kind).toLowerCase() !== words(b.label).toLowerCase() ? `watch: ${f.kind}` : "watch",
@@ -818,23 +821,25 @@ function blkFacts(b) {
     f.kcal ? `${f.kcal} kcal` : "", f.distance_km ? `${num(f.distance_km)} km` : ""].filter(Boolean).join(" · ");
 }
 
-function blockEl(b, lo, inner, screen = false) {
+function blockEl(b, lo, inner, screen = false, place = false) {
   const hours = blkEnd(b) - b.start;
-  // Activities share the column left of the screen strip, when the day has one.
-  const room = b.layer === "activity" || !b.layer ? (screen ? 100 - SCREEN_W : 100) : 100;
+  // Activities share the column between the place strip (left) and the screen strip (right).
+  const start = place ? PLACE_W : 0;
+  const room = 100 - start - (screen ? SCREEN_W : 0);
   const box = b.layer === "sleep" ? { left: "0%", width: "100%" }
     : b.layer === "screen" ? { left: `${100 - SCREEN_W}%`, width: `${SCREEN_W}%` }
-    : { left: `${(room * (b.lane || 0) / (b.lanes || 1)).toFixed(2)}%`, width: `${(room / (b.lanes || 1)).toFixed(2)}%` };
+    : b.layer === "place" ? { left: "0%", width: `${PLACE_W}%` }
+    : { left: `${(start + room * (b.lane || 0) / (b.lanes || 1)).toFixed(2)}%`, width: `${(room / (b.lanes || 1)).toFixed(2)}%` };
   const facts = blkFacts(b);
   return h("span.blk" + blkClass(b), {
     title: `${blkWhen(b)} ${blkName(b)}${b.detail && b.layer !== "screen" ? ` · ${b.detail}` : ""}${facts ? ` · ${facts}` : ""}`,
     style: {
-      "--h": String(b.layer === "sleep" ? 250 : b.layer === "screen" ? (b.source === "iphone" ? 330 : 25) : b.hue ?? 210),
+      "--h": String(b.layer === "sleep" ? 250 : b.layer === "place" ? 150 : b.layer === "screen" ? (b.source === "iphone" ? 330 : 25) : b.hue ?? 210),
       top: `calc(${b.start - lo} * var(--hour))`,
       height: `calc(${hours} * var(--hour) - 2px)`,
       ...box,
     },
-  }, b.layer === "screen" ? null : inner(hours));
+  }, b.layer === "screen" || b.layer === "place" ? null : inner(hours));
 }
 
 function renderCalendar(d) {
@@ -854,10 +859,11 @@ function renderCalendar(d) {
   for (const day of days) {
     const head = h("span.cal-head", weekday(day.date, 3), h("b", String(parseD(day.date)?.getDate() ?? "")), scoreBadges(day));
     const screen = day.blocks.some(b => b.layer === "screen");
+    const place = day.blocks.some(b => b.layer === "place");
     const bodyEl = h("span.cal-body", day.blocks.map(b => blockEl(b, lo, hours => [
       h("span.blk-name", blkName(b)),
       hours >= 0.9 ? h("span.blk-time", `${MARK[timeKind(b)]}${clock(b.start)}`) : null,
-    ], screen)));
+    ], screen, place)));
     const has = day.summary || day.blocks.length || Object.keys(day.measured || {}).length;
     const cls = (has ? "" : ".empty") + (day.date === today ? ".today" : "");
     grid.append(has
@@ -870,7 +876,7 @@ function renderCalendar(d) {
     h("p.cal-key",
       h("span.key.meas", "Measured"), " by your watch, ",
       h("span.key.booked", "booked"), " from a confirmation email, ",
-      h("span.key.sleep", "sleep"), " and ", h("span.key.screen", "screen time"), " (the strip at the edge) from your devices; ",
+      h("span.key.sleep", "sleep"), ", ", h("span.key.place", "where you were"), " (left edge) and ", h("span.key.screen", "screen time"), " (right edge) from your devices; ",
       h("span.key", "solid"), " where you said the time, ",
       h("span.key.est", "~ estimated"), " from what you said, ",
       h("span.key.guess", "≈ placed"), " by the order you told it. Tap a day for its times."),
@@ -901,6 +907,7 @@ function scoreRows(day) {
 function dayTimeline(blocks) {
   const [lo, hi] = hourSpan(blocks, Math.min(...blocks.map(b => b.start)), Math.max(...blocks.map(blkEnd)));
   const screen = blocks.some(b => b.layer === "screen");
+  const place = blocks.some(b => b.layer === "place");
   return h("div.day-clock", { style: { "--span": String(hi - lo) }, "aria-hidden": "true" },
     hourGutter(lo, hi, 1),
     h("span.cal-body", blocks.map(b => blockEl(b, lo, hours => [
@@ -908,7 +915,7 @@ function dayTimeline(blocks) {
       h("span.blk-name", blkName(b)),
       b.detail && hours >= 0.9 ? h("span.blk-detail", b.detail) : null,
       hours >= 1.2 && blkFacts(b) ? h("span.blk-detail", blkFacts(b)) : null,
-    ], screen))));
+    ], screen, place))));
 }
 
 // The day's numbers from the watch, phone and computer, when any came in.

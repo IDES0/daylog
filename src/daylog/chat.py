@@ -32,6 +32,7 @@ from daylog import (
     goals,
     health_stats,
     llm,
+    location_feed,
     measures,
     rankings,
     trail,
@@ -79,9 +80,10 @@ TOOLS: list[ToolParam] = [
         "get_health",
         "What their own devices measured, per day, for a date range (max 31 days): sleep "
         "(hours, bed and wake times, stages), resting heart rate, HRV, steps, exercise, each "
-        "Apple Watch workout with its real start and end, and screen time per device and "
-        "app. Plus the last 7 days against their 28-day usual. Exact, unlike the journal's "
-        "estimated times; the journal says what and why.",
+        "Apple Watch workout with its real start and end, screen time per device and "
+        "app, and the places their phone says they visited. Plus the last 7 days against "
+        "their 28-day usual. Exact, unlike the journal's estimated times; the journal says "
+        "what and why.",
         {"start": {"type": "string"}, "end": {"type": "string"}},
         ["start", "end"],
     ),
@@ -399,6 +401,7 @@ class Tools:
         s, e = self._range(start, end)
         rows, records = health_stats.load(self.v, s - timedelta(days=35), e)
         shown = [r for r in rows if r["date"] >= s.isoformat()]
+        places = location_feed.read_days(self.v, s, e)
         days = []
         for row in shown:
             d = date.fromisoformat(row["date"])
@@ -412,11 +415,17 @@ class Tools:
                 device: dict(list(apps.items())[:6])
                 for device, apps in measures.screen_minutes(rec).items()
             }
-            if numbers or workouts or screen:
+            visits = [
+                f"{str(v.get('start'))[11:16]}-{str(v.get('end'))[11:16]} "
+                + str(v.get("name") or "unnamed place")
+                for v in places.get(d, [])
+            ]
+            if numbers or workouts or screen or visits:
                 days.append(
                     f"## {row['date']}\n"
                     + json.dumps(
-                        {**numbers, "workouts": workouts, "screen_min": screen}, default=str
+                        {**numbers, "workouts": workouts, "screen_min": screen, "visits": visits},
+                        default=str,
                     )
                 )
         if not days:
