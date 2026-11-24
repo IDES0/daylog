@@ -823,3 +823,4 @@ details.rep-v > summary { padding: var(--s2) 0; gap: var(--s2); }
 .blk.place { z-index: 2; padding: 0; border: 0; border-radius: 3px; box-shadow: none; background: hsl(var(--h) 45% 55% / .55); }
 .cal-key .key.place { background: hsl(150 45% 55% / .55); color: hsl(150 40% 18%); box-shadow: none; }
 @media (prefers-color-scheme: dark) { .cal-key .key.place { color: hsl(150 50% 85%); } }
+.blk.place.travel { background: repeating-linear-gradient(0deg, hsl(150 30% 60% / .35) 0 3px, transparent 3px 6px); }

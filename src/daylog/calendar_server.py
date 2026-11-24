@@ -62,6 +62,9 @@ def _day_blocks_events(vault: Vault, journal_entries: list[Any]) -> list[dict[st
     measured = health.read_days(vault, start, today + timedelta(days=1))
     bookings = booked.read(vault, start, today)
     places = location_feed.read_days(vault, start, today + timedelta(days=1))
+    names = {
+        str(n["id"]): str(n.get("name") or n["id"]) for n in vault.read_places() if n.get("id")
+    }
     graph = Graph(vault.read_disciplines())
     events: list[dict[str, Any]] = []
     for day in sorted(
@@ -81,6 +84,7 @@ def _day_blocks_events(vault: Vault, journal_entries: list[Any]) -> list[dict[st
             day,
             bookings.get(day),
             places.get(day, []) + places.get(day + timedelta(days=1), []),
+            names,
         )
         events += calendar_feed.block_events(day, blocks, tz())
     nights = [n for d, rec in measured.items() if d <= today for n in rec.get("sleep") or []]
@@ -495,7 +499,7 @@ def _make_handler(
                 return
             try:
                 vault = _vault()
-                line, reply = location_feed.ingest(
+                line, reply, new_visits = location_feed.ingest(
                     vault, body, PlaceIndex(vault.read_places()), tz()
                 )
             except location_feed.LocationError as exc:
@@ -508,6 +512,12 @@ def _make_handler(
                 return
             logger.info("location inlet: %s", line)
             self._send(200, "application/json", json.dumps(reply).encode())
+            if api is not None and new_visits:
+                # A stop that matches a noted place with no location yet: one card.
+                try:
+                    api.visit_cards(new_visits, notify=True)
+                except Exception:
+                    logger.exception("visit cards failed")
 
         def _store_health(self) -> None:
             body = self._body(health.MAX_EXPORT_BYTES)

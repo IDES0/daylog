@@ -115,7 +115,7 @@ def test_ingest_keeps_raw_points_off_git_and_writes_visits(vault: Vault) -> None
             ("2026-11-23T17:00:00-06:00", _near(WAVE_POOL, 30)),
         ]
     )
-    line, reply = location_feed.ingest(vault, json.dumps(first).encode(), _index(), TZ)
+    line, reply, _ = location_feed.ingest(vault, json.dumps(first).encode(), _index(), TZ)
     assert reply == {"result": "ok"} and line == "2 points, 0 visit(s) closed"
     assert location_feed.read_days(vault, date(2026, 11, 23), date(2026, 11, 23)) == {}
     cur = location_feed.current(vault)
@@ -123,7 +123,7 @@ def test_ingest_keeps_raw_points_off_git_and_writes_visits(vault: Vault) -> None
     second = _overland(
         [("2026-11-23T19:10:00-06:00", _near(WAVE_POOL, 20)), ("2026-11-23T21:00:00-06:00", HOME)]
     )
-    line, _ = location_feed.ingest(vault, json.dumps(second).encode(), _index(), TZ)
+    line, _, closed = location_feed.ingest(vault, json.dumps(second).encode(), _index(), TZ)
     assert line == "2 points, 1 visit(s) closed"
     (visit,) = location_feed.read_days(vault, date(2026, 11, 23), date(2026, 11, 23))[
         date(2026, 11, 23)
@@ -187,3 +187,99 @@ def test_the_http_route_answers_overland(vault: Vault, monkeypatch: pytest.Monke
         assert conn.getresponse().status == 404
     finally:
         httpd.shutdown()
+
+
+def test_a_stay_takes_its_name_from_the_note_and_trips_show_between() -> None:
+    day = date(2026, 11, 21)
+    fm = {
+        "meals": [{"items": ["paella"], "place": "bolas", "when": "dinner"}],
+        "activities": [{"type": "surf", "place_mention": "Waco Surf", "at": "15:00", "hours": 2}],
+    }
+    visits: list[dict[str, Any]] = [
+        {
+            "start": "2026-11-21 15:00:00 -0600",
+            "end": "2026-11-21 17:10:00 -0600",
+            "lat": WAVE_POOL[0],
+            "lon": WAVE_POOL[1],
+        },
+        {
+            "start": "2026-11-21 19:30:00 -0600",
+            "end": "2026-11-21 20:45:00 -0600",
+            "lat": HOME[0],
+            "lon": HOME[1],
+        },
+    ]
+    names = {"bolas": "Bola's Restaurant"}
+    blocks = [
+        b
+        for b in timeline.day_blocks(fm, None, None, None, day, None, visits, names)
+        if b.layer == "place"
+    ]
+    surf, trip, dinner = blocks
+    assert (surf.detail, surf.facts["guess"]) == ("Waco Surf", True)
+    assert (dinner.detail, dinner.facts["noted_place"]) == ("Bola's Restaurant", "bolas")
+    assert (trip.kind, trip.detail, trip.facts["minutes"]) == (
+        "travel",
+        "to Bola's Restaurant",
+        140,
+    )
+    assert trip.facts["km"] > 100
+    events = calendar_feed.block_events(day, blocks, TZ)
+    assert [e["summary"] for e in events] == ["📍 Waco Surf?", "📍 Bola's Restaurant?"]
+
+
+def test_a_matched_stay_offers_to_save_the_places_location(vault: Vault) -> None:
+    from daylog.webapp import api as webapi
+
+    day = date(2026, 11, 21)
+    vault.write_place_files(
+        {
+            "texas": [
+                {"id": "austin", "name": "Austin", "kind": "town"},
+                {"id": "bolas", "name": "Bola's Restaurant", "kind": "food", "parent": "austin"},
+            ]
+        },
+        {"texas"},
+        "places",
+    )
+    vault.write_journal_entry(
+        datetime(2026, 11, 21, 21, 0),
+        {"meals": [{"items": ["paella"], "place": "bolas", "when": "dinner"}]},
+        "t",
+        "s",
+    )
+    visit = {
+        "start": "2026-11-21 19:30:00 -0600",
+        "end": "2026-11-21 20:45:00 -0600",
+        "lat": 30.2601,
+        "lon": -97.7502,
+    }
+    vault.write_yaml(location_feed.day_file(day), {"visits": [visit]}, "visits")
+    app = webapi.Api(vault=lambda: vault, spawn=lambda fn: None, run_notes=lambda fn: fn())
+    (card,) = app.visit_cards({day: [visit]})
+    assert card.title == "Save where Bola's Restaurant is?"
+    assert app.visit_cards({day: [visit]}) == []  # offered once
+    outcome = app.cards.answer(card.id, "save")
+    assert outcome is not None and outcome.message.startswith("Saved where Bola's Restaurant is")
+    node = PlaceIndex(vault.read_places()).get("bolas")
+    assert node is not None and (node["lat"], node["lon"], node["confidence"]) == (
+        30.2601,
+        -97.7502,
+        "approximate",
+    )
+    (named,) = location_feed.read_days(vault, day, day)[day]
+    assert named["name"] == "Bola's Restaurant" and named["place"] == "bolas"
+    # Two stays in the dinner window: ambiguous, no card.
+    other = dict(visit, start="2026-11-21 21:00:00 -0600", end="2026-11-21 22:30:00 -0600")
+    app2 = webapi.Api(vault=lambda: vault, spawn=lambda fn: None, run_notes=lambda fn: fn())
+    vault.write_place_files(
+        {
+            "texas": [
+                {"id": "austin", "name": "Austin", "kind": "town"},
+                {"id": "bolas", "name": "Bola's Restaurant", "kind": "food", "parent": "austin"},
+            ]
+        },
+        {"texas"},
+        "places: forget the location",
+    )
+    assert app2.visit_cards({day: [visit, other]}) == []

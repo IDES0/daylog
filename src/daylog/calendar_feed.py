@@ -140,7 +140,7 @@ def _block_title(b: Block) -> str:
         asleep = b.facts.get("asleep_h")
         return f"Sleep {asleep:.1f} h" if isinstance(asleep, int | float) else "Sleep"
     if b.layer == "place":
-        return f"📍 {b.detail}"
+        return f"📍 {b.detail}" + ("?" if b.facts.get("guess") else "")
     if b.layer == "screen":
         device = "iPhone" if b.source == "iphone" else "Mac"
         minutes = b.facts.get("minutes") or 0
@@ -179,7 +179,9 @@ def block_events(day: date, blocks: list[Block], tz: tzinfo) -> list[dict[str, A
         if b.layer == "sleep" or (b.layer == "screen" and b.end - b.start < FEED_SCREEN_MIN_HOURS):
             continue
         # A visit only when it's somewhere known and long enough to matter.
-        if b.layer == "place" and (not b.detail or b.end - b.start < FEED_SCREEN_MIN_HOURS):
+        if b.layer == "place" and (
+            b.kind == "travel" or not b.detail or b.end - b.start < FEED_SCREEN_MIN_HOURS
+        ):
             continue
         out.append(
             {

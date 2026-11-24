@@ -216,6 +216,25 @@ def merge_visits(existing: Any, new: list[dict[str, Any]]) -> dict[str, Any]:
     return {"visits": ordered}
 
 
+def name_visits(vault: Vault, day: date, place_id: str, name: str, lat: float, lon: float) -> int:
+    """Name the day's unnamed visits within PLACE_RADIUS_M of a place just
+    located; returns how many."""
+    data = vault.read_yaml(day_file(day), None)
+    visits = [dict(v) for v in (data or {}).get("visits") or [] if isinstance(v, dict)]
+    named = 0
+    for v in visits:
+        if v.get("place") or not isinstance(v.get("lat"), int | float):
+            continue
+        if distance_m(float(v["lat"]), float(v["lon"]), lat, lon) <= PLACE_RADIUS_M:
+            v["place"], v["name"] = place_id, name
+            named += 1
+    if named:
+        vault.write_yaml(
+            day_file(day), {"visits": visits}, f"location: name {named} visit(s) {name}"
+        )
+    return named
+
+
 def read_days(vault: Vault, start: date, end: date) -> dict[date, list[dict[str, Any]]]:
     out: dict[date, list[dict[str, Any]]] = {}
     day = start
@@ -237,9 +256,12 @@ def _points_state(raw: Any) -> list[Point]:
     return out
 
 
-def ingest(vault: Vault, body: bytes, index: PlaceIndex, tz: tzinfo) -> tuple[str, Any]:
-    """Store one post; returns (log line, the reply the sender expects):
-    Overland wants {"result": "ok"} or it retries; OwnTracks a JSON list."""
+def ingest(
+    vault: Vault, body: bytes, index: PlaceIndex, tz: tzinfo
+) -> tuple[str, Any, dict[date, list[dict[str, Any]]]]:
+    """Store one post; returns (log line, the reply the sender expects, the
+    visits it closed by day). Overland wants {"result": "ok"} or it retries;
+    OwnTracks a JSON list."""
     if len(body) > MAX_BODY_BYTES:
         raise LocationError("body too large")
     try:
@@ -249,7 +271,7 @@ def ingest(vault: Vault, body: bytes, index: PlaceIndex, tz: tzinfo) -> tuple[st
     reply: Any = {"result": "ok"} if isinstance(data, dict) and "locations" in data else []
     points = parse(data)
     if not points:
-        return "no usable points", reply
+        return "no usable points", reply, {}
     with _LOCK:
         spool = vault.spool()
         open_points = _points_state(spool.load_state(STATE, []))
@@ -259,11 +281,12 @@ def ingest(vault: Vault, body: bytes, index: PlaceIndex, tz: tzinfo) -> tuple[st
             [{"at": p.at.isoformat(), "lat": p.lat, "lon": p.lon} for p in still_open],
         )
         files: dict[str, Any] = {}
-        for day, visits in visits_by_day(closed, index, tz).items():
+        new_visits = visits_by_day(closed, index, tz)
+        for day, visits in new_visits.items():
             files[day_file(day)] = merge_visits(vault.read_yaml(day_file(day), {}), visits)
         if files:
             vault.write_yaml_many(files, f"location: {len(closed)} visit(s)")
-    return f"{len(points)} points, {len(closed)} visit(s) closed", reply
+    return f"{len(points)} points, {len(closed)} visit(s) closed", reply, new_visits
 
 
 def current(vault: Vault) -> tuple[float, float, datetime] | None:
