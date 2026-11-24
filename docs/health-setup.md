@@ -128,5 +128,9 @@ become a visit, and are never committed. It doesn't change your base in
 
 A stay counts as a visit after 10 minutes within ~150 m, and takes the
 name of a known place within ~250 m (a spot, venue or restaurant with
-coordinates; not a whole town). OwnTracks in HTTP mode works with the same
+coordinates; not a whole town). A stay nothing names takes the name of the
+place your note puts you at around then ("dinner at Bola's"), shown with a
+"?", and when that place has no location yet you get one card, **Save
+where Bola's is?**; after that, visits there are named for real. The gaps
+between stays show as trips ("on the move 1 h 05 to Waco Surf"). OwnTracks in HTTP mode works with the same
 URL if you prefer it.

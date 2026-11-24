@@ -262,6 +262,7 @@ def day_blocks(
     day: date | None = None,
     bookings: list[dict[str, Any]] | None = None,
     visits: list[dict[str, Any]] | None = None,
+    place_names: dict[str, str] | None = None,
 ) -> list[Block]:
     """The day's blocks, told, measured and booked.
 
@@ -328,27 +329,122 @@ def day_blocks(
                 )
             )
     _lay_out_lanes(blocks)
-    return blocks + sleep + _screen_blocks(day, files) + _place_blocks(day, visits or [])
+    places = _place_blocks(day, visits or [], frontmatter, place_names)
+    return blocks + sleep + _screen_blocks(day, files) + places
 
 
-def _place_blocks(day: date, visits: list[dict[str, Any]]) -> list[Block]:
+# A meal's rough window, hours on the day's axis, by what the journal says.
+MEAL_WINDOWS: dict[str, tuple[float, float]] = {
+    "breakfast": (6, 11),
+    "brunch": (9, 14),
+    "late morning": (9.5, 12.5),
+    "lunch": (11, 15),
+    "afternoon": (12, 18),
+    "dinner": (17, 23),
+    "evening": (17, 23),
+    "night": (19, 27),
+    "late night": (21, 28),
+}
+MIN_TRAVEL_HOURS = 5 / 60
+MAX_TRAVEL_HOURS = 6.0
+MIN_TRAVEL_M = 300.0
+
+
+def note_places(
+    frontmatter: dict[str, Any] | None, names: dict[str, str] | None = None
+) -> list[tuple[float, float, str, str | None]]:
+    """Where the day's notes say the user was, roughly when: (start, end, name,
+    place id or None) for each activity or meal that names a place."""
+    out: list[tuple[float, float, str, str | None]] = []
+    fm = frontmatter or {}
+    for item in fm.get("activities") or []:
+        if not isinstance(item, dict):
+            continue
+        pid = item.get("place")
+        name = (names or {}).get(str(pid)) if pid else None
+        name = name or item.get("place_mention")
+        if not name:
+            continue
+        for s, e, _ in _timed(item):
+            out.append((s, e, str(name), str(pid) if pid else None))
+    for meal in fm.get("meals") or []:
+        if not isinstance(meal, dict):
+            continue
+        pid = meal.get("place")
+        name = (names or {}).get(str(pid)) if pid else None
+        name = name or meal.get("place_mention")
+        if not name:
+            continue
+        when = str(meal.get("when") or "").strip().lower()
+        t = day_clock(when)
+        window = (t - 0.5, t + 1.5) if t is not None else MEAL_WINDOWS.get(when)
+        if window:
+            out.append((window[0], window[1], str(name), str(pid) if pid else None))
+    return out
+
+
+def best_note_place(
+    start: float, end: float, candidates: list[tuple[float, float, str, str | None]]
+) -> tuple[str, str | None] | None:
+    """The noted place a stay overlaps most (at least 15 minutes), if one."""
+    scored = [
+        (min(end, e) - max(start, s), name, pid)
+        for s, e, name, pid in candidates
+        if min(end, e) - max(start, s) >= 0.25
+    ]
+    if not scored:
+        return None
+    _, name, pid = max(scored, key=lambda t: t[0])
+    return name, pid
+
+
+def _place_blocks(
+    day: date,
+    visits: list[dict[str, Any]],
+    frontmatter: dict[str, Any] | None = None,
+    names: dict[str, str] | None = None,
+) -> list[Block]:
     """Where the phone says the user was (location_feed.py), as a strip at the
-    column's left edge. `visits` covers `day`'s date and the one after."""
-    out = []
-    for start, end, v in _on_day(visits, day):
-        facts = {k: v[k] for k in ("place", "lat", "lon") if v.get(k) is not None}
+    column's left edge, with the trips between stops. `visits` covers `day`'s
+    date and the one after. An unnamed stay that lines up with a place the
+    notes name is labelled after it, with `guess` in its facts."""
+    from daylog.location_feed import distance_m
+
+    candidates = note_places(frontmatter, names)
+    out: list[Block] = []
+    previous: tuple[float, dict[str, Any], str] | None = None
+    for start, end, v in sorted(_on_day(visits, day), key=lambda t: t[0]):
+        facts: dict[str, Any] = {k: v[k] for k in ("place", "lat", "lon") if v.get(k) is not None}
+        name = str(v.get("name") or "")
+        if not name and (guess := best_note_place(start, end, candidates)):
+            name, facts["guess"] = guess[0], True
+            if guess[1]:
+                facts["noted_place"] = guess[1]
+        if previous is not None:
+            p_end, p_visit, _ = previous
+            gap = start - p_end
+            lat_lon = [p_visit.get("lat"), p_visit.get("lon"), v.get("lat"), v.get("lon")]
+            if MIN_TRAVEL_HOURS <= gap <= MAX_TRAVEL_HOURS and all(
+                isinstance(x, int | float) for x in lat_lon
+            ):
+                metres = distance_m(*[float(x) for x in lat_lon])  # type: ignore[arg-type]
+                if metres >= MIN_TRAVEL_M:
+                    out.append(
+                        Block(
+                            "travel",
+                            f"to {name or 'the next stop'}",
+                            p_end,
+                            start,
+                            MEASURED,
+                            layer=PLACE,
+                            source="phone",
+                            facts={"minutes": round(gap * 60), "km": round(metres / 1000, 1)},
+                        )
+                    )
         out.append(
-            Block(
-                "place",
-                str(v.get("name") or ""),
-                start,
-                end,
-                MEASURED,
-                layer=PLACE,
-                source="phone",
-                facts=facts,
-            )
+            Block("place", name, start, end, MEASURED, layer=PLACE, source="phone", facts=facts)
         )
+        previous = (end, v, name)
     return out
 
 

@@ -48,6 +48,7 @@ from daylog import (
     journal_service,
     llm,
     location_feed,
+    measures,
     plan_flow,
     push,
     rankings,
@@ -235,6 +236,7 @@ class Api:
         self._now = now or (lambda: datetime.now(tz()))
         self._spawn = spawn or _spawn_thread
         self.cards = CardStore()
+        self._offered_spots: set[tuple[str, date]] = set()
         self.chat = ChatStore()
         # Notes are logged off the request, and spooled so a restart resumes
         # them: see jobs.py and `resume`.
@@ -481,6 +483,9 @@ class Api:
         measured = health.read_days(v, monday, days[-1] + timedelta(days=1))
         bookings = booked.read(v, monday, days[-1])
         places = location_feed.read_days(v, monday, days[-1] + timedelta(days=1))
+        names = {
+            str(n["id"]): str(n.get("name") or n["id"]) for n in v.read_places() if n.get("id")
+        }
         numbers = v.read_yaml(health.FILE, {})
         graph = Graph(v.read_disciplines())
         out = []
@@ -494,6 +499,7 @@ class Api:
                 d,
                 bookings.get(d),
                 places.get(d, []) + places.get(d + timedelta(days=1), []),
+                names,
             )
             out.append(
                 {
@@ -770,6 +776,12 @@ class Api:
                 cards.append(card)
         if result.place_mentions:
             self._spawn(lambda: self._mentions_in_background([result.date]))
+        # A stay the phone already saw that this note now explains: "Save where X is?"
+        try:
+            visits = location_feed.read_days(v, result.date, result.date)
+            cards += self.visit_cards(visits)
+        except Exception:
+            logger.exception("visit cards after a note failed")
         if not result.saved:
             return 500, {
                 "error": "commit_failed",
@@ -996,6 +1008,83 @@ class Api:
             n = len(findings.new_places)
             body = f"{n} new place{'s' * (n != 1)} from your note. Add or skip."
             push.send(v, "Places to confirm", body, "/#/home")
+
+    # -- where a noted place is, learned from a visit (location_feed.py) ---------
+
+    def visit_cards(
+        self, by_day: Mapping[date, list[dict[str, Any]]], notify: bool = False
+    ) -> list[Card]:
+        """A "Save where X is?" card for each unnamed stay that lines up with a
+        place the notes name and the tree has no coordinates for. Only when it's
+        unambiguous: one stay for that place that day. Each (place, day) once."""
+        v = self._vault()
+        nodes = v.read_places()
+        index = PlaceIndex(nodes)
+        names = {str(n["id"]): str(n.get("name") or n["id"]) for n in nodes if n.get("id")}
+        cards: list[Card] = []
+        for day, visits in by_day.items():
+            entry = v.read_journal_entry(day)
+            candidates = timeline.note_places(entry.frontmatter if entry else None, names)
+            matches: dict[str, list[dict[str, Any]]] = {}
+            for visit in visits:
+                a, b = health.wall(visit.get("start")), health.wall(visit.get("end"))
+                if visit.get("place") or not a or not b:
+                    continue
+                s, e = measures.clock_hours(a, day), measures.clock_hours(b, day)
+                guess = timeline.best_note_place(s, e, candidates)
+                if guess and guess[1]:
+                    matches.setdefault(guess[1], []).append(visit)
+            for pid, found in matches.items():
+                node = index.get(pid)
+                if (
+                    len(found) != 1
+                    or node is None
+                    or isinstance(node.get("lat"), int | float)
+                    or (pid, day) in self._offered_spots
+                ):
+                    continue
+                self._offered_spots.add((pid, day))
+                cards.append(self._spot_card(pid, names[pid], found[0], day))
+        if cards and notify:
+            n = len(cards)
+            push.send(
+                v,
+                "Where were you?",
+                f"{n} place{'s' * (n != 1)} from your notes to save on the map.",
+                "/#/home",
+            )
+        return cards
+
+    def _spot_card(self, place_id: str, name: str, visit: dict[str, Any], day: date) -> Card:
+        lat, lon = float(visit["lat"]), float(visit["lon"])
+        when = f"{str(visit.get('start'))[11:16]}–{str(visit.get('end'))[11:16]}"
+
+        def apply(answer: str) -> Outcome:
+            if answer == "skip":
+                return Outcome(f"Left {name} without a location.")
+            v = self._vault()
+            files = v.read_place_files()
+            for stem, file_nodes in files.items():
+                for node in file_nodes:
+                    if node.get("id") == place_id:
+                        node["lat"], node["lon"] = round(lat, 4), round(lon, 4)
+                        if node.get("confidence") in (None, "inferred"):
+                            node["confidence"] = "approximate"
+                        v.write_place_files(
+                            files, {stem}, f"places: where {name} is (from a visit)"
+                        )
+                        location_feed.name_visits(v, day, place_id, name, lat, lon)
+                        return Outcome(f"Saved where {name} is. Visits there will be named.")
+            return Outcome(f"{name} is no longer in the places tree.", ok=False)
+
+        return self.cards.add(
+            "place",
+            f"Save where {name} is?",
+            apply,
+            detail=f"Your phone was at one spot {when} on {day.isoformat()}, "
+            f"when your note says you were at {name}.",
+            actions=[action("save", "Save location", "primary"), action("skip", "Skip")],
+        )
 
     def _research_job_card(self, job: dict[str, Any]) -> Card | None:
         kind = job.get("job")

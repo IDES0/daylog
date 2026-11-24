@@ -785,10 +785,13 @@ function loadCalendar(week) {
 const MARK = { measured: "", booked: "", said: "", estimated: "~", guessed: "≈" };
 const timeKind = b => b.time || (b.guess ? "guessed" : "estimated");
 const blkClass = b => ({ measured: ".meas", booked: ".booked", said: "", estimated: ".est", guessed: ".guess" })[timeKind(b)]
-  + (b.layer === "sleep" ? ".sleep" : b.layer === "screen" ? ".screen" : b.layer === "place" ? ".place" : "");
+  + (b.layer === "sleep" ? ".sleep" : b.layer === "screen" ? ".screen"
+    : b.layer === "place" ? (b.label === "travel" ? ".place.travel" : ".place") : "");
 const SCREEN_W = 14; // % of a day column kept for the screen-time strip (right edge)
 const PLACE_W = 10;  // % kept for where the phone says you were (left edge)
-const blkName = b => b.layer === "place" ? `📍 ${b.detail || "somewhere unnamed"}`
+const travelTime = m => m >= 60 ? `${Math.floor(m / 60)} h ${pad(m % 60)}` : `${m} min`;
+const blkName = b => b.layer === "place" && b.label === "travel" ? `On the move ${travelTime(b.facts?.minutes || 0)} ${b.detail}`
+  : b.layer === "place" ? `📍 ${b.detail || "somewhere unnamed"}${b.facts?.guess ? "?" : ""}`
   : b.layer === "screen" ? `${b.source === "iphone" ? "iPhone" : "Mac"}: ${b.detail}`
   : words(b.label) + (b.session ? ` ${b.session}` : "");
 const blkEnd = b => b.end ?? b.start + (b.hours || 1);
@@ -813,7 +816,9 @@ function blkFacts(b) {
   const f = b.facts || {};
   if (b.layer === "sleep") return [f.asleep_h != null ? `${num(f.asleep_h)} h asleep` : "", f.deep_h ? `deep ${num(f.deep_h)}` : "", f.rem_h ? `REM ${num(f.rem_h)}` : ""].filter(Boolean).join(" · ");
   if (b.layer === "screen") return Object.entries(f.apps || {}).map(([a, m]) => `${a} ${m} min`).join(" · ");
-  if (b.layer === "place") return b.detail ? "where your phone was" : (f.lat != null ? `near ${num(f.lat, 3)}, ${num(f.lon, 3)}` : "");
+  if (b.layer === "place" && b.label === "travel") return f.km != null ? `${num(f.km)} km straight-line` : "";
+  if (b.layer === "place") return f.guess ? "matched to your note; not saved yet"
+    : b.detail ? "where your phone was" : (f.lat != null ? `near ${num(f.lat, 3)}, ${num(f.lon, 3)}` : "");
   if (b.time === "booked") return ["booked", f.title && f.title !== b.detail ? f.title : "", f.place || "", f.source || ""].filter(Boolean).join(" · ");
   if (b.time !== "measured") return "";
   return [f.kind && words(f.kind).toLowerCase() !== words(b.label).toLowerCase() ? `watch: ${f.kind}` : "watch",
