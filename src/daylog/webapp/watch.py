@@ -21,7 +21,8 @@ change, a new place) still waits as a card in the app: the watch can't
 confirm, so nothing it says is applied without a tap. `brief` makes the
 morning brief now, for a Shortcut run when the user wakes (after it has
 synced last night's sleep): once a day, announced by the brief's usual
-notification; the clock's 7am brief then skips the day.
+notification; the clock's 7am brief then skips the day. Asked again once
+it's made, it answers with the brief itself, as plain text to show or speak.
 
 Replies are plain text, since that's what a Shortcut shows best. Bodies,
 tokens and transcripts are never logged.
@@ -151,9 +152,27 @@ def said(body: bytes, content_type: str) -> str:
     return raw[:MAX_TEXT]
 
 
+_DRAFT = re.compile(r"```draft[^\n]*\n(.*?)(?:```|\Z)", re.S)
+
+
+def _draft_said(match: re.Match[str]) -> str:
+    """A draft block read out: who it's for and the text; sending happens in the app."""
+    lines = match.group(1).strip().splitlines()
+    head = {}
+    while lines and (
+        m := re.match(r"\s*(to|number|phone|email|subject)\s*:\s*(.*)", lines[0], re.I)
+    ):
+        head[m.group(1).lower()] = m.group(2).strip()
+        lines.pop(0)
+    who = f" for {head['to']}" if head.get("to") else ""
+    body = " ".join(line.strip() for line in lines if line.strip())
+    return f"Draft{who}: {body} (open daylog to send it)"
+
+
 def spoken(markdown: str) -> str:
     """A chat reply as plain text a watch can show or read out: no markdown marks."""
-    text = re.sub(r"\[([^\]]+)\]\((?:https?://)?[^)]+\)", r"\1", markdown)
+    text = _DRAFT.sub(_draft_said, markdown)
+    text = re.sub(r"\[([^\]]+)\]\((?:https?://)?[^)]+\)", r"\1", text)
     lines = []
     for raw in text.splitlines():
         line = re.sub(r"^\s*(#+|[-*•]|\d+[.)])\s+", "", raw)
@@ -275,7 +294,9 @@ class Watch:
         now = self.api._now()
         last = services.last_brief(v)
         if last is not None and last.date == now.date():
-            return 200, "Today's brief is already in the app."
+            # Already made (by the 7:00 run or on waking): read it back, so a
+            # "my brief" shortcut can show or speak it on the watch.
+            return 200, spoken(last.text)
         with self._lock:
             if self._briefing:
                 return 202, "Already making it."

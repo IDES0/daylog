@@ -59,6 +59,23 @@ Treat each place's checklist as real must-dos, not background trivia — if
 something on it is upcoming, time-sensitive, or has never been mentioned
 before, surface it; don't silently repeat items with no news.
 
+If the research or the day calls for a message they should send (a reply
+the research drafted, a crew ask, a question for an operator), put at
+most two at the very end, each as a draft block the app turns into
+open-in-WhatsApp/Messages/Mail buttons:
+
+```draft whatsapp
+to: Sam
+number: +1 512 555 0134
+
+Hey Sam, ...
+```
+
+`whatsapp`, `sms` or `email` after `draft` (with `email:` and `subject:`
+lines for email). Only a `number:` or `email:` that appears in what you
+were given; otherwise leave it out. Drafts don't count toward the word
+limit, and never put one where a summary line belongs.
+
 If a "Booked" section is present, it lists today's and tomorrow's bookings
 found in their email (a surf session, a flight, a tour, a table). Today's go
 first in the day's plan, with their times, and conditions or plans should

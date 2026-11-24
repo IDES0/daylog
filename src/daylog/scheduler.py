@@ -28,6 +28,9 @@ logger = logging.getLogger(__name__)
 # A job that couldn't run on time (the app was restarting) still runs if
 # it's this late; later than that it waits for its next slot.
 MISFIRE_GRACE_S = 3 * 3600
+# The brief's notification body: the phone's lock screen previews the start,
+# the watch shows (and scrolls) all of it.
+BRIEF_PUSH_CHARS = 600
 
 
 def brief_hour() -> int:
@@ -69,7 +72,8 @@ def morning_brief(
         llm.flush(v)
     api.chat.remember("The app sent the morning brief", text)
     title = f"☀️ Brief · {today.strftime('%a %b')} {today.day}"
-    push.send(v, title, push.lock_screen(text), "/#/home")
+    # Longer than a lock screen shows: the watch shows the whole notification.
+    push.send(v, title, push.lock_screen(text, BRIEF_PUSH_CHARS), "/#/home")
     # Decisions the morning research traced: cards until they're answered.
     waiting = api.waiting_decisions(v)
     if waiting:
