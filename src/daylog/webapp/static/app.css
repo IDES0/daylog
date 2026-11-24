@@ -26,9 +26,6 @@
   --shadow: 0 1px 2px rgb(20 20 15 / .04), 0 4px 16px rgb(20 20 15 / .04);
   --safe-t: env(safe-area-inset-top, 0px); --safe-b: env(safe-area-inset-bottom, 0px);
   --safe-l: env(safe-area-inset-left, 0px); --safe-r: env(safe-area-inset-right, 0px);
-  /* The same on both sides: a camera cutout reported on one side only would
-     otherwise shift the whole layout away from it, off centre. */
-  --safe-x: max(var(--safe-l), var(--safe-r));
   color-scheme: light dark;
 }
 @media (prefers-color-scheme: dark) {
@@ -78,7 +75,7 @@ svg { display: block; }
 .tabs {
   position: fixed; z-index: 20; left: 0; right: 0; bottom: 0;
   display: grid; grid-template-columns: repeat(5, minmax(0, 1fr));
-  padding: 0 var(--safe-x) var(--safe-b) var(--safe-x);
+  padding: 0 var(--safe-r) var(--safe-b) var(--safe-l);
   background: color-mix(in srgb, var(--surface) 88%, transparent);
   -webkit-backdrop-filter: saturate(1.6) blur(16px); backdrop-filter: saturate(1.6) blur(16px);
   border-top: 1px solid var(--line);
@@ -138,7 +135,7 @@ body.kb main { padding-bottom: 0; }
   position: sticky; top: 0; z-index: 10;
   display: flex; align-items: center; justify-content: space-between; gap: var(--s3);
   min-height: calc(52px + var(--safe-t));
-  padding: var(--safe-t) calc(var(--s4) + var(--safe-x)) 0 calc(var(--s4) + var(--safe-x));
+  padding: var(--safe-t) calc(var(--s4) + var(--safe-r)) 0 calc(var(--s4) + var(--safe-l));
   background: color-mix(in srgb, var(--bg) 86%, transparent);
   -webkit-backdrop-filter: saturate(1.6) blur(16px); backdrop-filter: saturate(1.6) blur(16px);
   border-bottom: 1px solid transparent; transition: border-color .15s;
@@ -146,7 +143,7 @@ body.kb main { padding-bottom: 0; }
 .bar.scrolled { border-bottom-color: var(--line); }
 .bar-title { font: 600 17px/1.2 var(--sans); letter-spacing: -.01em; }
 .bar-actions { display: flex; gap: var(--s2); margin-right: calc(-1 * var(--s2)); }
-.content { padding: var(--s2) calc(var(--s4) + var(--safe-x)) var(--s6) calc(var(--s4) + var(--safe-x)); max-width: 1180px; margin: 0 auto; }
+.content { padding: var(--s2) calc(var(--s4) + var(--safe-r)) var(--s6) calc(var(--s4) + var(--safe-l)); max-width: 1180px; margin: 0 auto; }
 @media (min-width: 900px) {
   .bar { min-height: 64px; padding: 0 var(--s6); }
   .bar-title { font-size: 18px; }

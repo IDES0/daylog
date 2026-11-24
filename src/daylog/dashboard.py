@@ -47,8 +47,7 @@ _CSS = """
 * { box-sizing:border-box; }
 body { margin:0; background:var(--bg); color:var(--text); font:16px/1.6 var(--sans);
   -webkit-font-smoothing:antialiased;
-  padding:env(safe-area-inset-top) max(env(safe-area-inset-left),env(safe-area-inset-right)) 0
-    max(env(safe-area-inset-left),env(safe-area-inset-right)); }
+  padding:env(safe-area-inset-top) env(safe-area-inset-right) 0 env(safe-area-inset-left); }
 .wrap { max-width:720px; margin:0 auto; padding:0 16px; }
 header { padding:48px 0 8px; }
 .eyebrow { font:500 13px/1 var(--mono); color:var(--accent); letter-spacing:.02em;
