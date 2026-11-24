@@ -657,12 +657,13 @@ class Vault:
 
     def recent_changes(self, limit: int = 8) -> list[tuple[str, str]]:
         """(sha, subject) of recent commits worth undoing — newest first, skipping
-        cost bookkeeping and merges."""
+        cost bookkeeping, device measurements (the Mac alone commits every 15
+        minutes; they'd push every real change off the list) and merges."""
         log = self._run_git("log", "--no-merges", "-n", str(limit * 4), "--format=%h%x09%s")
         out: list[tuple[str, str]] = []
         for line in log.stdout.splitlines():
             sha, _, subject = line.partition("\t")
-            if subject.startswith("usage:"):
+            if subject.startswith(("usage:", "health:")):
                 continue
             out.append((sha, subject))
             if len(out) >= limit:
