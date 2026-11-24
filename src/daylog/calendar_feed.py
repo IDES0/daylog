@@ -125,9 +125,10 @@ def _timed_events(cal: Calendar, timed: list[dict[str, Any]]) -> None:
 
 # A screen-time stretch shorter than this stays off the subscribed calendar.
 FEED_SCREEN_MIN_HOURS = 0.5
-_TIME_MARK = {"measured": "", "said": "", "estimated": "~", "guessed": "≈"}
+_TIME_MARK = {"measured": "", "booked": "", "said": "", "estimated": "~", "guessed": "≈"}
 _TIME_NOTE = {
     "measured": "Measured by your watch.",
+    "booked": "At the booked time (from a confirmation email).",
     "said": "At the time you said.",
     "estimated": "Time estimated from what you said.",
     "guessed": "No time said: placed after what you told before it.",
@@ -143,7 +144,8 @@ def _block_title(b: Block) -> str:
         minutes = b.facts.get("minutes") or 0
         return f"{device}: {b.detail} ({int(minutes) // 60} h {int(minutes) % 60:02d})"
     name = b.kind.replace("_", " ") + (f" {b.session}" if b.session else "")
-    return f"{_TIME_MARK.get(b.time, '')}{name}" + (" ⌚" if b.time == "measured" else "")
+    mark = {"measured": " ⌚", "booked": " ✉"}.get(b.time, "")
+    return f"{_TIME_MARK.get(b.time, '')}{name}{mark}"
 
 
 def _block_description(b: Block) -> str:

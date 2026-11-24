@@ -790,3 +790,12 @@ details.rep-v > summary { padding: var(--s2) 0; gap: var(--s2); }
 .subnav a[aria-current="page"] { background: var(--surface); color: var(--text); box-shadow: 0 1px 2px rgb(0 0 0 / .12); }
 /* Rankings, compact: the top few per list until "Show all". */
 .rk-all { margin-top: 8px; }
+
+/* Booked: at the time a confirmation email gave (booked.py). Planned, not proof. */
+.blk.booked { box-shadow: none; padding-left: 4px; background: hsl(var(--h) 60% 96%); border: 1.5px solid hsl(var(--h) 45% 55%); color: hsl(var(--h) 35% 30%); }
+.blk.booked .blk-name::before { content: "✉ "; }
+.cal-key .key.booked { box-shadow: none; padding-left: 5px; background: hsl(210 60% 96%); border: 1.5px solid hsl(210 45% 55%); color: hsl(210 35% 30%); }
+@media (prefers-color-scheme: dark) {
+  .blk.booked { background: hsl(var(--h) 25% 16%); border-color: hsl(var(--h) 40% 50%); color: hsl(var(--h) 45% 82%); }
+  .cal-key .key.booked { background: hsl(210 25% 16%); border-color: hsl(210 40% 50%); color: hsl(210 45% 82%); }
+}

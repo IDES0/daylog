@@ -44,7 +44,7 @@ from dataclasses import dataclass, field
 from datetime import date
 from typing import Any
 
-from daylog import measures
+from daylog import booked, measures
 from daylog.disciplines import Graph
 from daylog.health import wall
 
@@ -58,6 +58,7 @@ MIN_HOURS = 0.5  # shorter is too thin to see or tap
 OFF_CALENDAR = ("meal",)
 
 SAID, ESTIMATED, GUESSED, MEASURED = "said", "estimated", "guessed", "measured"
+BOOKED = "booked"  # from a booking confirmation in email (booked.py)
 ACTIVITY, SLEEP, SCREEN = "activity", "sleep", "screen"  # layers
 TIME_FIELDS = ("at", "until", "sessions", "time")
 
@@ -259,12 +260,19 @@ def day_blocks(
     next_records: dict[str, Any] | None = None,
     graph: Graph | None = None,
     day: date | None = None,
+    bookings: list[dict[str, Any]] | None = None,
 ) -> list[Block]:
-    """The day's blocks, told and measured.
+    """The day's blocks, told, measured and booked.
 
     `records` and `next_records` are the measured files (health.read_days) for
     `day`'s date and the one after: the logical day runs past midnight, and
-    tonight's sleep is filed under tomorrow. Without them, only the journal."""
+    tonight's sleep is filed under tomorrow. `bookings` are the day's from
+    email (booked.read). Without either, only the journal.
+
+    A told activity takes a watch workout's times first; failing that, a
+    matching booking's, unless the user said the time (a said time wins over
+    a booking, never over the watch). A booking nothing matches is drawn as
+    its own `booked` block: planned, not proof it happened."""
     items = [
         item
         for item in (frontmatter or {}).get("activities") or []
@@ -272,7 +280,7 @@ def day_blocks(
     ]
     timed = [_timed(item) for item in items]
     files = [r for r in (records, next_records) if r]
-    if day is None or not files:
+    if day is None or not (files or bookings):
         blocks = _journal_blocks(items, timed, {}, [])
         _lay_out_lanes(blocks)
         return blocks
@@ -288,6 +296,13 @@ def day_blocks(
         else:
             units.append((i * 100 + 99, kind, None, _number(item.get("hours")) or DEFAULT_HOURS))
     matched = measures.match_workouts(units, [w for _, _, w in workouts], graph, day)
+    booked_records = _on_day(booked.as_records(day, bookings or []), day)
+    open_units = [
+        u for u in units if u[0] not in matched and items[u[0] // 100].get("time") != SAID
+    ]
+    matched.update(
+        measures.match_workouts(open_units, [b for _, _, b in booked_records], graph, day)
+    )
     nights = [n for r in files for n in r.get("sleep") or []]
     sleep = _sleep_blocks(day, nights)
     blocks = _journal_blocks(items, timed, matched, [(b.start, b.end) for b in sleep], day)
@@ -298,8 +313,38 @@ def day_blocks(
             blocks.append(
                 Block(kind, "", start, end, MEASURED, source="watch", facts=_workout_facts(w))
             )
+    for start, end, b in booked_records:
+        if id(b) not in used:
+            blocks.append(
+                Block(
+                    str(b["kind"]),
+                    str(b["title"]),
+                    start,
+                    end,
+                    BOOKED,
+                    source="email",
+                    facts=_booking_facts(b),
+                )
+            )
     _lay_out_lanes(blocks)
     return blocks + sleep + _screen_blocks(day, files)
+
+
+def _booking_facts(b: dict[str, Any]) -> dict[str, Any]:
+    return {k: b[k] for k in ("title", "place", "source") if b.get(k)}
+
+
+def _matched_block(
+    kind: str, detail: str, start: float, end: float, w: dict[str, Any], session: str = ""
+) -> Block:
+    """A told activity drawn at a workout's (measured) or a booking's times."""
+    if w.get("_booked"):
+        return Block(
+            kind, detail, start, end, BOOKED, session, source="email", facts=_booking_facts(w)
+        )
+    return Block(
+        kind, detail, start, end, MEASURED, session, source="watch", facts=_workout_facts(w)
+    )
 
 
 def _journal_blocks(
@@ -329,28 +374,14 @@ def _journal_blocks(
             for j, (start, end, label) in enumerate(pieces):
                 w = matched.get(i * 100 + j)
                 if w and day:
-                    blocks.append(
-                        Block(
-                            kind,
-                            detail,
-                            start,
-                            end,
-                            MEASURED,
-                            label,
-                            source="watch",
-                            facts=_workout_facts(w),
-                        )
-                    )
+                    blocks.append(_matched_block(kind, detail, start, end, w, label))
                 else:
                     blocks.append(Block(kind, detail, start, end, when, label))
             cursor = max(e for _, e, _ in pieces)
             continue
         span = measured(i * 100 + 99)
         if span:
-            w = matched[i * 100 + 99]
-            blocks.append(
-                Block(kind, detail, *span, MEASURED, source="watch", facts=_workout_facts(w))
-            )
+            blocks.append(_matched_block(kind, detail, *span, matched[i * 100 + 99]))
             cursor = span[1]
             continue
         length = max(MIN_HOURS, _number(item.get("hours")) or DEFAULT_HOURS)

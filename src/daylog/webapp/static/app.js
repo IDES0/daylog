@@ -725,9 +725,9 @@ function loadCalendar(week) {
 // How sure a block's time is: measured by a device, said (exact), estimated (~),
 // or placed by order (≈). Lanes for overlaps come from the server (timeline.py).
 // Sleep is drawn full width under everything; screen time is a strip at the edge.
-const MARK = { measured: "", said: "", estimated: "~", guessed: "≈" };
+const MARK = { measured: "", booked: "", said: "", estimated: "~", guessed: "≈" };
 const timeKind = b => b.time || (b.guess ? "guessed" : "estimated");
-const blkClass = b => ({ measured: ".meas", said: "", estimated: ".est", guessed: ".guess" })[timeKind(b)]
+const blkClass = b => ({ measured: ".meas", booked: ".booked", said: "", estimated: ".est", guessed: ".guess" })[timeKind(b)]
   + (b.layer === "sleep" ? ".sleep" : b.layer === "screen" ? ".screen" : "");
 const SCREEN_W = 14; // % of a day column kept for the screen-time strip
 const blkName = b => b.layer === "screen" ? `${b.source === "iphone" ? "iPhone" : "Mac"}: ${b.detail}`
@@ -754,6 +754,7 @@ function blkFacts(b) {
   const f = b.facts || {};
   if (b.layer === "sleep") return [f.asleep_h != null ? `${num(f.asleep_h)} h asleep` : "", f.deep_h ? `deep ${num(f.deep_h)}` : "", f.rem_h ? `REM ${num(f.rem_h)}` : ""].filter(Boolean).join(" · ");
   if (b.layer === "screen") return Object.entries(f.apps || {}).map(([a, m]) => `${a} ${m} min`).join(" · ");
+  if (b.time === "booked") return ["booked", f.title && f.title !== b.detail ? f.title : "", f.place || "", f.source || ""].filter(Boolean).join(" · ");
   if (b.time !== "measured") return "";
   return [f.kind && words(f.kind).toLowerCase() !== words(b.label).toLowerCase() ? `watch: ${f.kind}` : "watch",
     f.hr_avg ? `${f.hr_avg} bpm avg` : "", f.hr_max ? `max ${f.hr_max}` : "",
@@ -811,6 +812,7 @@ function renderCalendar(d) {
   fill(c.body, grid,
     h("p.cal-key",
       h("span.key.meas", "Measured"), " by your watch, ",
+      h("span.key.booked", "booked"), " from a confirmation email, ",
       h("span.key.sleep", "sleep"), " and ", h("span.key.screen", "screen time"), " (the strip at the edge) from your devices; ",
       h("span.key", "solid"), " where you said the time, ",
       h("span.key.est", "~ estimated"), " from what you said, ",

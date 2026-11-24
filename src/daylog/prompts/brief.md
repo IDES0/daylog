@@ -59,6 +59,11 @@ Treat each place's checklist as real must-dos, not background trivia — if
 something on it is upcoming, time-sensitive, or has never been mentioned
 before, surface it; don't silently repeat items with no news.
 
+If a "Booked" section is present, it lists today's and tomorrow's bookings
+found in their email (a surf session, a flight, a tour, a table). Today's go
+first in the day's plan, with their times, and conditions or plans should
+fit around them; don't re-announce tomorrow's unless it changes today.
+
 If a "Measured by their own devices" section is present (sleep, resting
 heart rate and HRV against their own 28-day usual, yesterday's workouts,
 steps and screen time), use it at most for one line, and only when it

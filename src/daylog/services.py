@@ -15,6 +15,7 @@ from typing import Any
 from zoneinfo import ZoneInfo
 
 from daylog import (
+    booked,
     brief,
     disciplines,
     goals,
@@ -386,6 +387,7 @@ def build_brief(v: Vault, today: date) -> str:
         principles=v.read_principles(),
         disciplines=disciplines.summary(v, today),
         measured=_measured(v, today),
+        bookings=booked.brief_text(v, today) or None,
     )
     try:
         site = site_flow.brief_section(v, today)
