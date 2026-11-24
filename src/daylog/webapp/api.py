@@ -47,6 +47,7 @@ from daylog import (
     itinerary,
     journal_service,
     llm,
+    location_feed,
     plan_flow,
     push,
     rankings,
@@ -479,6 +480,7 @@ class Api:
         entries = v.read_journal_range(monday, days[-1])
         measured = health.read_days(v, monday, days[-1] + timedelta(days=1))
         bookings = booked.read(v, monday, days[-1])
+        places = location_feed.read_days(v, monday, days[-1] + timedelta(days=1))
         numbers = v.read_yaml(health.FILE, {})
         graph = Graph(v.read_disciplines())
         out = []
@@ -491,6 +493,7 @@ class Api:
                 graph,
                 d,
                 bookings.get(d),
+                places.get(d, []) + places.get(d + timedelta(days=1), []),
             )
             out.append(
                 {

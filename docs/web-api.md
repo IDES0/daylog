@@ -254,7 +254,7 @@ The You tab's Booking screen; see booking.py and the README.
   most 8 legs; goal `progress`/`target` are numbers or null.
 - `GET /api/calendar`: each block also has `"detail"`; a day without an
   entry has `"summary": null, "blocks": []`. Each block has `"layer"`
-  (`activity` | `sleep` | `screen`), `"time"` (`measured` | `booked` |
+  (`activity` | `sleep` | `screen` | `place`), `"time"` (`measured` | `booked` |
   `said` | `estimated` | `guessed`), `"source"` (`watch`, `sleep`, `mac`,
   `iphone` for measured blocks, `email` for booked ones, else empty; a booked
   block's `facts` has `title`, `place`, `source`) and `"facts"` (a workout's `kind`,

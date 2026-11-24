@@ -818,3 +818,8 @@ details.rep-v > summary { padding: var(--s2) 0; gap: var(--s2); }
 .draft-text { white-space: pre-wrap; font-size: 15px; line-height: 1.5; }
 .draft-btns { margin-top: 10px; flex-wrap: wrap; }
 .draft-note { margin: 8px 0 0; font-size: 12px; color: var(--faint); }
+
+/* Where the phone says you were (location_feed.py): a strip at the left edge. */
+.blk.place { z-index: 2; padding: 0; border: 0; border-radius: 3px; box-shadow: none; background: hsl(var(--h) 45% 55% / .55); }
+.cal-key .key.place { background: hsl(150 45% 55% / .55); color: hsl(150 40% 18%); box-shadow: none; }
+@media (prefers-color-scheme: dark) { .cal-key .key.place { color: hsl(150 50% 85%); } }
