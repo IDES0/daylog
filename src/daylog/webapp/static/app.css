@@ -796,3 +796,15 @@ details.rep-v > summary { padding: var(--s2) 0; gap: var(--s2); }
   .blk.booked { background: hsl(var(--h) 25% 16%); border-color: hsl(var(--h) 40% 50%); color: hsl(var(--h) 45% 82%); }
   .cal-key .key.booked { background: hsl(210 25% 16%); border-color: hsl(210 40% 50%); color: hsl(210 45% 82%); }
 }
+
+/* Some iPhones report a side inset in portrait for a status column (clock,
+   Wi-Fi) that only fills the top of that edge. Padding the whole edge left an
+   empty strip down the side and pushed everything off centre. In portrait,
+   only the header and the Home hero keep clear of it; content and the tab bar
+   use the full width. Landscape keeps the insets: a notch there can sit
+   anywhere along the side. */
+@media (orientation: portrait) and (max-width: 899px) {
+  .content { padding-left: var(--s4); padding-right: var(--s4); }
+  .tabs { padding-left: 0; padding-right: 0; }
+  .hero { padding-right: var(--safe-r); }
+}
