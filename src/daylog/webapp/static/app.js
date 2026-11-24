@@ -137,9 +137,20 @@ function md(text, cls = "") {
     root.append(p); para = [];
   };
   const flushList = () => { if (list) root.append(list); list = null; };
+  let draft = null; // lines of an open ```draft block
   for (const raw of lines) {
     const line = raw.trimEnd();
     let m;
+    if (draft) {
+      if (/^\s*```\s*$/.test(line)) { root.append(draftCard(draft.channel, draft.lines)); draft = null; }
+      else draft.lines.push(raw);
+      continue;
+    }
+    if ((m = /^\s*```draft\b\s*([a-z]*)/i.exec(line))) {
+      flushPara(); flushList();
+      draft = { channel: m[1].toLowerCase(), lines: [] };
+      continue;
+    }
     if (!line.trim()) { flushPara(); flushList(); continue; }
     if ((m = /^\s{0,3}#{1,6}\s+(.*)$/.exec(line))) {
       flushPara(); flushList();
@@ -159,7 +170,53 @@ function md(text, cls = "") {
     para.push(line);
   }
   flushPara(); flushList();
+  if (draft) root.append(draftCard(draft.channel, draft.lines));
   return root;
+}
+
+// A message for the user to send, written by chat or the brief as a block:
+//   ```draft whatsapp        (or sms, imessage, email)
+//   to: Sam
+//   number: +1 512 555 0134  (or email: …; subject: … for email)
+//
+//   Hey Sam, …
+//   ```
+// Shown with the exact recipient and text, and buttons that open the user's
+// own app with both filled in. daylog sends nothing: the user taps send there.
+function draftCard(channel, lines) {
+  const head = {}; let i = 0;
+  for (; i < lines.length; i++) {
+    const m = /^\s*(to|number|phone|email|subject)\s*:\s*(.*)$/i.exec(lines[i]);
+    if (!m) break;
+    head[m[1].toLowerCase()] = m[2].trim();
+  }
+  const text = lines.slice(i).join("\n").trim();
+  const number = (head.number || head.phone || "").replace(/[^\d+]/g, "");
+  const email = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(head.email || "") ? head.email : "";
+  const kind = channel || (email ? "email" : "whatsapp");
+  const enc = encodeURIComponent;
+  const links = [];
+  if (kind === "email") {
+    links.push(["Open in Mail", `mailto:${email}?subject=${enc(head.subject || "")}&body=${enc(text)}`]);
+  } else {
+    const wa = `https://wa.me/${number.replace(/^\+/, "")}?text=${enc(text)}`;
+    const sms = `sms:${number}?&body=${enc(text)}`;
+    if (kind === "sms" || kind === "imessage") links.push(["Open in Messages", sms], ["WhatsApp", wa]);
+    else links.push(["Open in WhatsApp", wa], ["Messages", sms]);
+  }
+  const copy = h("button.btn.sm", { type: "button" }, "Copy");
+  copy.addEventListener("click", async () => {
+    try { await navigator.clipboard.writeText(text); copy.textContent = "Copied"; announce("Copied."); } catch { announce("Select the text to copy it."); }
+  });
+  const who = [head.to, number || email].filter(Boolean).join(" · ") || "Pick who in the app";
+  return h("div.draft", { role: "group", "aria-label": `Draft message to ${head.to || "someone"}` },
+    h("div.draft-head", h("span.draft-kind", { "data-kind": kind }, kind === "email" ? "Email" : kind === "whatsapp" ? "WhatsApp" : "Message"), h("span.draft-to", who)),
+    head.subject ? h("div.draft-subject", head.subject) : null,
+    h("div.draft-text", text),
+    h("div.btns.draft-btns",
+      links.map(([label, href], n) => h("a.btn.sm" + (n === 0 ? ".primary" : ""), { href, rel: "noopener" }, label)),
+      copy),
+    h("p.draft-note", "Opens your app with this filled in; nothing is sent until you send it there."));
 }
 
 // Report text (surf, fly, usage…) keeps its lines and spacing.

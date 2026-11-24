@@ -77,6 +77,12 @@ the 7:00 brief skips a day you already woke up to. Set `BRIEF_HOUR` later
 (say 11) on Railway to keep 7:00 from beating you to it on a slow morning;
 it's still the fallback when the automation doesn't run.
 
+**Hearing the brief on the watch.** The ☀️ Brief notification shows on
+the watch with its first ~600 characters. To hear the whole thing, make a
+shortcut **My brief**: Get Contents of URL (`/watch/brief`, POST, the same
+`Authorization` header, no body) → **Speak Text** (Contents of URL). Once
+the day's brief exists it reads it back; before then it makes one.
+
 ## 5. Starting it fast
 
 - **Siri:** "Hey Siri, log to daylog" / "Hey Siri, ask daylog".

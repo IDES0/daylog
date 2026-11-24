@@ -258,7 +258,17 @@ def test_brief_on_waking_is_made_once_and_the_clock_then_skips_it(
     assert notes.sent[0][0].startswith("☀️ Brief")
     assert w.handle(_req("/watch/brief", token, b"")) == (
         200,
-        "Today's brief is already in the app.",
+        "Swell's up at the point.",
     )
     scheduler.morning_brief(api, vault, NOW, skip_if_made=True)
     assert built == [TODAY]  # the 7am run left the day alone
+
+
+def test_a_draft_block_is_read_out_plainly() -> None:
+    reply = (
+        "Here's one:\n\n```draft whatsapp\nto: Sam\nnumber: +1 512 555 0134\n\n"
+        "Hey Sam, free Saturday?\n```\n"
+    )
+    assert watch.spoken(reply) == (
+        "Here's one:\nDraft for Sam: Hey Sam, free Saturday? (open daylog to send it)"
+    )

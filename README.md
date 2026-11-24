@@ -353,6 +353,13 @@ the measurements are the source of truth for when and how long:
   the weekly review the week's averages and workouts; chat a `get_health`
   tool.
 
+### Drafts you send yourself
+When you ask chat for a message to someone, or the brief has one worth
+sending, it comes as a draft card: the recipient, the exact text, and
+buttons that open WhatsApp, Messages or Mail with it filled in (or the
+contact picker when the number isn't known), plus Copy. daylog never sends
+it; you do, from your own app.
+
 ### From the Apple Watch
 Two Shortcuts, **Log to daylog** and **Ask daylog** (setup:
 [`docs/watch-setup.md`](docs/watch-setup.md)), run on the watch from Siri, a

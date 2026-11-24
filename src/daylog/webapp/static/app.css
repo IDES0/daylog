@@ -808,3 +808,13 @@ details.rep-v > summary { padding: var(--s2) 0; gap: var(--s2); }
   .tabs { padding-left: 0; padding-right: 0; }
   .hero { padding-right: var(--safe-r); }
 }
+
+/* A draft message (```draft in chat or the brief): recipient, exact text, open-in buttons. */
+.draft { margin: var(--s3) 0; padding: var(--s3); border: 1px solid var(--line); border-radius: var(--r); background: var(--surface-2); }
+.draft-head { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; font-size: 13px; color: var(--muted); }
+.draft-kind { padding: 2px 8px; border-radius: 999px; font: 500 11.5px var(--mono); background: var(--surface); color: var(--text); }
+.draft-kind[data-kind="whatsapp"] { color: #1d9e55; }
+.draft-subject { font-weight: 600; margin-bottom: 4px; }
+.draft-text { white-space: pre-wrap; font-size: 15px; line-height: 1.5; }
+.draft-btns { margin-top: 10px; flex-wrap: wrap; }
+.draft-note { margin: 8px 0 0; font-size: 12px; color: var(--faint); }
