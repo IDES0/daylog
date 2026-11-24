@@ -290,8 +290,10 @@ def test_ingest_writes_one_commit_and_reports(vault: Vault) -> None:
     assert list(days) == [TODAY]
     assert days[TODAY]["workouts"][0]["kind"] == "Surfing"
     assert vault.read_yaml(health.UNITS_FILE, {}) == {"step_count": "count"}
-    log = [subject for _, subject in vault.recent_changes(5)]
+    log = vault._run_git("log", "--format=%s", "-n", "5").stdout.splitlines()
     assert sum("health:" in line for line in log) == 1
+    # Measurements stay off the undo list: they'd crowd out the user's own changes.
+    assert not any(s.startswith("health:") for _, s in vault.recent_changes(5))
     assert "(nothing new)" in health.ingest(vault, body, TODAY)
 
 
