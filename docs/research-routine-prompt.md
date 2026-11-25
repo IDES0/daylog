@@ -209,12 +209,53 @@ Getting there from where they are now / Costs / Spots / Watch out for /
 Sources), then set its `research: done` and `dossier:` — change nothing
 else in the file.
 
+## Job 6 — spots where they are and where they're going (only when missing)
+Their base region (the `location.yaml` entry with an empty `to:`, its
+`place_id`, and the region above it in `places/`) and every itinerary leg
+starting in the next 21 days: count the `surf_spot` places under each that
+have `lat`/`lon` **and** a `surf:` profile. If a region has fewer than 5 and
+they surf (`disciplines.yaml`), research its named breaks within day-trip
+reach (and the main dive sites or launches if they dive or fly) and write
+one proposal, `research/proposals/<today>-places-<region-id>.yaml`:
+
+```yaml
+decision: Surf spots around Guanacaste
+made_on: <today>
+by: routine
+summary:
+  - 9 breaks within an hour of Tamarindo; Avellanas and Playa Negra suit their level
+places:
+  - ref: negra
+    name: Playa Negra
+    kind: surf_spot             # or dive_site, fly_site, town, region
+    parent_id: guanacaste       # an existing id, or parent_ref: <ref of a new town above>
+    lat: 10.2016                # the break itself, 4 decimals
+    lon: -85.8361
+    confidence: verified        # two sources agree within ~500 m; else approximate
+    description: Right-hand reef...
+    facts: {break: "reef, right", level: "intermediate+", hazards: "urchins, shallow at low"}
+    surf: {swell: [180, 300], best_swell: 235, offshore: 80, tide: [mid, high], size: [0.8, 3.0], min_period: 10}
+    sources: ["https://..."]
+status: pending
+```
+
+- `surf.swell` is the window the swell comes FROM (degrees), `offshore` the
+  wind-FROM direction straight offshore at that beach (from its
+  orientation), `size` deep-water metres it handles, `min_period` seconds.
+- Real, named breaks only, cross-checked; never invent one or guess a
+  position you can't source.
+- One proposal per region; skip a region with a places proposal (pending
+  or answered) from the last 30 days.
+- A spot that already exists without a profile: add its `surf:` profile
+  directly (see Rules) instead of proposing it.
+- The app shows it as one card (Add all / Review each / Skip).
+
 ## Rules
 - Research properly: search, then open and read the actual pages, and
   cross-check. Prefer primary sources (the operator, the organiser, the
   forecast itself).
-- You may add `description`, `facts`, `sources` or approximate `lat`/`lon`
-  to existing place nodes; never create, delete, rename or re-parent
+- You may add `description`, `facts`, `sources`, approximate `lat`/`lon`
+  or a missing `surf:` profile to existing place nodes; never create, delete, rename or re-parent
   nodes, and never touch `my_notes`, user `notes` or `checklist`. List
   places that should exist under `## Suggested places` in the daily file.
 - Never modify `journal/`, `goals.yaml`, `location.yaml`, `rankings.yaml`,

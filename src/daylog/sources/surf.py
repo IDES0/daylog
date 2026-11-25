@@ -81,6 +81,21 @@ class SurfProfile:
     tide: tuple[str, ...]
     size: tuple[float, float]
     min_period: float
+    # No researched profile: any swell direction counts, and wind is judged by
+    # strength alone (offshore unknown). Ratings are rough and marked so.
+    generic: bool = False
+
+    @classmethod
+    def rough(cls) -> SurfProfile:
+        return cls(
+            swell=(0.0, 0.0),
+            best_swell=0.0,
+            offshore=0.0,
+            tide=("low", "mid", "high"),
+            size=(0.6, 3.0),
+            min_period=8,
+            generic=True,
+        )
 
     @classmethod
     def from_node(cls, node: Any) -> SurfProfile | None:
@@ -132,6 +147,8 @@ def _in_window(deg: float, lo: float, hi: float) -> bool:
 
 def direction_factor(deg: float, p: SurfProfile) -> float:
     """1.0 at the best direction, ~0.5 at the window edge, fading to 0 30° outside it."""
+    if p.generic:
+        return 0.85  # unknown window: neither credit nor blame the direction
     half = max(((p.swell[1] - p.swell[0]) % 360) / 2, 1.0)
     if _in_window(deg, *p.swell):
         return 1.0 - 0.5 * min(angle_diff(deg, p.best_swell) / half, 1.0)
@@ -166,6 +183,8 @@ def wind_factor(speed_kn: float, wind_from: float, p: SurfProfile) -> float:
     """Glassy or offshore is clean; cross-shore costs a little; onshore costs a lot."""
     if speed_kn < 5:
         return 1.0
+    if p.generic:
+        return max(0.3, 1 - speed_kn / 25)  # offshore unknown: lighter is better
     rel = angle_diff(wind_from, p.offshore)
     if rel <= 45:
         return 0.85 if speed_kn > 20 else 1.0
@@ -343,7 +362,7 @@ def fetch_hourly(
 
 
 def _forecasts(
-    spots: list[Any], timezone: str, days: int
+    spots: list[Any], timezone: str, days: int, rough: bool = False
 ) -> list[tuple[Any, SurfProfile, list[Hour]]]:
     """(node, profile, its own copy of the hours) for every profiled spot with data.
 
@@ -353,7 +372,7 @@ def _forecasts(
     cache: dict[tuple[float, float], list[Hour] | None] = {}
     out = []
     for node in spots:
-        profile = SurfProfile.from_node(node)
+        profile = SurfProfile.from_node(node) or (SurfProfile.rough() if rough else None)
         if profile is None or node.get("lat") is None or node.get("lon") is None:
             continue
         key = (round(float(node["lat"]), 2), round(float(node["lon"]), 2))
@@ -400,11 +419,16 @@ def day_data(
 
 
 def report_data(
-    spots: list[Any], timezone: str, days: int = 3, comfort_face: float | None = None
+    spots: list[Any],
+    timezone: str,
+    days: int = 3,
+    comfort_face: float | None = None,
+    rough: bool = False,
 ) -> list[dict[str, Any]]:
-    """The same forecast as `report`, as numbers per spot and day."""
+    """The same forecast as `report`, as numbers per spot and day. With `rough`,
+    spots without a profile are rated generically and marked `profiled: false`."""
     out = []
-    for node, profile, hours in _forecasts(spots, timezone, days):
+    for node, profile, hours in _forecasts(spots, timezone, days, rough):
         by_day: dict[str, list[Hour]] = {}
         for h in hours:
             if h.time.hour in DAYLIGHT:
@@ -414,6 +438,7 @@ def report_data(
             {
                 "id": node.get("id"),
                 "name": str(node.get("name")),
+                "profiled": not profile.generic,
                 "days": [day_data(d, profile, comfort_face) for d in by_day.values() if d],
             }
         )

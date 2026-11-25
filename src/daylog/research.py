@@ -108,6 +108,29 @@ RECORD_PLACES_TOOL: ToolParam = {
                             ),
                             "additionalProperties": {"type": "string"},
                         },
+                        "surf": {
+                            "type": "object",
+                            "description": (
+                                "Surf spots: how it works, so it can be rated from the "
+                                "forecast. swell = usable swell window [from, to] as "
+                                "compass degrees the swell comes FROM; best_swell; "
+                                "offshore = wind-FROM degrees straight offshore (from the "
+                                "beach's orientation); tide = states it works on; size = "
+                                "[min, max] deep-water swell metres; min_period seconds."
+                            ),
+                            "properties": {
+                                "swell": {"type": "array", "items": {"type": "number"}},
+                                "best_swell": {"type": "number"},
+                                "offshore": {"type": "number"},
+                                "tide": {
+                                    "type": "array",
+                                    "items": {"type": "string", "enum": ["low", "mid", "high"]},
+                                },
+                                "size": {"type": "array", "items": {"type": "number"}},
+                                "min_period": {"type": "number"},
+                            },
+                            "required": ["swell", "offshore"],
+                        },
                         "sources": {"type": "array", "items": {"type": "string"}},
                     },
                     "required": ["ref", "name", "kind", "confidence", "description"],
@@ -137,6 +160,30 @@ class Findings:
     cost: float = 0.0
 
 
+def clean_surf(raw: Any) -> dict[str, Any] | None:
+    """A proposed surf profile, checked: a two-number swell window and an offshore
+    direction at least, everything in range; None if it can't be used."""
+    if not isinstance(raw, dict):
+        return None
+    try:
+        lo, hi = (float(x) % 360 for x in raw["swell"])
+        out: dict[str, Any] = {"swell": [lo, hi], "offshore": float(raw["offshore"]) % 360}
+        if raw.get("best_swell") is not None:
+            out["best_swell"] = float(raw["best_swell"]) % 360
+        tide = [t for t in raw.get("tide") or [] if t in ("low", "mid", "high")]
+        if tide:
+            out["tide"] = tide
+        if raw.get("size") is not None:
+            a, b = (float(x) for x in raw["size"])
+            if 0 < a < b <= 15:
+                out["size"] = [a, b]
+        if raw.get("min_period") is not None and 4 <= float(raw["min_period"]) <= 20:
+            out["min_period"] = float(raw["min_period"])
+    except (KeyError, TypeError, ValueError):
+        return None
+    return out
+
+
 def _parse(raw: dict[str, Any], index: PlaceIndex) -> Findings:
     """Keep only well-formed proposals: known kinds, real parents, no invented ids."""
     findings = Findings(summary=str(raw.get("summary", "")))
@@ -154,6 +201,12 @@ def _parse(raw: dict[str, Any], index: PlaceIndex) -> Findings:
         if not has_parent and p.get("kind") != "country":
             logger.info("dropping proposal %r: no valid parent", p.get("name"))
             continue
+        if "surf" in p:
+            surf_profile = clean_surf(p["surf"])
+            if surf_profile is None:
+                p.pop("surf")
+            else:
+                p["surf"] = surf_profile
         findings.new_places.append(p)
     findings.unresolved = [u for u in raw.get("unresolved") or [] if isinstance(u, dict)]
     return findings
@@ -277,7 +330,7 @@ def apply_new_places(
             node: dict[str, Any] = {"id": node_id, "name": p["name"], "kind": p["kind"]}
             if parent_id:
                 node["parent"] = parent_id
-            for key in ("aliases", "lat", "lon", "confidence", "description", "facts"):
+            for key in ("aliases", "lat", "lon", "confidence", "description", "facts", "surf"):
                 if p.get(key) not in (None, [], {}, ""):
                     node[key] = p[key]
             if p.get("sources"):
@@ -410,7 +463,9 @@ def arrive_job(region_path: str, activities: list[str], known_spots: list[str]) 
         f"Already known here: {', '.join(known_spots) or '(nothing)'}\n"
         "Find the places in and around this area worth knowing for those activities — "
         "for surf, every named break within day-trip reach with break direction, the "
-        "tide and swell it works on, level, and hazards. Include the notable dive "
+        "tide and swell it works on, level, hazards, coordinates of the break itself, "
+        "and its `surf` profile (swell window, best swell, offshore wind direction, "
+        "tide, size, minimum period) so it can be rated. Include the notable dive "
         "sites, hikes, viewpoints and one or two well-regarded food spots. Skip what's "
         "already known. Parent each under the right town or region; create the town "
         "first (with a ref) if it's missing. Where sources disagree, say so in facts."

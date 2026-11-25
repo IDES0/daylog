@@ -2400,6 +2400,7 @@ function surfRow(spot, day) {
     h("span.wind", windArrow(day.wind_from, day.wind_kn), wind),
     h("span", `${day.tide} tide ${day.tide_trend === "rising" ? "↑" : "↓"}`));
   const notes = [];
+  if (spot.profiled === false) notes.push(h("span.faint", spot.id ? "rough: this spot has no profile yet" : "open-ocean forecast at your base: no spots here yet"));
   if (day.above_comfort) notes.push(h("span.flag", "⚠ above your comfort size"));
   if (day.drops_to) notes.push(h("span.faint", `${day.drops_to.label.toLowerCase()} by ${pad(day.drops_to.hour)}:00`));
   return h("li.cond-row", chip,
