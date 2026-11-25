@@ -275,10 +275,19 @@ def _region(v: Vault) -> tuple[PlaceIndex, Any, dict[str, Any]]:
 
 
 def surf_data(v: Vault) -> list[dict[str, Any]]:
-    """The rated surf forecast for the current region, as numbers (web app)."""
+    """The surf forecast for the current region, as numbers (web app). Never
+    empty where there's ocean: spots without a profile get a rough rating, and a
+    region with no spots at all gets the forecast at the base itself."""
     index, here, profile = _region(v)
     spots = index.with_coordinates(index.region_nodes(here, ("surf_spot",)))
-    return surf.report_data(spots, str(tz()), comfort_face=profile.get("surf_comfort_face_m"))
+    if not spots:
+        base = brief.current_location(v.read_location()) or {}
+        if base.get("lat") is not None and base.get("lon") is not None:
+            name = str(base.get("place") or "your base").split(",")[0]
+            spots = [{"id": None, "name": f"Around {name}", "lat": base["lat"], "lon": base["lon"]}]
+    return surf.report_data(
+        spots, str(tz()), comfort_face=profile.get("surf_comfort_face_m"), rough=True
+    )
 
 
 def fly_data(v: Vault) -> list[dict[str, Any]]:

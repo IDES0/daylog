@@ -1140,6 +1140,9 @@ class Api:
                 self._ripple_card(v, path)
 
     def _ripple_card(self, v: Vault, path: str) -> Card | None:
+        data = v.read_yaml(path, None)
+        if isinstance(data, dict) and data.get("places"):
+            return self._places_proposal_card(v, path, data)
         opened = ripple_flow.open_card(v, path)
         if opened is None:
             return None
@@ -1167,6 +1170,50 @@ class Api:
             actions=[
                 action("all", ripple_flow.apply_label(len(changes), has_plan), "primary"),
                 action("each", "One by one"),
+                action("skip", "Skip"),
+            ],
+            key=f"proposal:{path}",
+        )
+
+    def _places_proposal_card(self, v: Vault, path: str, data: dict[str, Any]) -> Card | None:
+        """New places a research routine proposes (a region's surf spots on arrival,
+        or before a leg): one card, Add all / Review each / Skip. Nothing joins the
+        tree without the tap."""
+        index = PlaceIndex(v.read_places())
+        findings = research._parse({"new_places": data["places"]}, index)
+        if not findings.new_places:
+            ripple_flow.mark(v, path, "reviewed", ["nothing usable in it"])
+            return None
+        batch = research_flow.new_batch(findings, [])
+        n = len(findings.new_places)
+        title = str(data.get("decision") or f"{n} new places proposed")
+        lines = research_flow.bulk_lines(index, findings)
+        summary = "\n".join(str(x) for x in data.get("summary") or [])
+
+        def apply(answer: str) -> Outcome:
+            v = self._vault()
+            if answer == "skip":
+                ripple_flow.mark(v, path, "skipped", [])
+                return Outcome("Skipped them.")
+            if answer == "each":
+                ripple_flow.mark(v, path, "reviewed", ["reviewed one by one"])
+                return Outcome("One at a time:", cards=self._each_place(batch))
+            try:
+                new_ids = research_flow.add_proposals(v, batch, list(range(n)))
+            except VaultError:
+                logger.exception("adding proposed places failed")
+                return Outcome("Saving failed — nothing was added.", ok=False)
+            ripple_flow.mark(v, path, "applied", [f"added {len(new_ids)}"])
+            return Outcome(f"Added {len(new_ids)} places.")
+
+        return self.cards.add(
+            "place",
+            title,
+            apply,
+            detail="\n".join([*([summary] if summary else []), *lines]),
+            actions=[
+                action("all", f"Add all {n}", "primary"),
+                action("each", "Review each"),
                 action("skip", "Skip"),
             ],
             key=f"proposal:{path}",
@@ -1409,7 +1456,11 @@ class Api:
 
     def surf(self, req: Request, m: re.Match[str]) -> Reply:
         spots = services.surf_data(self._vault())
-        empty = None if spots else "No surf spots with a profile around here yet."
+        empty = (
+            None
+            if spots
+            else "No surf forecast for here (no coast nearby, or the model had no data)."
+        )
         return 200, {"spots": spots, "message": empty}
 
     def fly(self, req: Request, m: re.Match[str]) -> Reply:
